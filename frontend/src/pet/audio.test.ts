@@ -56,4 +56,68 @@ describe("audio recording helpers", () => {
     await expect(stopPromise).resolves.toBeInstanceOf(Blob);
     vi.useRealTimers();
   });
+
+  test("prefers wav recording when Web Audio is available", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeAudioContext {
+      sampleRate = 16_000;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array([0, 0.5, -0.5, 0.25])
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    const blob = await session.stop();
+    const bytes = await readBlob(blob);
+    const header =
+      new TextDecoder().decode(bytes.slice(0, 4)) +
+      new TextDecoder().decode(bytes.slice(8, 12));
+
+    expect(blob.type).toBe("audio/wav");
+    expect(header).toBe("RIFFWAVE");
+    now.mockRestore();
+  });
 });
+
+function readBlob(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}

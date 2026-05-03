@@ -14,7 +14,7 @@ Momo 不是客服、不是普通 AI 助手，也不是女友设定。它是一�
 
 ## Stage 2
 
-- 语音：浏览器按住说话，后端接收 `audio/webm` / `audio/wav` / `audio/mpeg` / `audio/mp4`
+- 语音：浏览器按住说话，前端优先用 Web Audio 录成 `audio/wav`，后端仍兼容 `audio/webm` / `audio/mpeg` / `audio/mp4`
 - 音频理解：`mimo-v2-omni` 直接理解语音内容、语气和情绪
 - 激活：前台页面内支持 `hi momo` 唤醒和 `momo休息吧` 退出
 - 兜底：静音、过短、低置信度或 provider 失败时返回 `uncertain`，Momo 不胡编
@@ -65,6 +65,8 @@ http://127.0.0.1:8000/
 ```
 
 Android 6 时代的浏览器不一定支持现代 ES module，所以前端构建包含 legacy bundle，避免旧浏览器只看到空白页。
+
+Via 等轻量浏览器会依赖系统 WebView。旧 WebView 产出的 `webm/opus` 可能能上传但不能被 MiMo 稳定理解，所以网页录音会优先封装成标准 WAV 再上传。
 
 ## Secrets
 
