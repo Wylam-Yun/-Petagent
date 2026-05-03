@@ -46,6 +46,26 @@ npm run build
 ./scripts/stop.sh
 ```
 
+## Voice Testing Notes
+
+浏览器麦克风需要安全上下文。Mac Chrome 打开 `http://手机局域网IP:8000/` 时，页面可以显示，但通常不会允许麦克风。
+
+Mac 上测试语音链路可以走 SSH 本地端口转发：
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 nubia
+```
+
+然后在 Mac 打开 `http://127.0.0.1:8000/`。这会使用 Mac 的麦克风。
+
+手机本机测试要在 nubia 的浏览器打开：
+
+```text
+http://127.0.0.1:8000/
+```
+
+Android 6 时代的浏览器不一定支持现代 ES module，所以前端构建包含 legacy bundle，避免旧浏览器只看到空白页。
+
 ## Secrets
 
 真实 API key 只放本地 `.env`，不要提交到 GitHub。`.env.example` 只保留空 key、base URL 和模型配置示例。
