@@ -1,0 +1,5 @@
+
+.env
+.env.*
+backend/data/
+backend/app/static/audio/
