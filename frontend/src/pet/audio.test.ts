@@ -111,6 +111,57 @@ describe("audio recording helpers", () => {
     expect(header).toBe("RIFFWAVE");
     now.mockRestore();
   });
+
+  test("uses a valid wav sample rate when old WebView reports zero", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeZeroRateAudioContext {
+      sampleRate = 0;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      audioContextCtor: FakeZeroRateAudioContext as unknown as typeof AudioContext
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array([0.2, 0.1, -0.1, -0.2])
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    const blob = await session.stop();
+    const view = new DataView(await readBlob(blob));
+
+    expect(view.getUint32(24, true)).toBe(48000);
+    expect(view.getUint32(28, true)).toBe(96000);
+    now.mockRestore();
+  });
 });
 
 function readBlob(blob: Blob): Promise<ArrayBuffer> {

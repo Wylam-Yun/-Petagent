@@ -105,7 +105,7 @@ async function createWavRecordingSession(
     void audioContext.close?.();
     try {
       assertRecordingDuration(Date.now() - startedAt);
-      resolveFinished(encodeWavBlob(chunks, audioContext.sampleRate));
+      resolveFinished(encodeWavBlob(chunks, normalizedSampleRate(audioContext.sampleRate)));
     } catch (error) {
       rejectFinished(error as Error);
     }
@@ -253,6 +253,10 @@ function encodeWavBlob(chunks: Float32Array[], sampleRate: number): Blob {
   });
 
   return new Blob([buffer], { type: "audio/wav" });
+}
+
+function normalizedSampleRate(sampleRate: number): number {
+  return Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
 }
 
 function writeString(view: DataView, offset: number, value: string) {
