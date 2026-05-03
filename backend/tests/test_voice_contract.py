@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -76,3 +78,18 @@ def test_voice_chat_falls_back_when_audio_provider_fails():
         "confidence": 0.0,
     }
     assert body["reply"]
+
+
+def test_voice_chat_does_not_create_accumulating_debug_log(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("PETAGENT_DATA_DIR", str(tmp_path / "data"))
+    client = TestClient(create_app(testing=True))
+
+    response = client.post(
+        "/api/voice/chat",
+        files={"file": ("hello.webm", b"momo audio bytes", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert not (tmp_path / "data" / "logs" / "voice_debug.jsonl").exists()

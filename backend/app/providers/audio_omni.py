@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +11,6 @@ from typing import Any, Dict, Union
 import requests
 
 from app.config import Settings
-from app.voice_debug import append_voice_debug, truncate_text
 
 
 ALLOWED_EMOTIONS = {
@@ -138,16 +136,12 @@ class MiMoAudioUnderstandingProvider:
 
     def understand(self, audio_path: Path, content_type: str) -> AudioUnderstanding:
         if not audio_path.exists():
-            self._record("audio_provider_result", audio_path, {"reason": "missing_file"})
             return FALLBACK_AUDIO_UNDERSTANDING
         if is_probably_empty_audio(audio_path, content_type):
-            self._record("audio_provider_result", audio_path, {"reason": "probably_empty_audio"})
             return FALLBACK_AUDIO_UNDERSTANDING
         if not self.settings.api_key or not self.settings.audio_understanding.base_url:
-            self._record("audio_provider_result", audio_path, {"reason": "missing_settings"})
             return FALLBACK_AUDIO_UNDERSTANDING
 
-        started_at = time.time()
         try:
             audio_data = base64.b64encode(audio_path.read_bytes()).decode("ascii")
             response = requests.post(
@@ -183,35 +177,9 @@ class MiMoAudioUnderstandingProvider:
             response.raise_for_status()
             body = response.json()
             content = body["choices"][0]["message"]["content"]
-            result = parse_audio_understanding(content)
-            self._record(
-                "audio_provider_result",
-                audio_path,
-                {
-                    "status_code": response.status_code,
-                    "elapsed_ms": int((time.time() - started_at) * 1000),
-                    "raw_content": truncate_text(str(content)),
-                    "parsed": result.dict(),
-                },
-            )
-            return result
+            return parse_audio_understanding(content)
         except Exception:
-            self._record(
-                "audio_provider_result",
-                audio_path,
-                {
-                    "elapsed_ms": int((time.time() - started_at) * 1000),
-                    "reason": "exception",
-                },
-            )
             return FALLBACK_AUDIO_UNDERSTANDING
-
-    def _record(self, event: str, audio_path: Path, payload: Dict[str, Any]) -> None:
-        append_voice_debug(
-            self.settings.data_dir,
-            event,
-            {"filename": audio_path.name, **payload},
-        )
 
 
 def is_probably_empty_audio(audio_path: Path, content_type: str) -> bool:

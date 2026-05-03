@@ -7,8 +7,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
-from app.voice_debug import append_voice_debug, probe_audio_file
-
 router = APIRouter(prefix="/api/voice")
 
 ALLOWED_AUDIO_TYPES = {"audio/webm", "audio/wav", "audio/mpeg", "audio/mp4"}
@@ -51,16 +49,6 @@ async def _save_upload(upload_dir: Path, file: UploadFile) -> Path:
 async def post_voice_chat(request: Request, file: UploadFile = File(...)):
     settings = request.app.state.settings
     path = await _save_upload(settings.upload_dir, file)
-    append_voice_debug(
-        settings.data_dir,
-        "upload_received",
-        {
-            "filename": path.name,
-            "content_type": file.content_type or "",
-            "size_bytes": path.stat().st_size,
-            "audio_probe": probe_audio_file(path, file.content_type or ""),
-        },
-    )
     understanding = request.app.state.audio_provider.understand(
         path, file.content_type or ""
     )
