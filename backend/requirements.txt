@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 PyYAML==6.0.1
 pytest==7.4.4
 httpx==0.24.1
+h11==0.14.0
