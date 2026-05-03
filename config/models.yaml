@@ -1,0 +1,19 @@
+providers:
+  llm:
+    name: mimo
+    model: mimo-v2-omni
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 60
+  tts:
+    name: mimo
+    model: mimo-v2.5-tts
+    voice: 冰糖
+    format: wav
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 120
+    style:
+      name: cute_soft
+      speed: slightly_slow
+      emotion: warm

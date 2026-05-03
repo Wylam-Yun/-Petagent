@@ -1,0 +1,3 @@
+skills: []
+limits:
+  max_skill_calls_per_event: 0

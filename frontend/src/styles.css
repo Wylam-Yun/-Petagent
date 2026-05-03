@@ -1,0 +1,299 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color: #172033;
+  background: #f7fbff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.3;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 16px;
+  padding: clamp(14px, 3vh, 28px);
+  background:
+    linear-gradient(135deg, rgba(67, 179, 174, 0.16), transparent 28%),
+    linear-gradient(315deg, rgba(255, 122, 168, 0.18), transparent 32%),
+    #f7fbff;
+}
+
+.status-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+.status-item {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(23, 32, 51, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 10px 28px rgba(23, 32, 51, 0.07);
+}
+
+.status-icon svg {
+  width: 20px;
+  height: 20px;
+  color: #43b3ae;
+}
+
+.status-label {
+  color: #667085;
+  white-space: nowrap;
+}
+
+.status-item strong {
+  min-width: 32px;
+  text-align: right;
+  font-size: 1rem;
+}
+
+.pet-stage {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-rows: auto minmax(170px, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  gap: 12px;
+}
+
+.pet-stage h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 5vh, 2.4rem);
+  font-weight: 850;
+  color: #172033;
+}
+
+.pet-face {
+  width: min(92vw, 760px);
+  min-height: clamp(170px, 34vh, 320px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: 8px;
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: clamp(2.9rem, 14vw, 7.6rem);
+  line-height: 1.05;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: rgba(255, 255, 255, 0.54);
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  box-shadow: 0 18px 48px rgba(67, 179, 174, 0.12);
+}
+
+.pet-bubble {
+  width: min(720px, 100%);
+  min-height: 58px;
+  display: grid;
+  place-items: center;
+  padding: 13px 18px;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #172033;
+  font-size: clamp(1rem, 3vw, 1.28rem);
+  text-align: center;
+  box-shadow: 0 12px 32px rgba(23, 32, 51, 0.07);
+}
+
+.touch-area {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.touch-button {
+  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(23, 32, 51, 0.1);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  box-shadow: 0 12px 26px rgba(23, 32, 51, 0.08);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.touch-button.primary {
+  background: #ff7aa8;
+  border-color: #ff7aa8;
+  color: #ffffff;
+}
+
+.touch-button svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.touch-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(23, 32, 51, 0.12);
+}
+
+.touch-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.animation-breathing {
+  animation: breathing 2.4s ease-in-out infinite;
+}
+
+.animation-bounce {
+  animation: bounce 680ms ease-in-out;
+}
+
+.animation-droop {
+  animation: droop 1.1s ease-in-out;
+}
+
+.animation-slowBlink {
+  animation: slowBlink 2.2s ease-in-out infinite;
+}
+
+.animation-shake {
+  animation: shake 360ms ease-in-out;
+}
+
+.animation-wiggle {
+  animation: wiggle 580ms ease-in-out;
+}
+
+.animation-blink {
+  animation: blink 900ms ease-in-out;
+}
+
+.animation-tilt {
+  animation: tilt 900ms ease-in-out;
+}
+
+.animation-jump {
+  animation: jump 650ms ease-out;
+}
+
+.animation-small {
+  animation: small 1.4s ease-in-out;
+}
+
+@keyframes breathing {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  42% { transform: translateY(-18px); }
+}
+
+@keyframes droop {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(14px) scale(0.97); }
+}
+
+@keyframes slowBlink {
+  0%, 78%, 100% { opacity: 1; transform: scaleY(1); }
+  84% { opacity: 0.72; transform: scaleY(0.86); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-10px); }
+  75% { transform: translateX(10px); }
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg); }
+}
+
+@keyframes jump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-24px) scale(1.04); }
+}
+
+@keyframes small {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.92); }
+}
+
+@media (max-width: 680px) {
+  .app-shell {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .status-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-item {
+    min-height: 48px;
+  }
+
+  .touch-area {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .app-shell {
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 1fr auto;
+  }
+
+  .status-bar {
+    grid-row: 1 / 3;
+    grid-template-columns: 1fr;
+    align-content: center;
+  }
+
+  .pet-stage {
+    min-height: 0;
+  }
+
+  .pet-face {
+    min-height: 150px;
+    font-size: clamp(2.5rem, 12vh, 5rem);
+  }
+}

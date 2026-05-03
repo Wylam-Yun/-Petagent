@@ -3,6 +3,11 @@
 .env.production
 .env.development
 !.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+frontend/dist/
 backend/data/
 backend/static/audio/
 backend/app/static/audio/

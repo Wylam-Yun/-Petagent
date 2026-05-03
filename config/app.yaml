@@ -1,0 +1,25 @@
+runtime:
+  name: PetAgent
+  pet_name: Momo
+  schema_version: "0.1"
+server:
+  host: 0.0.0.0
+  port: 8000
+paths:
+  data_dir: backend/data
+  audio_dir: backend/static/audio
+  frontend_dist: frontend/dist
+audio_cache:
+  max_audio_cache_mb: 200
+  max_audio_age_hours: 72
+state:
+  initial:
+    name: Momo
+    mood: idle
+    energy: 72
+    intimacy: 40
+    hunger: 30
+    cleanliness: 85
+    loneliness: 35
+    sleepiness: 15
+    mode: idle

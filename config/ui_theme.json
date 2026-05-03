@@ -1,0 +1,17 @@
+{
+  "name": "momo-stage1",
+  "colors": {
+    "background": "#f7fbff",
+    "surface": "#ffffff",
+    "ink": "#172033",
+    "muted": "#667085",
+    "accent": "#ff7aa8",
+    "accent2": "#43b3ae",
+    "warm": "#ffd166",
+    "danger": "#e15b64"
+  },
+  "pet": {
+    "defaultFaceType": "idle",
+    "defaultAnimation": "breathing"
+  }
+}
