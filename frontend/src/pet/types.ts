@@ -30,6 +30,8 @@ export type PetEventType =
   | "debug_sleepy"
   | "debug_angry";
 
+export type PetUIPhase = "idle" | "listening" | "thinking" | "speaking" | "error";
+
 export type PetState = {
   schema_version?: string;
   name: string;
@@ -58,4 +60,29 @@ export type PetResponse = {
     event_id: string;
     skills_used: unknown[];
   };
+};
+
+export type AudioUnderstanding = {
+  user_text: string;
+  detected_emotion:
+    | "calm"
+    | "tired"
+    | "happy"
+    | "sad"
+    | "angry"
+    | "anxious"
+    | "uncertain";
+  tone_notes: string;
+  non_verbal: string;
+  confidence: number;
+};
+
+export type VoiceChatResponse = PetResponse & {
+  user_text: string;
+  audio_understanding: AudioUnderstanding;
+};
+
+export type ActivationResponse = PetResponse & {
+  active: boolean;
+  session_id: string | null;
 };

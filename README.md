@@ -1,6 +1,6 @@
 # PetAgent / Momo
 
-PetAgent 是运行在旧安卓手机上的表情包式 AI 桌宠 runtime。第一阶段先做 Momo 的生命感闭环：大号 kaomoji 表情、触摸反馈、基础养成状态、LLM 短回复和可爱风 TTS。
+PetAgent 是运行在旧安卓手机上的表情包式 AI 桌宠 runtime。当前阶段已经具备 Momo 的生命感闭环和按住说话闭环：大号 kaomoji 表情、触摸反馈、基础养成状态、语音理解、LLM 短回复和可爱风 TTS。
 
 ## Stage 1
 
@@ -11,6 +11,14 @@ PetAgent 是运行在旧安卓手机上的表情包式 AI 桌宠 runtime。第�
 - 运行环境：Android Termux 手机作为 runtime，Mac 作为前端构建和开发环境
 
 Momo 不是客服、不是普通 AI 助手，也不是女友设定。它是一只住在手机里的可爱小宠物，会根据摸头、戳脸、抱一下等事件产生短句回复、表情、动画和状态变化。
+
+## Stage 2
+
+- 语音：浏览器按住说话，后端接收 `audio/webm` / `audio/wav` / `audio/mpeg` / `audio/mp4`
+- 音频理解：`mimo-v2-omni` 直接理解语音内容、语气和情绪
+- 激活：前台页面内支持 `hi momo` 唤醒和 `momo休息吧` 退出
+- 兜底：静音、过短、低置信度或 provider 失败时返回 `uncertain`，Momo 不胡编
+- 体验：UI 有 `listening` / `thinking` / `speaking` / `error` 状态
 
 ## Local Development
 

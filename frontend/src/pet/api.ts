@@ -1,4 +1,10 @@
-import type { PetEventType, PetResponse, PetState } from "./types";
+import type {
+  ActivationResponse,
+  PetEventType,
+  PetResponse,
+  PetState,
+  VoiceChatResponse
+} from "./types";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -23,6 +29,31 @@ export function postPetEvent(event: PetEventType): Promise<PetResponse> {
   });
 }
 
+export function uploadVoice(blob: Blob): Promise<VoiceChatResponse> {
+  const formData = new FormData();
+  formData.append("file", blob, `voice.${extensionForType(blob.type)}`);
+  return requestJson<VoiceChatResponse>("/api/voice/chat", {
+    method: "POST",
+    body: formData
+  });
+}
+
+export function wakeMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
+  return requestJson<ActivationResponse>("/api/activation/wake", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
+  });
+}
+
+export function exitMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
+  return requestJson<ActivationResponse>("/api/activation/exit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
+  });
+}
+
 function eventDescription(event: PetEventType): string {
   switch (event) {
     case "pet_head":
@@ -40,4 +71,11 @@ function eventDescription(event: PetEventType): string {
     default:
       return "用户和你互动";
   }
+}
+
+function extensionForType(type: string): string {
+  if (type.includes("wav")) return "wav";
+  if (type.includes("mpeg")) return "mp3";
+  if (type.includes("mp4")) return "mp4";
+  return "webm";
 }

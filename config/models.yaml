@@ -5,6 +5,12 @@ providers:
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
+  audio_understanding:
+    name: mimo
+    model: mimo-v2-omni
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 60
   tts:
     name: mimo
     model: mimo-v2.5-tts

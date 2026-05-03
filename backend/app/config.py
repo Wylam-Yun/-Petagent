@@ -28,6 +28,7 @@ class Settings:
     config_dir: Path
     data_dir: Path
     audio_dir: Path
+    upload_dir: Path
     frontend_dist: Path
     runtime_name: str
     pet_name: str
@@ -38,6 +39,7 @@ class Settings:
     skills_config: Dict[str, Any]
     ui_theme: Dict[str, Any]
     llm: ProviderConfig
+    audio_understanding: ProviderConfig
     tts: ProviderConfig
     api_key: Optional[str]
 
@@ -120,12 +122,16 @@ def load_settings(
         "backend/data",
     )
     audio_dir = _resolve_path(root_path, paths.get("audio_dir"), "backend/static/audio")
+    upload_dir = _resolve_path(root_path, paths.get("upload_dir"), "backend/data/uploads")
     frontend_dist = _resolve_path(
         root_path, paths.get("frontend_dist"), "frontend/dist"
     )
 
     providers = models_config.get("providers", {})
     llm = _provider_config(providers.get("llm", {}), env_values)
+    audio_understanding = _provider_config(
+        providers.get("audio_understanding", providers.get("llm", {})), env_values
+    )
     tts = _provider_config(providers.get("tts", {}), env_values)
     api_key = env_values.get(tts.api_key_env) or env_values.get(llm.api_key_env)
 
@@ -135,6 +141,7 @@ def load_settings(
         config_dir=config_dir,
         data_dir=data_dir,
         audio_dir=audio_dir,
+        upload_dir=upload_dir,
         frontend_dist=frontend_dist,
         runtime_name=runtime.get("name", "PetAgent"),
         pet_name=runtime.get("pet_name", "Momo"),
@@ -145,6 +152,7 @@ def load_settings(
         skills_config=skills_config,
         ui_theme=ui_theme,
         llm=llm,
+        audio_understanding=audio_understanding,
         tts=tts,
         api_key=api_key,
     )

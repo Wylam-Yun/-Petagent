@@ -8,6 +8,7 @@ server:
 paths:
   data_dir: backend/data
   audio_dir: backend/static/audio
+  upload_dir: backend/data/uploads
   frontend_dist: frontend/dist
 audio_cache:
   max_audio_cache_mb: 200
@@ -23,3 +24,16 @@ state:
     loneliness: 35
     sleepiness: 15
     mode: idle
+activation:
+  foreground_wake_enabled: true
+  background_wake_enabled: false
+  wake_phrases:
+    - hi momo
+    - hey momo
+    - 嗨 momo
+  exit_phrases:
+    - momo休息吧
+    - 退出
+    - 先这样
+    - 不用陪了
+  min_wake_confidence: 0.75

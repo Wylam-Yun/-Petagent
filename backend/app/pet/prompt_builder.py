@@ -32,6 +32,15 @@ def build_pet_messages(
     settings: Settings, event: PetEvent, context: RuntimeContext
 ) -> List[Dict[str, str]]:
     system_prompt = settings.persona_config.get("system_prompt", "")
+    if event.type == "voice_message":
+        system_prompt += (
+            "\n\n语音事件规则：\n"
+            "1. 优先回应用户情绪，而不是急着给建议。\n"
+            "2. 如果用户疲惫、烦躁、低落，语气要温柔。\n"
+            "3. 如果识别置信度低，不要假装完全听懂，可以说刚刚有点没听清。\n"
+            "4. 不要复读用户整句话。\n"
+            "5. 很多时候陪着就好，不要强行解决问题。"
+        )
     user_payload = {
         "event": event.dict(),
         "runtime_context": context.dict(),

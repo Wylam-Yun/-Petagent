@@ -14,6 +14,9 @@ ALLOWED_EVENTS = {
     "debug_happy",
     "debug_sleepy",
     "debug_angry",
+    "voice_message",
+    "wake_phrase",
+    "exit_phrase",
 }
 
 
@@ -21,6 +24,7 @@ class PetEvent(BaseModel):
     schema_version: str = "0.1"
     id: str = Field(default_factory=lambda: "evt-" + uuid4().hex)
     type: str
+    source: str = "runtime"
     payload: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
@@ -32,4 +36,5 @@ def normalize_event(raw: Dict[str, Any]) -> PetEvent:
     if event_type not in ALLOWED_EVENTS:
         raise ValueError("Unsupported PetEvent type: %s" % event_type)
     payload = raw.get("payload") or {}
-    return PetEvent(type=event_type, payload=payload)
+    source = raw.get("source") or "runtime"
+    return PetEvent(type=event_type, source=source, payload=payload)

@@ -32,6 +32,13 @@ button {
     #f7fbff;
 }
 
+.app-shell.is-active-session {
+  background:
+    linear-gradient(135deg, rgba(67, 179, 174, 0.2), transparent 30%),
+    linear-gradient(315deg, rgba(255, 122, 168, 0.22), transparent 34%),
+    #f7fbff;
+}
+
 .status-bar {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -118,6 +125,62 @@ button {
   font-size: clamp(1rem, 3vw, 1.28rem);
   text-align: center;
   box-shadow: 0 12px 32px rgba(23, 32, 51, 0.07);
+}
+
+.control-deck {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 10px;
+}
+
+.voice-button {
+  min-height: 60px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(67, 179, 174, 0.32);
+  border-radius: 8px;
+  background: #43b3ae;
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(67, 179, 174, 0.18);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+.voice-button svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.voice-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(67, 179, 174, 0.24);
+}
+
+.voice-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.voice-listening {
+  background: #ff7aa8;
+  border-color: #ff7aa8;
+}
+
+.voice-thinking,
+.voice-speaking {
+  background: #172033;
+  border-color: #172033;
+}
+
+.voice-error {
+  background: #ffffff;
+  color: #172033;
 }
 
 .touch-area {
@@ -295,5 +358,9 @@ button {
   .pet-face {
     min-height: 150px;
     font-size: clamp(2.5rem, 12vh, 5rem);
+  }
+
+  .control-deck {
+    grid-column: 2;
   }
 }

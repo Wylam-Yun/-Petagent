@@ -37,6 +37,9 @@ EVENT_DELTAS = {
     "debug_happy": {"mood": "happy"},
     "debug_sleepy": {"mood": "sleepy", "sleepiness": 8, "energy": -5},
     "debug_angry": {"mood": "angry"},
+    "voice_message": {"intimacy": 1, "loneliness": -4},
+    "wake_phrase": {"mood": "happy", "loneliness": -3},
+    "exit_phrase": {"mood": "sleepy", "sleepiness": 2},
 }
 
 

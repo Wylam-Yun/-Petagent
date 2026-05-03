@@ -4,9 +4,20 @@ import { PetBubble } from "./components/PetBubble";
 import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
 import { TouchArea } from "./components/TouchArea";
-import { getPetState, postPetEvent } from "./pet/api";
+import { VoiceButton } from "./components/VoiceButton";
+import { exitMomo, getPetState, postPetEvent, wakeMomo } from "./pet/api";
 import { animationMap } from "./pet/animations";
-import type { AnimationName, Mood, PetEventType, PetState } from "./pet/types";
+import { detectActivationIntent } from "./pet/activation";
+import type {
+  ActivationResponse,
+  AnimationName,
+  Mood,
+  PetEventType,
+  PetResponse,
+  PetState,
+  PetUIPhase,
+  VoiceChatResponse
+} from "./pet/types";
 
 const fallbackState: PetState = {
   schema_version: "0.1",
@@ -36,6 +47,8 @@ function App() {
   const [animation, setAnimation] = useState<AnimationName>("breathing");
   const [bubbleText, setBubbleText] = useState("Momo 在这里。");
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<PetUIPhase>("idle");
+  const [activeSession, setActiveSession] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,22 +94,93 @@ function App() {
     }
   }
 
+  function applyPetResponse(response: PetResponse) {
+    setPetState(response.pet_state);
+    setFaceType(response.face_type);
+    setAnimation(response.animation);
+    setBubbleText(response.reply);
+    playVoice(response.voice_url, () => setPhase("idle"));
+    vibrate(response.vibration);
+  }
+
+  async function handleVoiceResponse(response: VoiceChatResponse) {
+    const intent = detectActivationIntent(
+      response.user_text,
+      response.audio_understanding.confidence
+    );
+
+    try {
+      if (intent === "wake") {
+        const activation = await wakeMomo(
+          response.user_text,
+          response.audio_understanding.confidence
+        );
+        setActiveSession(activation.active ? activation.session_id : null);
+        applyActivationResponse(activation);
+        return;
+      }
+      if (intent === "exit") {
+        const activation = await exitMomo(
+          response.user_text,
+          response.audio_understanding.confidence
+        );
+        setActiveSession(activation.active ? activation.session_id : null);
+        applyActivationResponse(activation);
+        return;
+      }
+    } catch {
+      setActiveSession(null);
+    }
+
+    applyPetResponse(response);
+  }
+
+  function applyActivationResponse(response: ActivationResponse) {
+    applyPetResponse(response);
+  }
+
+  function handleVoicePhase(nextPhase: PetUIPhase) {
+    setPhase(nextPhase);
+    if (nextPhase === "listening") {
+      setFaceType("thinking");
+      setAnimation("blink");
+      setBubbleText("嗯嗯，Momo 听着呢。");
+    } else if (nextPhase === "thinking") {
+      setFaceType("thinking");
+      setAnimation("blink");
+      setBubbleText("让我想想。");
+    } else if (nextPhase === "error") {
+      setFaceType("concerned");
+      setAnimation("tilt");
+    }
+  }
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
       <StatusBar state={petState} />
       <section className="pet-stage" aria-label={`Momo 当前心情 ${titleMood}`}>
         <h1>Momo</h1>
         <PetFace faceType={faceType} animation={animation} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>
-      <TouchArea disabled={busy} onPetEvent={handlePetEvent} />
+      <div className="control-deck">
+        <VoiceButton
+          disabled={busy}
+          phase={phase}
+          onError={(message) => setBubbleText(message)}
+          onPhaseChange={handleVoicePhase}
+          onVoiceResponse={handleVoiceResponse}
+        />
+        <TouchArea disabled={busy || phase === "thinking"} onPetEvent={handlePetEvent} />
+      </div>
     </main>
   );
 }
 
-function playVoice(voiceUrl: string | null) {
+function playVoice(voiceUrl: string | null, onEnded?: () => void) {
   if (!voiceUrl) return;
   const audio = new Audio(voiceUrl);
+  audio.onended = () => onEnded?.();
   void audio.play().catch(() => undefined);
 }
 
