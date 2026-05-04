@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
@@ -9,7 +9,17 @@ from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
 
-def parse_transcript_json(body: Dict[str, Any]) -> Tuple[str, float]:
+def parse_transcript_json(
+    body: Dict[str, Any],
+    text_paths: Optional[Iterable[str]] = None,
+    confidence_paths: Optional[Iterable[str]] = None,
+) -> Tuple[str, float]:
+    configured_text = _first_text(body, text_paths or [])
+    if configured_text:
+        return configured_text, _confidence(
+            _first_value(body, confidence_paths or []) or body.get("confidence", 1.0)
+        )
+
     for key in ("text", "transcript", "transcription"):
         text = str(body.get(key) or "").strip()
         if text:
@@ -34,6 +44,47 @@ def parse_transcript_json(body: Dict[str, Any]) -> Tuple[str, float]:
     return "", 0.0
 
 
+def _first_text(body: Dict[str, Any], paths: Iterable[str]) -> str:
+    for path in paths:
+        for value in _values_at_path(body, path):
+            text = str(value or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _first_value(body: Dict[str, Any], paths: Iterable[str]) -> Any:
+    for path in paths:
+        for value in _values_at_path(body, path):
+            if value is not None and value != "":
+                return value
+    return None
+
+
+def _values_at_path(body: Dict[str, Any], path: str) -> List[Any]:
+    values: List[Any] = [body]
+    for raw_part in str(path or "").split("."):
+        if not raw_part:
+            continue
+        expand_list = raw_part.endswith("[]")
+        key = raw_part[:-2] if expand_list else raw_part
+        next_values: List[Any] = []
+        for value in values:
+            if key:
+                if not isinstance(value, dict) or key not in value:
+                    continue
+                value = value[key]
+            if expand_list:
+                if isinstance(value, list):
+                    next_values.extend(value)
+                else:
+                    next_values.append(value)
+            else:
+                next_values.append(value)
+        values = next_values
+    return values
+
+
 def _confidence(raw: Any) -> float:
     try:
         value = float(raw)
@@ -52,49 +103,109 @@ class HttpASRProvider:
             return ASRTranscript(text="", confidence=0.0, provider=self.name)
 
         try:
-            with audio_path.open("rb") as handle:
-                response = requests.post(
-                    self._url(),
-                    headers=self._headers(),
-                    data=self._data(),
-                    files={
-                        "file": (
-                            audio_path.name,
-                            handle,
-                            content_type or "application/octet-stream",
-                        )
-                    },
-                    proxies=self._proxies(),
-                    timeout=self.config.timeout_seconds,
-                )
+            request_kwargs = self._request_kwargs(audio_path, content_type)
+            file_handles = request_kwargs.pop("_file_handles", [])
+            response = requests.post(
+                self._url(),
+                **request_kwargs,
+            )
             response.raise_for_status()
-            text, confidence = parse_transcript_json(response.json())
+            text, confidence = parse_transcript_json(
+                response.json(),
+                text_paths=self.config.extra.get("transcript_paths") or [],
+                confidence_paths=self.config.extra.get("confidence_paths") or [],
+            )
             return ASRTranscript(text=text, confidence=confidence, provider=self.name)
         except Exception:
             return ASRTranscript(text="", confidence=0.0, provider=self.name)
+        finally:
+            for handle in locals().get("file_handles", []):
+                handle.close()
+
+    def _request_kwargs(self, audio_path: Path, content_type: str) -> Dict[str, Any]:
+        request_format = str(
+            self.config.extra.get("request_format") or "multipart"
+        ).lower()
+        common = {
+            "headers": self._headers(
+                content_type if request_format == "binary" else None
+            ),
+            "params": self._params(),
+            "proxies": self._proxies(),
+            "timeout": self.config.timeout_seconds,
+        }
+        if request_format == "binary":
+            common["data"] = audio_path.read_bytes()
+            return common
+
+        file_field = str(self.config.extra.get("file_field") or "file")
+        handle = audio_path.open("rb")
+        common["data"] = self._data()
+        common["files"] = {
+            file_field: (
+                audio_path.name,
+                handle,
+                content_type or "application/octet-stream",
+            )
+        }
+        common["_file_handles"] = [handle]
+        return common
 
     def _url(self) -> str:
         endpoint = str(self.config.extra.get("endpoint") or "/v1/audio/transcriptions")
         return self.config.base_url.rstrip("/") + "/" + endpoint.lstrip("/")
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self, content_type: Optional[str] = None) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        configured_headers = self.config.extra.get("headers") or {}
+        if isinstance(configured_headers, dict):
+            headers.update(
+                {str(key): str(value) for key, value in configured_headers.items()}
+            )
+        if content_type:
+            headers["Content-Type"] = content_type
+
         if not self.config.api_key:
-            return {}
+            return headers
         scheme = str(self.config.extra.get("auth_scheme") or "bearer").lower()
+        if scheme == "none":
+            return headers
+        if scheme == "custom":
+            header = str(self.config.extra.get("api_key_header") or "Authorization")
+            prefix = str(self.config.extra.get("api_key_prefix") or "")
+            headers[header] = ("%s %s" % (prefix, self.config.api_key)).strip()
+            return headers
         if scheme == "api-key":
-            return {"api-key": self.config.api_key}
-        return {"Authorization": "Bearer %s" % self.config.api_key}
+            header = str(self.config.extra.get("api_key_header") or "api-key")
+            headers[header] = self.config.api_key
+            return headers
+        headers["Authorization"] = "Bearer %s" % self.config.api_key
+        return headers
 
     def _data(self) -> Dict[str, str]:
-        data = {
-            "model": self.config.model,
-            "language": str(self.config.extra.get("language_code") or "zh-CN"),
-        }
+        data: Dict[str, str] = {}
+        model_field = self.config.extra.get("model_field", "model")
+        language_field = self.config.extra.get("language_field", "language")
+        if model_field:
+            data[str(model_field)] = self.config.model
+        if language_field:
+            data[str(language_field)] = str(
+                self.config.extra.get("language_code") or "zh-CN"
+            )
+        form_fields = self.config.extra.get("form_fields") or {}
+        if isinstance(form_fields, dict):
+            data.update({str(key): str(value) for key, value in form_fields.items()})
         for key in ("response_format", "temperature", "prompt"):
             value = self.config.extra.get(key)
             if value is not None and value != "":
                 data[key] = str(value)
         return data
+
+    def _params(self) -> Dict[str, str]:
+        query_params = self.config.extra.get("query_params") or {}
+        if not isinstance(query_params, dict):
+            return {}
+        return {str(key): str(value) for key, value in query_params.items()}
 
     def _proxies(self) -> Dict[str, str]:
         proxy_url = str(self.config.extra.get("proxy_url") or "").strip()

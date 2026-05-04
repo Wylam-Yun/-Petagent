@@ -32,6 +32,23 @@ def test_parse_transcript_json_accepts_common_shapes():
     ) == ("我回来啦", 0.8)
 
 
+def test_parse_transcript_json_uses_configured_paths_for_nested_provider():
+    body = {
+        "payload": {
+            "speech": {
+                "text": "Momo 我回来啦",
+                "confidence_score": 0.64,
+            }
+        }
+    }
+
+    assert parse_transcript_json(
+        body,
+        text_paths=["payload.speech.text"],
+        confidence_paths=["payload.speech.confidence_score"],
+    ) == ("Momo 我回来啦", 0.64)
+
+
 def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
@@ -66,6 +83,60 @@ def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypat
     assert transcript.text == "你好 Momo"
     assert transcript.confidence == 0.81
     assert transcript.provider == "nvidia_http_asr"
+
+
+def test_http_asr_can_send_binary_audio_with_custom_headers_and_response_paths(
+    tmp_path: Path, monkeypatch
+):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF custom wav")
+    config = provider_config()
+    config.name = "future_asr"
+    config.extra.update(
+        {
+            "request_format": "binary",
+            "endpoint": "/speech/transcribe",
+            "auth_scheme": "custom",
+            "api_key_header": "X-Future-Key",
+            "api_key_prefix": "",
+            "headers": {"X-Client": "petagent"},
+            "query_params": {"model": "fast-zh", "language": "zh-CN"},
+            "transcript_paths": ["result.text"],
+            "confidence_paths": ["result.score"],
+        }
+    )
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"result": {"text": "今天有点累", "score": 0.77}}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert captured["url"] == "https://asr.example/speech/transcribe"
+    assert captured["headers"] == {
+        "X-Future-Key": "test-key",
+        "X-Client": "petagent",
+        "Content-Type": "audio/wav",
+    }
+    assert captured["params"] == {"model": "fast-zh", "language": "zh-CN"}
+    assert captured["data"] == b"RIFF custom wav"
+    assert "files" not in captured
+    assert transcript.text == "今天有点累"
+    assert transcript.confidence == 0.77
+    assert transcript.provider == "future_asr"
 
 
 def test_http_asr_returns_empty_transcript_when_not_configured(tmp_path: Path):

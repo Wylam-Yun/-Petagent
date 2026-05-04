@@ -91,15 +91,22 @@ providers:
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
   asr:
-    name: nvidia_http_asr
+    name: configurable_http_asr
     model: parakeet-ctc-0.6b-zh-cn
-    base_url_env: NVIDIA_HTTP_ASR_BASE_URL
-    api_key_env: NVIDIA_API_KEY
+    base_url_env:
+      - ASR_BASE_URL
+      - NVIDIA_HTTP_ASR_BASE_URL
+    api_key_env:
+      - ASR_API_KEY
+      - NVIDIA_API_KEY
     timeout_seconds: 15
+    protocol: http
     endpoint: /v1/audio/transcriptions
     language_code: zh-CN
     auth_scheme: bearer
-    proxy_url_env: PETAGENT_ASR_PROXY_URL
+    proxy_url_env:
+      - ASR_PROXY_URL
+      - PETAGENT_ASR_PROXY_URL
   tts:
     name: mimo
     model: mimo-v2.5-tts
@@ -130,8 +137,10 @@ providers:
     assert settings.llm_fast.model == "mimo-v2-flash"
     assert settings.asr is not None
     assert settings.asr.model == "parakeet-ctc-0.6b-zh-cn"
-    assert settings.asr.name == "nvidia_http_asr"
+    assert settings.asr.name == "configurable_http_asr"
     assert settings.asr.base_url == "https://asr.example"
+    assert settings.asr.api_key == "test-nvidia-secret"
+    assert settings.asr.extra["protocol"] == "http"
     assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
     assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
     assert settings.voice_routing["allowed_audio_types"] == ["audio/wav"]

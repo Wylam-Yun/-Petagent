@@ -18,15 +18,41 @@ providers:
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
   asr:
-    name: nvidia_http_asr
+    name: configurable_http_asr
     model: parakeet-ctc-0.6b-zh-cn
-    base_url_env: NVIDIA_HTTP_ASR_BASE_URL
-    api_key_env: NVIDIA_API_KEY
+    base_url_env:
+      - ASR_BASE_URL
+      - NVIDIA_HTTP_ASR_BASE_URL
+    api_key_env:
+      - ASR_API_KEY
+      - NVIDIA_API_KEY
     timeout_seconds: 15
+    protocol: http
     endpoint: /v1/audio/transcriptions
+    request_format: multipart
+    file_field: file
+    model_field: model
+    language_field: language
     language_code: zh-CN
     auth_scheme: bearer
-    proxy_url_env: PETAGENT_ASR_PROXY_URL
+    proxy_url_env:
+      - ASR_PROXY_URL
+      - PETAGENT_ASR_PROXY_URL
+    transcript_paths:
+      - text
+      - transcript
+      - transcription
+      - data.text
+      - result.text
+      - results[].alternatives[].transcript
+      - results[].channels[].alternatives[].transcript
+    confidence_paths:
+      - confidence
+      - data.confidence
+      - result.confidence
+      - result.score
+      - results[].alternatives[].confidence
+      - results[].channels[].alternatives[].confidence
   tts:
     name: mimo
     model: mimo-v2.5-tts

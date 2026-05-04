@@ -91,6 +91,24 @@ def _resolve_path(root: Path, value: Optional[str], default: str) -> Path:
     return path
 
 
+def _env_names(value: Any) -> list:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _env_name(value: Any) -> str:
+    return _env_names(value)[0]
+
+
+def _env_value(env_values: Mapping[str, str], value: Any) -> str:
+    for name in _env_names(value):
+        resolved = env_values.get(name)
+        if resolved:
+            return resolved
+    return ""
+
+
 def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> ProviderConfig:
     base_url_env = raw.get("base_url_env", "MIMO_BASE_URL")
     api_key_env = raw.get("api_key_env", "MIMO_API_KEY")
@@ -108,16 +126,16 @@ def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> Prov
         }:
             continue
         if key.endswith("_env"):
-            extra[key[:-4]] = env_values.get(str(value), "")
+            extra[key[:-4]] = _env_value(env_values, value)
         else:
             extra[key] = value
     return ProviderConfig(
         name=raw.get("name", "mimo"),
         model=raw.get("model", ""),
-        base_url=env_values.get(base_url_env),
-        api_key_env=api_key_env,
+        base_url=_env_value(env_values, base_url_env),
+        api_key_env=_env_name(api_key_env),
         timeout_seconds=int(raw.get("timeout_seconds", 60)),
-        api_key=env_values.get(api_key_env),
+        api_key=_env_value(env_values, api_key_env),
         voice=raw.get("voice"),
         audio_format=raw.get("format"),
         style=raw.get("style") or {},

@@ -48,7 +48,8 @@ def _select_audio_provider(settings: Settings, testing: bool):
 def _select_asr_provider(settings: Settings, testing: bool):
     if testing or settings.asr is None:
         return MockASRProvider()
-    if settings.asr.name in {"http_asr", "nvidia_http_asr"}:
+    protocol = str(settings.asr.extra.get("protocol") or "").lower()
+    if protocol == "http" or settings.asr.name in {"http_asr", "nvidia_http_asr"}:
         return HttpASRProvider(settings.asr)
     return NvidiaParakeetASRProvider(settings.asr)
 
