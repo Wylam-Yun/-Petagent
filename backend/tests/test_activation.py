@@ -50,3 +50,21 @@ def test_activation_exit_ends_active_session():
     assert body["active"] is False
     assert body["reply"]
     assert body["voice_url"] is not None
+
+
+def test_activation_normalizes_common_momo_asr_aliases():
+    client = TestClient(create_app(testing=True))
+
+    wake = client.post(
+        "/api/activation/wake",
+        json={"phrase": "嗨 默默", "confidence": 0.86, "source": "foreground_voice"},
+    )
+    exit_response = client.post(
+        "/api/activation/exit",
+        json={"phrase": "摸摸休息吧", "confidence": 0.86, "source": "foreground_voice"},
+    )
+
+    assert wake.status_code == 200
+    assert wake.json()["active"] is True
+    assert exit_response.status_code == 200
+    assert exit_response.json()["active"] is False

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -17,9 +17,11 @@ class ProviderConfig:
     base_url: Optional[str]
     api_key_env: str
     timeout_seconds: int
+    api_key: Optional[str] = field(default=None, repr=False)
     voice: Optional[str] = None
     audio_format: Optional[str] = None
     style: Optional[Dict[str, Any]] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -39,9 +41,12 @@ class Settings:
     skills_config: Dict[str, Any]
     ui_theme: Dict[str, Any]
     llm: ProviderConfig
+    llm_fast: Optional[ProviderConfig]
     audio_understanding: ProviderConfig
+    asr: Optional[ProviderConfig]
     tts: ProviderConfig
-    api_key: Optional[str]
+    voice_routing: Dict[str, Any]
+    api_key: Optional[str] = field(default=None, repr=False)
 
 
 def project_root() -> Path:
@@ -88,15 +93,35 @@ def _resolve_path(root: Path, value: Optional[str], default: str) -> Path:
 
 def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> ProviderConfig:
     base_url_env = raw.get("base_url_env", "MIMO_BASE_URL")
+    api_key_env = raw.get("api_key_env", "MIMO_API_KEY")
+    extra: Dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in {
+            "name",
+            "model",
+            "base_url_env",
+            "api_key_env",
+            "timeout_seconds",
+            "voice",
+            "format",
+            "style",
+        }:
+            continue
+        if key.endswith("_env"):
+            extra[key[:-4]] = env_values.get(str(value), "")
+        else:
+            extra[key] = value
     return ProviderConfig(
         name=raw.get("name", "mimo"),
         model=raw.get("model", ""),
         base_url=env_values.get(base_url_env),
-        api_key_env=raw.get("api_key_env", "MIMO_API_KEY"),
+        api_key_env=api_key_env,
         timeout_seconds=int(raw.get("timeout_seconds", 60)),
+        api_key=env_values.get(api_key_env),
         voice=raw.get("voice"),
         audio_format=raw.get("format"),
         style=raw.get("style") or {},
+        extra=extra,
     )
 
 
@@ -129,11 +154,16 @@ def load_settings(
 
     providers = models_config.get("providers", {})
     llm = _provider_config(providers.get("llm", {}), env_values)
+    llm_fast_raw = providers.get("llm_fast")
+    llm_fast = _provider_config(llm_fast_raw, env_values) if llm_fast_raw else None
     audio_understanding = _provider_config(
         providers.get("audio_understanding", providers.get("llm", {})), env_values
     )
+    asr_raw = providers.get("asr")
+    asr = _provider_config(asr_raw, env_values) if asr_raw else None
     tts = _provider_config(providers.get("tts", {}), env_values)
     api_key = env_values.get(tts.api_key_env) or env_values.get(llm.api_key_env)
+    voice_routing = app_config.get("voice", {})
 
     runtime = app_config.get("runtime", {})
     return Settings(
@@ -152,7 +182,10 @@ def load_settings(
         skills_config=skills_config,
         ui_theme=ui_theme,
         llm=llm,
+        llm_fast=llm_fast,
         audio_understanding=audio_understanding,
+        asr=asr,
         tts=tts,
+        voice_routing=voice_routing,
         api_key=api_key,
     )

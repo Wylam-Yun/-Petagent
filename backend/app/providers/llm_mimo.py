@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Protocol
 
 import requests
 
-from app.config import Settings
+from app.config import ProviderConfig, Settings
 
 
 class LLMProvider(Protocol):
@@ -27,6 +27,9 @@ def _extract_json_text(text: str) -> str:
 
 
 class MockLLMProvider:
+    def __init__(self, name: str = "mock_llm") -> None:
+        self.name = name
+
     def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         return {
             "reply": "嘿嘿，Momo 在呢。",
@@ -49,27 +52,32 @@ class MockLLMProvider:
 
 
 class MiMoLLMProvider:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, provider_config: ProviderConfig = None
+    ) -> None:
         self.settings = settings
+        self.provider_config = provider_config or settings.llm
+        self.name = self.provider_config.name
 
     def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        if not self.settings.api_key:
-            raise RuntimeError("MIMO_API_KEY is not configured")
-        if not self.settings.llm.base_url:
+        api_key = self.provider_config.api_key or self.settings.api_key
+        if not api_key:
+            raise RuntimeError("%s is not configured" % self.provider_config.api_key_env)
+        if not self.provider_config.base_url:
             raise RuntimeError("MIMO_BASE_URL is not configured")
 
         response = requests.post(
-            self.settings.llm.base_url.rstrip("/") + "/chat/completions",
+            self.provider_config.base_url.rstrip("/") + "/chat/completions",
             headers={
-                "api-key": self.settings.api_key,
+                "api-key": api_key,
                 "content-type": "application/json",
             },
             json={
-                "model": self.settings.llm.model,
+                "model": self.provider_config.model,
                 "messages": messages,
                 "temperature": 0.8,
             },
-            timeout=self.settings.llm.timeout_seconds,
+            timeout=self.provider_config.timeout_seconds,
         )
         response.raise_for_status()
         body = response.json()

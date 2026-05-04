@@ -31,9 +31,29 @@ activation:
     - hi momo
     - hey momo
     - 嗨 momo
+    - 你好 momo
   exit_phrases:
     - momo休息吧
     - 退出
     - 先这样
     - 不用陪了
   min_wake_confidence: 0.75
+voice:
+  default_route: fast
+  slow_fallback_enabled: true
+  allowed_audio_types:
+    - audio/webm
+    - audio/wav
+    - audio/mpeg
+    - audio/mp4
+  max_audio_bytes: 8388608
+  asr_min_confidence: 0.25
+  asr_wav_contract:
+    required_channels: 1
+    required_sample_width: 2
+    accepted_sample_rates:
+      - 16000
+      - 44100
+      - 48000
+  normalize_pet_name: true
+  route_debug_enabled: false

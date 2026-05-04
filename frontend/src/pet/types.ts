@@ -31,6 +31,7 @@ export type PetEventType =
   | "debug_angry";
 
 export type PetUIPhase = "idle" | "listening" | "thinking" | "speaking" | "error";
+export type VoiceMode = "fast" | "thinking";
 
 export type PetState = {
   schema_version?: string;
@@ -80,6 +81,17 @@ export type AudioUnderstanding = {
 export type VoiceChatResponse = PetResponse & {
   user_text: string;
   audio_understanding: AudioUnderstanding;
+  voice_route?: VoiceRouteInfo;
+};
+
+export type VoiceRouteInfo = {
+  requested: "auto" | "fast" | "slow";
+  selected: "fast" | "slow" | "fallback";
+  thinking_mode: boolean;
+  asr_provider: string;
+  brain_provider: string;
+  fallback_reason: string;
+  timings_ms: Record<string, number>;
 };
 
 export type ActivationResponse = PetResponse & {

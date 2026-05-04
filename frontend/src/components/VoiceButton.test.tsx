@@ -51,6 +51,7 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={recorderFactory()}
+        thinkingMode={false}
         uploadVoice={uploadVoice}
         onError={vi.fn()}
         onPhaseChange={onPhaseChange}
@@ -66,6 +67,7 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("speaking"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
+    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), { thinkingMode: false });
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
@@ -82,6 +84,7 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={createRecorder}
+        thinkingMode={true}
         uploadVoice={uploadVoice}
         onError={vi.fn()}
         onPhaseChange={vi.fn()}

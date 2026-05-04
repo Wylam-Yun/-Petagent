@@ -26,4 +26,11 @@ describe("activation phrase matching", () => {
     expect(detectActivationIntent("momo休息吧", 0.9, config)).toBe("exit");
     expect(detectActivationIntent("hi momo", 0.2, config)).toBe("none");
   });
+
+  test("normalizes common ASR aliases for Momo", () => {
+    expect(detectActivationIntent("嗨 默默", 0.9, config)).toBe("wake");
+    expect(detectActivationIntent("嗨 摸摸", 0.9, config)).toBe("wake");
+    expect(detectActivationIntent("默默休息吧", 0.9, config)).toBe("exit");
+    expect(detectActivationIntent("摸摸休息吧", 0.9, config)).toBe("exit");
+  });
 });

@@ -27,14 +27,17 @@ class RuntimeDispatcher:
         self.tts_provider = tts_provider
         self.registry = registry
 
-    def handle_event(self, raw_event: Dict[str, Any]) -> PetResponse:
+    def handle_event(
+        self, raw_event: Dict[str, Any], brain: PetBrain = None
+    ) -> PetResponse:
         event = normalize_event(raw_event)
         current_state = self.state_store.get_state()
         ruled_state = apply_event_rules(current_state, event.type)
         context = build_runtime_context(event, ruled_state)
+        active_brain = brain or self.brain
 
         try:
-            raw_action = self.brain.generate_action(event, context)
+            raw_action = active_brain.generate_action(event, context)
         except Exception:
             raw_action = None
         action = guard_action(raw_action)

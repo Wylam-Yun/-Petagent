@@ -9,6 +9,20 @@ from pydantic import BaseModel
 from app.config import Settings
 
 
+def normalize_pet_name(text: str) -> str:
+    normalized = str(text).strip().lower()
+    for alias in ("默默", "摸摸"):
+        normalized = normalized.replace(alias, "momo")
+    return normalized
+
+
+def normalize_activation_phrase(text: str) -> str:
+    normalized = normalize_pet_name(text)
+    for char in (" ", "\t", "\n", "，", "。", ",", ".", "!", "?", "！", "？", "、"):
+        normalized = normalized.replace(char, "")
+    return normalized
+
+
 class ActivationState(BaseModel):
     schema_version: str = "0.1"
     active: bool = False
@@ -36,8 +50,10 @@ class ActivationManager:
         return self.settings.app_config.get("activation", {}).get("exit_phrases", [])
 
     def phrase_matches(self, phrase: str, phrases: list) -> bool:
-        normalized = phrase.strip().lower().replace(" ", "")
-        return any(normalized == str(item).lower().replace(" ", "") for item in phrases)
+        normalized = normalize_activation_phrase(phrase)
+        return any(
+            normalized == normalize_activation_phrase(str(item)) for item in phrases
+        )
 
     def wake(self, phrase: str, confidence: float, source: str) -> ActivationState:
         if confidence < self.min_confidence() or not self.phrase_matches(

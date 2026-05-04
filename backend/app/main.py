@@ -15,17 +15,21 @@ from app.providers.audio_omni import (
     MiMoAudioUnderstandingProvider,
     MockAudioUnderstandingProvider,
 )
+from app.providers.asr_mock import MockASRProvider
+from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
 from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.registry import SkillRegistry
+from app.runtime.voice_pipeline import VoicePipeline
 
 
-def _select_llm_provider(settings: Settings, testing: bool):
-    if testing or not settings.api_key:
-        return MockLLMProvider()
-    return MiMoLLMProvider(settings)
+def _select_llm_provider(settings: Settings, testing: bool, provider_config=None, mock_name: str = "mock_llm"):
+    config = provider_config or settings.llm
+    if testing or not config.api_key:
+        return MockLLMProvider(mock_name)
+    return MiMoLLMProvider(settings, config)
 
 
 def _select_tts_provider(settings: Settings, testing: bool):
@@ -40,6 +44,12 @@ def _select_audio_provider(settings: Settings, testing: bool):
     return MiMoAudioUnderstandingProvider(settings)
 
 
+def _select_asr_provider(settings: Settings, testing: bool):
+    if testing or settings.asr is None:
+        return MockASRProvider()
+    return NvidiaParakeetASRProvider(settings.asr)
+
+
 def create_app(testing: bool = False) -> FastAPI:
     settings = load_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -48,14 +58,35 @@ def create_app(testing: bool = False) -> FastAPI:
 
     state_store = create_state_store(settings, testing=testing)
     registry = SkillRegistry()
-    brain = PetBrain(settings, _select_llm_provider(settings, testing))
+    slow_llm_provider = _select_llm_provider(
+        settings, testing, settings.llm, "mock_slow_llm"
+    )
+    fast_llm_provider = _select_llm_provider(
+        settings, testing, settings.llm_fast or settings.llm, "mock_fast_llm"
+    )
+    brain = PetBrain(settings, slow_llm_provider)
+    fast_brain = PetBrain(settings, fast_llm_provider)
     audio_provider = _select_audio_provider(settings, testing)
+    asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings)
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
         brain=brain,
         tts_provider=_select_tts_provider(settings, testing),
         registry=registry,
+    )
+    voice_pipeline = VoicePipeline(
+        dispatcher=dispatcher,
+        fast_brain=fast_brain,
+        slow_brain=brain,
+        asr_provider=asr_provider,
+        audio_provider=audio_provider,
+        slow_fallback_enabled=bool(
+            settings.voice_routing.get("slow_fallback_enabled", True)
+        ),
+        asr_min_confidence=float(settings.voice_routing.get("asr_min_confidence", 0.0)),
+        fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
+        slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
     )
 
     app = FastAPI(title="PetAgent Momo", version=settings.schema_version)
@@ -71,6 +102,8 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.registry = registry
     app.state.dispatcher = dispatcher
     app.state.audio_provider = audio_provider
+    app.state.asr_provider = asr_provider
+    app.state.voice_pipeline = voice_pipeline
     app.state.activation_manager = activation_manager
 
     @app.get("/api/health")

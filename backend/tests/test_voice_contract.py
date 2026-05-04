@@ -64,6 +64,7 @@ def test_voice_chat_falls_back_when_audio_provider_fails():
 
     response = client.post(
         "/api/voice/chat",
+        data={"route": "slow"},
         files={"file": ("noise.webm", b"noise", "audio/webm")},
     )
 

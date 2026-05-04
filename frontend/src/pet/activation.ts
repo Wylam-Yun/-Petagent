@@ -5,7 +5,7 @@ export type ActivationConfig = {
 };
 
 export const defaultActivationConfig: ActivationConfig = {
-  wakePhrases: ["hi momo", "hey momo", "嗨 momo"],
+  wakePhrases: ["hi momo", "hey momo", "嗨 momo", "你好 momo"],
   exitPhrases: ["momo休息吧", "退出", "先这样", "不用陪了"],
   minConfidence: 0.75
 };
@@ -43,5 +43,9 @@ function matchesAnyPhrase(text: string, phrases: string[]): boolean {
 }
 
 function normalizePhrase(text: string): string {
-  return text.toLowerCase().replace(/[\s，。,.!?！？、]/g, "");
+  return normalizePetName(text).toLowerCase().replace(/[\s，。,.!?！？、]/g, "");
+}
+
+export function normalizePetName(text: string): string {
+  return text.replace(/默默|摸摸/g, "momo");
 }

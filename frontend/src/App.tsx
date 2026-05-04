@@ -5,6 +5,7 @@ import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
 import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
+import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import { exitMomo, getPetState, postPetEvent, wakeMomo } from "./pet/api";
 import { animationMap } from "./pet/animations";
 import { detectActivationIntent } from "./pet/activation";
@@ -49,6 +50,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<PetUIPhase>("idle");
   const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [thinkingMode, setThinkingMode] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -148,7 +150,7 @@ function App() {
     } else if (nextPhase === "thinking") {
       setFaceType("thinking");
       setAnimation("blink");
-      setBubbleText("让我想想。");
+      setBubbleText(thinkingMode ? "Momo 多想一下。" : "马上回应你。");
     } else if (nextPhase === "error") {
       setFaceType("concerned");
       setAnimation("tilt");
@@ -164,9 +166,11 @@ function App() {
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
+        <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
           disabled={busy}
           phase={phase}
+          thinkingMode={thinkingMode}
           onError={(message) => setBubbleText(message)}
           onPhaseChange={handleVoicePhase}
           onVoiceResponse={handleVoiceResponse}

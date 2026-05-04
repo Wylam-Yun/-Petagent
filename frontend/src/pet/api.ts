@@ -29,9 +29,17 @@ export function postPetEvent(event: PetEventType): Promise<PetResponse> {
   });
 }
 
-export function uploadVoice(blob: Blob): Promise<VoiceChatResponse> {
+export type UploadVoiceOptions = {
+  thinkingMode?: boolean;
+};
+
+export function uploadVoice(
+  blob: Blob,
+  options: UploadVoiceOptions = {}
+): Promise<VoiceChatResponse> {
   const formData = new FormData();
   formData.append("file", blob, `voice.${extensionForType(blob.type)}`);
+  formData.append("thinking_mode", options.thinkingMode ? "true" : "false");
   return requestJson<VoiceChatResponse>("/api/voice/chat", {
     method: "POST",
     body: formData

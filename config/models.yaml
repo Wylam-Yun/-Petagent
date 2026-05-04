@@ -5,12 +5,26 @@ providers:
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
+  llm_fast:
+    name: mimo_flash
+    model: mimo-v2-flash
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 20
   audio_understanding:
     name: mimo
     model: mimo-v2-omni
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
+  asr:
+    name: nvidia_parakeet
+    model: parakeet-ctc-0.6b-zh-cn
+    base_url_env: NVIDIA_RIVA_SERVER
+    api_key_env: NVIDIA_API_KEY
+    timeout_seconds: 15
+    function_id_env: NVIDIA_PARKEET_FUNCTION_ID
+    language_code: zh-CN
   tts:
     name: mimo
     model: mimo-v2.5-tts
