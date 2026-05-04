@@ -9,13 +9,20 @@ class ASRTranscript:
     text: str
     confidence: float = 0.0
     provider: str = "unknown"
+    error_code: str = ""
+    error_message: str = ""
 
     def dict(self) -> Dict[str, Any]:
-        return {
+        body = {
             "text": self.text,
             "confidence": max(0.0, min(1.0, float(self.confidence))),
             "provider": self.provider,
         }
+        if self.error_code:
+            body["error_code"] = self.error_code
+        if self.error_message:
+            body["error_message"] = self.error_message
+        return body
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,8 @@ class VoiceRouteInfo:
     selected: str
     thinking_mode: bool
     asr_provider: str = ""
+    asr_error_code: str = ""
+    asr_error_message: str = ""
     brain_provider: str = ""
     fallback_reason: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
@@ -34,6 +43,8 @@ class VoiceRouteInfo:
             "selected": self.selected,
             "thinking_mode": self.thinking_mode,
             "asr_provider": self.asr_provider,
+            "asr_error_code": self.asr_error_code,
+            "asr_error_message": self.asr_error_message,
             "brain_provider": self.brain_provider,
             "fallback_reason": self.fallback_reason,
             "timings_ms": dict(self.timings_ms),

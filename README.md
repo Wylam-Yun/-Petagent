@@ -15,7 +15,8 @@ Momo 不是客服、不是普通 AI 助手，也不是女友设定。它是一�
 ## Stage 2
 
 - 语音：浏览器按住说话，前端优先用 Web Audio 录成 `audio/wav`，后端仍兼容 `audio/webm` / `audio/mpeg` / `audio/mp4`
-- 音频理解：`mimo-v2-omni` 直接理解语音内容、语气和情绪
+- 快路径：默认可走 configurable HTTP ASR -> `mimo-v2-flash` -> TTS
+- 慢路径：思考模式下使用 `mimo-v2-omni` 直接理解语音内容、语气和情绪
 - 激活：前台页面内支持 `hi momo` 唤醒和 `momo休息吧` 退出
 - 兜底：静音、过短、低置信度或 provider 失败时返回 `uncertain`，Momo 不胡编
 - 体验：UI 有 `listening` / `thinking` / `speaking` / `error` 状态

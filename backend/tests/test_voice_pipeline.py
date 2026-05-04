@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.runtime.voice_types import ASRTranscript
 
 
 def post_voice(client: TestClient, *, data=None, content_type="audio/wav"):
@@ -51,6 +52,33 @@ def test_voice_chat_falls_back_to_slow_route_when_asr_is_empty():
     assert body["voice_route"]["selected"] == "slow"
     assert body["voice_route"]["fallback_reason"] == "asr_empty"
     assert body["reply"]
+
+
+def test_voice_chat_exposes_sanitized_asr_provider_error():
+    class FailingASR:
+        name = "future_asr"
+
+        def transcribe(self, audio_path, content_type):
+            return ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider=self.name,
+                error_code="asr_http_401",
+                error_message="ASR HTTP request failed with status 401",
+            )
+
+    app = create_app(testing=True)
+    app.state.voice_pipeline.asr_provider = FailingASR()
+    client = TestClient(app)
+
+    response = post_voice(client)
+
+    assert response.status_code == 200
+    route = response.json()["voice_route"]
+    assert route["selected"] == "slow"
+    assert route["fallback_reason"] == "asr_provider_error"
+    assert route["asr_error_code"] == "asr_http_401"
+    assert route["asr_error_message"] == "ASR HTTP request failed with status 401"
 
 
 def test_voice_chat_uses_configured_upload_limits():

@@ -3,11 +3,14 @@ set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 AUDIO_DIR="$PROJECT_DIR/backend/static/audio"
+UPLOAD_DIR="$PROJECT_DIR/backend/data/uploads"
 
-if [ ! -d "$AUDIO_DIR" ]; then
-  echo "audio cache does not exist"
-  exit 0
+if [ -d "$AUDIO_DIR" ]; then
+  find "$AUDIO_DIR" -type f -mtime +3 -delete
 fi
 
-find "$AUDIO_DIR" -type f -mtime +3 -delete
-echo "old audio cache cleaned"
+if [ -d "$UPLOAD_DIR" ]; then
+  find "$UPLOAD_DIR" -type f -mtime +3 -delete
+fi
+
+echo "old voice cache cleaned"

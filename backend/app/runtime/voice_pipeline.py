@@ -79,12 +79,20 @@ class VoicePipeline:
         try:
             transcript = self.asr_provider.transcribe(audio_path, content_type)
         except Exception:
-            transcript = ASRTranscript(text="", confidence=0.0, provider=self._asr_name())
+            transcript = ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider=self._asr_name(),
+                error_code="asr_provider_exception",
+                error_message="ASR provider raised an exception",
+            )
             fallback_reason = "asr_error"
         timings["asr"] = _now_ms(started)
 
         text = transcript.text.strip()
-        if not text:
+        if transcript.error_code:
+            fallback_reason = "asr_provider_error"
+        elif not text:
             fallback_reason = fallback_reason or "asr_empty"
         elif transcript.confidence < self.asr_min_confidence:
             fallback_reason = "asr_low_confidence"
@@ -109,6 +117,8 @@ class VoicePipeline:
                         selected=result.route_info.selected,
                         thinking_mode=result.route_info.thinking_mode,
                         asr_provider=transcript.provider,
+                        asr_error_code=transcript.error_code,
+                        asr_error_message=transcript.error_message,
                         brain_provider=result.route_info.brain_provider,
                         fallback_reason=fallback_reason,
                         timings_ms=merged,
@@ -149,6 +159,8 @@ class VoicePipeline:
                 selected="fast",
                 thinking_mode=thinking_mode,
                 asr_provider=transcript.provider,
+                asr_error_code=transcript.error_code,
+                asr_error_message=transcript.error_message,
                 brain_provider=self.fast_brain_provider_name,
                 fallback_reason=fallback_reason,
                 timings_ms=timings,

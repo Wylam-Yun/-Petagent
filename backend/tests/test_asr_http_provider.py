@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import requests
+
 from app.config import ProviderConfig
 from app.providers.asr_http import HttpASRProvider, parse_transcript_json
 
@@ -149,3 +151,31 @@ def test_http_asr_returns_empty_transcript_when_not_configured(tmp_path: Path):
 
     assert transcript.text == ""
     assert transcript.confidence == 0.0
+    assert transcript.error_code == "asr_not_configured"
+
+
+def test_http_asr_reports_sanitized_http_error(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+
+    class Response:
+        status_code = 401
+
+        def raise_for_status(self):
+            error = requests.HTTPError("401 Client Error: token leaked")
+            error.response = self
+            raise error
+
+    def fake_post(url, **kwargs):
+        return Response()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(provider_config()).transcribe(audio, "audio/wav")
+
+    assert transcript.text == ""
+    assert transcript.confidence == 0.0
+    assert transcript.error_code == "asr_http_401"
+    assert transcript.error_message == "ASR HTTP request failed with status 401"
+    assert "test-key" not in transcript.error_message
+    assert "asr.example" not in transcript.error_message

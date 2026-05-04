@@ -99,8 +99,10 @@ class HttpASRProvider:
         self.name = config.name or "http_asr"
 
     def transcribe(self, audio_path: Path, content_type: str) -> ASRTranscript:
-        if not audio_path.exists() or not self.config.base_url:
-            return ASRTranscript(text="", confidence=0.0, provider=self.name)
+        if not audio_path.exists():
+            return self._error("asr_audio_missing", "ASR input audio file is missing")
+        if not self.config.base_url:
+            return self._error("asr_not_configured", "ASR base URL is not configured")
 
         try:
             request_kwargs = self._request_kwargs(audio_path, content_type)
@@ -116,11 +118,34 @@ class HttpASRProvider:
                 confidence_paths=self.config.extra.get("confidence_paths") or [],
             )
             return ASRTranscript(text=text, confidence=confidence, provider=self.name)
+        except requests.Timeout:
+            return self._error("asr_timeout", "ASR HTTP request timed out")
+        except requests.HTTPError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status:
+                return self._error(
+                    "asr_http_%s" % status,
+                    "ASR HTTP request failed with status %s" % status,
+                )
+            return self._error("asr_http_error", "ASR HTTP request failed")
+        except requests.RequestException:
+            return self._error("asr_request_error", "ASR HTTP request failed")
+        except ValueError:
+            return self._error("asr_bad_response", "ASR HTTP response was not valid JSON")
         except Exception:
-            return ASRTranscript(text="", confidence=0.0, provider=self.name)
+            return self._error("asr_provider_error", "ASR provider failed")
         finally:
             for handle in locals().get("file_handles", []):
                 handle.close()
+
+    def _error(self, code: str, message: str) -> ASRTranscript:
+        return ASRTranscript(
+            text="",
+            confidence=0.0,
+            provider=self.name,
+            error_code=code,
+            error_message=message,
+        )
 
     def _request_kwargs(self, audio_path: Path, content_type: str) -> Dict[str, Any]:
         request_format = str(
