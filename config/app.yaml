@@ -57,3 +57,7 @@ voice:
       - 48000
   normalize_pet_name: true
   route_debug_enabled: false
+proactive:
+  mode: low_cost
+  synthesize_voice: false
+  poll_interval_seconds: 30

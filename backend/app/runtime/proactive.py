@@ -17,17 +17,18 @@ class ProactiveService:
         self.initialize()
 
     def initialize(self) -> None:
-        self.connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS proactive_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_type TEXT NOT NULL,
-                triggered_at TEXT NOT NULL,
-                user_responded INTEGER NOT NULL DEFAULT 0
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proactive_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    triggered_at TEXT NOT NULL,
+                    user_responded INTEGER NOT NULL DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        self.connection.commit()
+            self.connection.commit()
 
     def next_event(self, now: Optional[datetime] = None) -> Optional[PetEvent]:
         current = now or datetime.utcnow()
@@ -44,14 +45,15 @@ class ProactiveService:
         )
 
     def record(self, event_type: str, when: Optional[datetime] = None) -> None:
-        self.connection.execute(
-            """
-            INSERT INTO proactive_log (event_type, triggered_at, user_responded)
-            VALUES (?, ?, 0)
-            """,
-            (event_type, (when or datetime.utcnow()).isoformat()),
-        )
-        self.connection.commit()
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                INSERT INTO proactive_log (event_type, triggered_at, user_responded)
+                VALUES (?, ?, 0)
+                """,
+                (event_type, (when or datetime.utcnow()).isoformat()),
+            )
+            self.connection.commit()
 
     def _candidate(self, now: datetime) -> Optional[str]:
         state = self.state_store.get_state()
@@ -80,14 +82,15 @@ class ProactiveService:
 
     def _triggered_today(self, event_type: str, now: datetime) -> bool:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        row = self.connection.execute(
-            """
-            SELECT 1 FROM proactive_log
-            WHERE event_type = ? AND triggered_at >= ?
-            LIMIT 1
-            """,
-            (event_type, start),
-        ).fetchone()
+        with self.connection.locked():
+            row = self.connection.execute(
+                """
+                SELECT 1 FROM proactive_log
+                WHERE event_type = ? AND triggered_at >= ?
+                LIMIT 1
+                """,
+                (event_type, start),
+            ).fetchone()
         return row is not None
 
     def _triggered_recently(
@@ -95,19 +98,21 @@ class ProactiveService:
     ) -> bool:
         since = (now - timedelta(minutes=minutes)).isoformat()
         if event_type is None:
-            row = self.connection.execute(
-                "SELECT 1 FROM proactive_log WHERE triggered_at >= ? LIMIT 1",
-                (since,),
-            ).fetchone()
+            with self.connection.locked():
+                row = self.connection.execute(
+                    "SELECT 1 FROM proactive_log WHERE triggered_at >= ? LIMIT 1",
+                    (since,),
+                ).fetchone()
         else:
-            row = self.connection.execute(
-                """
-                SELECT 1 FROM proactive_log
-                WHERE event_type = ? AND triggered_at >= ?
-                LIMIT 1
-                """,
-                (event_type, since),
-            ).fetchone()
+            with self.connection.locked():
+                row = self.connection.execute(
+                    """
+                    SELECT 1 FROM proactive_log
+                    WHERE event_type = ? AND triggered_at >= ?
+                    LIMIT 1
+                    """,
+                    (event_type, since),
+                ).fetchone()
         return row is not None
 
     def _parse_datetime(self, value) -> Optional[datetime]:

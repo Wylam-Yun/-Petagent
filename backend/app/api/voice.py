@@ -6,6 +6,7 @@ from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/voice")
 
@@ -70,7 +71,8 @@ async def post_voice_chat(
     path = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
     request.app.state.tick_service.apply_if_due()
-    result = request.app.state.voice_pipeline.handle(
+    result = await run_in_threadpool(
+        request.app.state.voice_pipeline.handle,
         path,
         file.content_type or "",
         requested_route=route,

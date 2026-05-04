@@ -9,6 +9,10 @@ LOG_FILE="$PROJECT_DIR/backend/data/logs/runtime.log"
 
 mkdir -p "$PROJECT_DIR/backend/data/logs" "$PROJECT_DIR/backend/static/audio"
 
+if [ -x "$PROJECT_DIR/scripts/clean_cache.sh" ]; then
+  "$PROJECT_DIR/scripts/clean_cache.sh" >/dev/null 2>&1 || true
+fi
+
 if [ -f "$PROJECT_DIR/.env" ]; then
   set -a
   . "$PROJECT_DIR/.env"

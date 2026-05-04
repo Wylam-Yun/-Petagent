@@ -23,30 +23,33 @@ class TickService:
         self.initialize()
 
     def initialize(self) -> None:
-        self.connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS runtime_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runtime_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        self.connection.commit()
+            self.connection.commit()
 
     def set_last_tick(self, value: datetime) -> None:
-        self.connection.execute(
-            """
-            INSERT INTO runtime_meta (key, value) VALUES ('last_tick_at', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (value.isoformat(),),
-        )
-        self.connection.commit()
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                INSERT INTO runtime_meta (key, value) VALUES ('last_tick_at', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (value.isoformat(),),
+            )
+            self.connection.commit()
 
     def get_last_tick(self) -> Optional[datetime]:
-        row = self.connection.execute(
-            "SELECT value FROM runtime_meta WHERE key = 'last_tick_at'"
-        ).fetchone()
+        with self.connection.locked():
+            row = self.connection.execute(
+                "SELECT value FROM runtime_meta WHERE key = 'last_tick_at'"
+            ).fetchone()
         if row is None:
             return None
         try:

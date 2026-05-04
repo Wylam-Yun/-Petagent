@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from app.runtime.registry import SkillRegistry
 from app.skills.base import SkillManifest
 
@@ -34,3 +36,32 @@ def test_skill_registry_returns_structured_timeout():
 
     assert result.ok is False
     assert result.error == "skill timeout"
+
+
+def test_skill_registry_respects_enabled_config_and_timeout():
+    settings = SimpleNamespace(
+        skills_config={
+            "skills": [
+                {
+                    "id": "device.info",
+                    "enabled": False,
+                    "permissions": ["device"],
+                },
+                {
+                    "id": "weather.current",
+                    "enabled": True,
+                    "permissions": ["network", "device"],
+                    "timeout_ms": 6000,
+                    "config": {"mock_weather": {"content": "晴", "confidence": 0.8}},
+                },
+            ],
+            "limits": {"timeout_ms": 3000},
+        }
+    )
+
+    registry = SkillRegistry(settings=settings)
+    listed = registry.list_skills()
+
+    assert [skill["id"] for skill in listed] == ["weather.current"]
+    assert listed[0]["permissions"] == ["network"]
+    assert listed[0]["timeout_ms"] == 3000

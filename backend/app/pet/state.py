@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 
 STATE_COLUMNS = [
@@ -19,6 +21,31 @@ STATE_COLUMNS = [
     "last_interaction_at",
     "updated_at",
 ]
+
+
+class LockedSQLiteConnection:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def locked(self) -> Iterator["LockedSQLiteConnection"]:
+        with self._lock:
+            yield self
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            return self._connection.execute(*args, **kwargs)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._connection.commit()
+
+    def cursor(self):
+        return self._connection.cursor()
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
 
 
 def default_state(name: str = "Momo") -> Dict[str, Any]:
@@ -44,57 +71,63 @@ class PetStateStore:
         self.pet_name = pet_name
         if db_path is not None:
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.connection = sqlite3.connect(str(db_path), check_same_thread=False)
+            raw_connection = sqlite3.connect(str(db_path), check_same_thread=False)
         else:
-            self.connection = sqlite3.connect(":memory:", check_same_thread=False)
-        self.connection.row_factory = sqlite3.Row
+            raw_connection = sqlite3.connect(":memory:", check_same_thread=False)
+        raw_connection.row_factory = sqlite3.Row
+        raw_connection.execute("PRAGMA busy_timeout = 5000")
+        if db_path is not None:
+            raw_connection.execute("PRAGMA journal_mode = WAL")
+            raw_connection.execute("PRAGMA synchronous = NORMAL")
+        self.connection = LockedSQLiteConnection(raw_connection)
         self.initialize()
 
     def initialize(self) -> None:
-        cursor = self.connection.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                version TEXT NOT NULL
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    version TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS pet_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                name TEXT NOT NULL,
-                mood TEXT NOT NULL,
-                energy INTEGER NOT NULL,
-                intimacy INTEGER NOT NULL,
-                hunger INTEGER NOT NULL,
-                cleanliness INTEGER NOT NULL,
-                loneliness INTEGER NOT NULL,
-                sleepiness INTEGER NOT NULL,
-                mode TEXT NOT NULL,
-                last_interaction_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pet_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    name TEXT NOT NULL,
+                    mood TEXT NOT NULL,
+                    energy INTEGER NOT NULL,
+                    intimacy INTEGER NOT NULL,
+                    hunger INTEGER NOT NULL,
+                    cleanliness INTEGER NOT NULL,
+                    loneliness INTEGER NOT NULL,
+                    sleepiness INTEGER NOT NULL,
+                    mode TEXT NOT NULL,
+                    last_interaction_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, '0.1')"
-        )
-        state = default_state(self.pet_name)
-        cursor.execute(
-            """
-            INSERT OR IGNORE INTO pet_state (
-                id, name, mood, energy, intimacy, hunger, cleanliness,
-                loneliness, sleepiness, mode, last_interaction_at, updated_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            tuple(state[column] for column in STATE_COLUMNS),
-        )
-        self.connection.commit()
+            self.connection.execute(
+                "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, '0.1')"
+            )
+            state = default_state(self.pet_name)
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO pet_state (
+                    id, name, mood, energy, intimacy, hunger, cleanliness,
+                    loneliness, sleepiness, mode, last_interaction_at, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                tuple(state[column] for column in STATE_COLUMNS),
+            )
+            self.connection.commit()
 
     def get_state(self) -> Dict[str, Any]:
-        row = self.connection.execute("SELECT * FROM pet_state WHERE id = 1").fetchone()
+        with self.connection.locked():
+            row = self.connection.execute("SELECT * FROM pet_state WHERE id = 1").fetchone()
         if row is None:
             state = default_state(self.pet_name)
             self.save_state(state)
@@ -108,16 +141,17 @@ class PetStateStore:
         now = datetime.utcnow().isoformat()
         saved["updated_at"] = now
         saved.setdefault("last_interaction_at", now)
-        self.connection.execute(
-            """
-            UPDATE pet_state SET
-                name = ?, mood = ?, energy = ?, intimacy = ?, hunger = ?,
-                cleanliness = ?, loneliness = ?, sleepiness = ?, mode = ?,
-                last_interaction_at = ?, updated_at = ?
-            WHERE id = 1
-            """,
-            tuple(saved[column] for column in STATE_COLUMNS),
-        )
-        self.connection.commit()
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                UPDATE pet_state SET
+                    name = ?, mood = ?, energy = ?, intimacy = ?, hunger = ?,
+                    cleanliness = ?, loneliness = ?, sleepiness = ?, mode = ?,
+                    last_interaction_at = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                tuple(saved[column] for column in STATE_COLUMNS),
+            )
+            self.connection.commit()
         saved["schema_version"] = "0.1"
         return saved

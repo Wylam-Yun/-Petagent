@@ -68,3 +68,31 @@ def test_activation_normalizes_common_momo_asr_aliases():
     assert wake.json()["active"] is True
     assert exit_response.status_code == 200
     assert exit_response.json()["active"] is False
+
+
+def test_activation_session_is_persisted_and_closed():
+    app = create_app(testing=True)
+    client = TestClient(app)
+    wake = client.post(
+        "/api/activation/wake",
+        json={"phrase": "hi momo", "confidence": 0.86, "source": "foreground_voice"},
+    )
+    session_id = wake.json()["session_id"]
+
+    client.post(
+        "/api/activation/exit",
+        json={"phrase": "momo休息吧", "confidence": 0.86, "source": "foreground_voice"},
+    )
+
+    row = app.state.state_store.connection.execute(
+        """
+        SELECT active, started_at, ended_at
+        FROM activation_session
+        WHERE session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+    assert row is not None
+    assert row["active"] == 0
+    assert row["started_at"]
+    assert row["ended_at"]

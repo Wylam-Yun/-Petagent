@@ -41,7 +41,11 @@ def test_device_info_skill_returns_structured_result():
 
 
 def test_weather_skill_failure_is_structured_when_provider_unavailable():
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+    app.state.registry._skill_configs["weather.current"]["config"][
+        "provider"
+    ] = "disabled"
+    client = TestClient(app)
 
     response = client.post("/api/skills/weather.current/run", json={"location": "current"})
 
@@ -50,6 +54,48 @@ def test_weather_skill_failure_is_structured_when_provider_unavailable():
     assert body["skill_id"] == "weather.current"
     assert "ok" in body
     assert "error" in body
+
+
+def test_weather_skill_uses_configured_network_provider(monkeypatch):
+    app = create_app(testing=True)
+    weather_config = app.state.registry._skill_configs["weather.current"]["config"]
+    weather_config["provider"] = "wttr_in"
+    weather_config.pop("mock_weather", None)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "current_condition": [
+                    {
+                        "temp_C": "22",
+                        "FeelsLikeC": "21",
+                        "humidity": "60",
+                        "windspeedKmph": "8",
+                        "weatherDesc": [{"value": "多云"}],
+                    }
+                ]
+            }
+
+    class FakeSession:
+        def get(self, url, params=None, timeout=None):
+            assert url.startswith("https://wttr.in")
+            assert params == {"format": "j1"}
+            assert timeout == 5
+            return FakeResponse()
+
+    monkeypatch.setattr("app.runtime.registry.requests.Session", lambda: FakeSession())
+    client = TestClient(app)
+
+    response = client.post("/api/skills/weather.current/run", json={"location": "current"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["temperature_c"] == 22
+    assert "22" in body["content"]
 
 
 def test_proactive_morning_only_triggers_once_per_day():
@@ -90,3 +136,20 @@ def test_proactive_api_uses_low_cost_response_without_tts_for_active_event():
     assert body["active"] is True
     assert body["voice_url"] is None
     assert body["reply"]
+    assert body["runtime"]["proactive_mode"] == "low_cost"
+
+
+def test_proactive_api_can_use_llm_mode_for_active_event():
+    app = create_app(testing=True)
+    state = app.state.state_store.get_state()
+    state["last_interaction_at"] = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+    state["updated_at"] = state["last_interaction_at"]
+    app.state.state_store.save_state(state)
+    client = TestClient(app)
+
+    response = client.get("/api/pet/proactive?mode=llm")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["active"] is True
+    assert body["runtime"]["proactive_mode"] == "llm"
