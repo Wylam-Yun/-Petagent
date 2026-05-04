@@ -73,3 +73,20 @@ def test_proactive_api_returns_inactive_when_no_candidate():
 
     assert response.status_code == 200
     assert "active" in response.json()
+
+
+def test_proactive_api_uses_low_cost_response_without_tts_for_active_event():
+    app = create_app(testing=True)
+    state = app.state.state_store.get_state()
+    state["last_interaction_at"] = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+    state["updated_at"] = state["last_interaction_at"]
+    app.state.state_store.save_state(state)
+    client = TestClient(app)
+
+    response = client.get("/api/pet/proactive")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["active"] is True
+    assert body["voice_url"] is None
+    assert body["reply"]

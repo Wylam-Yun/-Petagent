@@ -22,6 +22,7 @@ from app.providers.asr_http import HttpASRProvider
 from app.providers.asr_mock import MockASRProvider
 from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
+from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
 from app.runtime.dispatcher import RuntimeDispatcher
@@ -81,6 +82,7 @@ def create_app(testing: bool = False) -> FastAPI:
     )
     brain = PetBrain(settings, slow_llm_provider)
     fast_brain = PetBrain(settings, fast_llm_provider)
+    proactive_brain = PetBrain(settings, ProactiveRuleProvider())
     audio_provider = _select_audio_provider(settings, testing)
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings)
@@ -129,6 +131,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.asr_provider = asr_provider
     app.state.voice_pipeline = voice_pipeline
     app.state.activation_manager = activation_manager
+    app.state.proactive_brain = proactive_brain
 
     @app.get("/api/health")
     def health():

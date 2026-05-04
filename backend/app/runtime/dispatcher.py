@@ -37,7 +37,10 @@ class RuntimeDispatcher:
         self.tick_service = tick_service
 
     def handle_event(
-        self, raw_event: Dict[str, Any], brain: PetBrain = None
+        self,
+        raw_event: Dict[str, Any],
+        brain: PetBrain = None,
+        synthesize_voice: bool = True,
     ) -> PetResponse:
         event = normalize_event(raw_event)
         if self.tick_service is not None:
@@ -75,10 +78,11 @@ class RuntimeDispatcher:
         saved_state = self.state_store.save_state(final_state)
 
         voice_url = None
-        try:
-            voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
-        except Exception:
-            voice_url = None
+        if synthesize_voice:
+            try:
+                voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
+            except Exception:
+                voice_url = None
         if self.memory_store is not None:
             self.memory_store.save_from_update(action.memory_update)
         if self.interaction_log is not None:

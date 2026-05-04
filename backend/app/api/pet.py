@@ -24,6 +24,10 @@ def get_pet_proactive(request: Request):
     event = request.app.state.proactive_service.next_event()
     if event is None:
         return {"active": False}
-    response = request.app.state.dispatcher.handle_event(event.dict()).dict()
+    response = request.app.state.dispatcher.handle_event(
+        event.dict(),
+        brain=request.app.state.proactive_brain,
+        synthesize_voice=False,
+    ).dict()
     response["active"] = True
     return response
