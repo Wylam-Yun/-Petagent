@@ -41,6 +41,20 @@ def build_pet_messages(
             "4. 不要复读用户整句话。\n"
             "5. 很多时候陪着就好，不要强行解决问题。"
         )
+    if event.source == "proactive":
+        system_prompt += (
+            "\n\n主动陪伴规则：\n"
+            "1. 主动回复要更短、更轻，不要像通知。\n"
+            "2. 不要催促用户，不要连续抱怨没人理。\n"
+            "3. 可以根据时间、电量和记忆轻轻表达状态。\n"
+        )
+    if context.skill_results:
+        system_prompt += (
+            "\n\nSkill 结果规则：\n"
+            "1. skill 只提供事实，最终表达必须仍像 Momo。\n"
+            "2. skill 失败时温柔兜底，不暴露接口错误。\n"
+            "3. 不要说“根据 API/数据库/工具结果”。"
+        )
     user_payload = {
         "event": event.dict(),
         "runtime_context": context.dict(),
@@ -52,4 +66,32 @@ def build_pet_messages(
             "role": "user",
             "content": json.dumps(user_payload, ensure_ascii=False),
         },
+    ]
+
+
+def build_skill_plan_messages(
+    settings: Settings, event: PetEvent, context: RuntimeContext
+) -> List[Dict[str, str]]:
+    system_prompt = (
+        settings.persona_config.get("system_prompt", "")
+        + "\n\n你现在只决定是否需要调用 runtime skill。"
+        "不要生成最终回复，不要安慰用户。"
+        "只有用户需要天气、设备状态或外部事实时才请求 skill。"
+        "最多请求 2 个 skill。"
+        "可用 skill: weather.current, device.info。"
+        "必须只输出 JSON。"
+    )
+    payload = {
+        "event": event.dict(),
+        "runtime_context": context.dict(),
+        "output_schema": {
+            "skill_requests": [
+                {"skill_id": "weather.current", "payload": {"location": "current"}}
+            ],
+            "reason": "简短说明为什么需要或不需要 skill",
+        },
+    }
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]

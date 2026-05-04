@@ -69,6 +69,7 @@ async def post_voice_chat(
     started = datetime.utcnow()
     path = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+    request.app.state.tick_service.apply_if_due()
     result = request.app.state.voice_pipeline.handle(
         path,
         file.content_type or "",

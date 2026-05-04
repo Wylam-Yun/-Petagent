@@ -17,6 +17,14 @@ ALLOWED_EVENTS = {
     "voice_message",
     "wake_phrase",
     "exit_phrase",
+    "morning",
+    "night",
+    "long_idle",
+    "battery_low",
+    "charging_started",
+    "charging_stopped",
+    "sleepy_time",
+    "user_return",
 }
 
 

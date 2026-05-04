@@ -5,12 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api import activation as activation_api
+from app.api import device as device_api
 from app.api import pet as pet_api
 from app.api import runtime as runtime_api
+from app.api import skills as skills_api
 from app.api import voice as voice_api
 from app.config import Settings, load_settings
 from app.db import create_state_store
 from app.pet.brain import PetBrain
+from app.pet.memory import InteractionLogStore, MemoryStore
 from app.providers.audio_omni import (
     MiMoAudioUnderstandingProvider,
     MockAudioUnderstandingProvider,
@@ -22,7 +25,10 @@ from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
 from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
 from app.runtime.dispatcher import RuntimeDispatcher
+from app.runtime.device import DeviceStateStore
+from app.runtime.proactive import ProactiveService
 from app.runtime.registry import SkillRegistry
+from app.runtime.tick import TickService
 from app.runtime.voice_pipeline import VoicePipeline
 
 
@@ -61,7 +67,12 @@ def create_app(testing: bool = False) -> FastAPI:
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     state_store = create_state_store(settings, testing=testing)
-    registry = SkillRegistry()
+    memory_store = MemoryStore(state_store.connection)
+    interaction_log = InteractionLogStore(state_store.connection)
+    device_store = DeviceStateStore(state_store.connection)
+    tick_service = TickService(state_store, device_store)
+    proactive_service = ProactiveService(state_store, device_store)
+    registry = SkillRegistry(settings=settings, device_store=device_store)
     slow_llm_provider = _select_llm_provider(
         settings, testing, settings.llm, "mock_slow_llm"
     )
@@ -78,6 +89,10 @@ def create_app(testing: bool = False) -> FastAPI:
         brain=brain,
         tts_provider=_select_tts_provider(settings, testing),
         registry=registry,
+        memory_store=memory_store,
+        interaction_log=interaction_log,
+        device_store=device_store,
+        tick_service=tick_service,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -103,6 +118,11 @@ def create_app(testing: bool = False) -> FastAPI:
     )
     app.state.settings = settings
     app.state.state_store = state_store
+    app.state.memory_store = memory_store
+    app.state.interaction_log = interaction_log
+    app.state.device_store = device_store
+    app.state.tick_service = tick_service
+    app.state.proactive_service = proactive_service
     app.state.registry = registry
     app.state.dispatcher = dispatcher
     app.state.audio_provider = audio_provider
@@ -118,6 +138,8 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(pet_api.router)
     app.include_router(voice_api.router)
     app.include_router(activation_api.router)
+    app.include_router(device_api.router)
+    app.include_router(skills_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)

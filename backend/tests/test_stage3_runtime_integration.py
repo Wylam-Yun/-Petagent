@@ -1,0 +1,90 @@
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+
+
+def test_pet_event_writes_interaction_log():
+    app = create_app(testing=True)
+    client = TestClient(app)
+
+    response = client.post("/api/pet/event", json={"event": "pet_head", "payload": {}})
+
+    assert response.status_code == 200
+    rows = app.state.interaction_log.recent_dialogue(limit=3)
+    assert rows
+    assert rows[0]["event_type"] == "pet_head"
+    assert rows[0]["pet"] == response.json()["reply"]
+
+
+def test_voice_chat_can_persist_memory_update_from_brain():
+    app = create_app(testing=True)
+
+    class MemoryLLM:
+        name = "memory_llm"
+
+        def complete_json(self, messages):
+            return {
+                "reply": "辛苦啦，Momo 陪你慢慢缓一下。",
+                "mood": "concerned",
+                "face_type": "concerned",
+                "animation": "tilt",
+                "voice_style": "soft",
+                "vibration": "light",
+                "state_delta": {"loneliness": -2},
+                "memory_update": {
+                    "should_save": True,
+                    "content": "用户今天很累，需要温柔陪伴。",
+                },
+            }
+
+    app.state.voice_pipeline.fast_brain.provider = MemoryLLM()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/voice/chat",
+        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert "用户今天很累，需要温柔陪伴。" in app.state.memory_store.recent_memory()
+
+
+def test_voice_weather_question_uses_skill_plan_before_final_reply():
+    app = create_app(testing=True)
+    app.state.asr_provider.text = "今天适合出门吗"
+
+    class PlanningLLM:
+        name = "planning_llm"
+
+        def complete_json(self, messages):
+            content = messages[-1]["content"]
+            if "skill_requests" in content:
+                return {
+                    "skill_requests": [
+                        {"skill_id": "weather.current", "payload": {"location": "current"}}
+                    ],
+                    "reason": "用户询问出门天气",
+                }
+            return {
+                "reply": "天气刚刚没问稳，但出门前可以看一眼窗外哦。",
+                "mood": "concerned",
+                "face_type": "concerned",
+                "animation": "tilt",
+                "voice_style": "soft",
+                "vibration": "light",
+                "state_delta": {"loneliness": -1},
+                "memory_update": {"should_save": False, "content": ""},
+            }
+
+    app.state.voice_pipeline.fast_brain.provider = PlanningLLM()
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/voice/chat",
+        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime"]["skills_used"] == ["weather.current"]
+    assert "API" not in body["reply"]

@@ -6,9 +6,17 @@ import { StatusBar } from "./components/StatusBar";
 import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
 import { VoiceModeToggle } from "./components/VoiceModeToggle";
-import { exitMomo, getPetState, postPetEvent, wakeMomo } from "./pet/api";
+import {
+  exitMomo,
+  getPetState,
+  getProactiveEvent,
+  postPetEvent,
+  reportDeviceState,
+  wakeMomo
+} from "./pet/api";
 import { animationMap } from "./pet/animations";
 import { detectActivationIntent } from "./pet/activation";
+import { shouldApplyProactive } from "./pet/proactive";
 import type {
   ActivationResponse,
   AnimationName,
@@ -69,6 +77,53 @@ function App() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let battery: BatteryManager | null = null;
+    let cancelled = false;
+    let reportBattery: (() => void) | null = null;
+
+    async function attachBattery() {
+      const getBattery = navigatorGetBattery();
+      if (!getBattery) return;
+      try {
+        battery = await getBattery();
+      } catch {
+        return;
+      }
+      if (cancelled || !battery) return;
+      reportBattery = () => {
+        void reportDeviceState({
+          battery: Math.round((battery?.level ?? 0) * 100),
+          is_charging: battery?.charging ?? null
+        }).catch(() => undefined);
+      };
+      reportBattery();
+      battery.addEventListener("chargingchange", reportBattery);
+      battery.addEventListener("levelchange", reportBattery);
+    }
+
+    void attachBattery();
+    return () => {
+      cancelled = true;
+      if (!battery || !reportBattery) return;
+      battery.removeEventListener("chargingchange", reportBattery);
+      battery.removeEventListener("levelchange", reportBattery);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!shouldApplyProactive({ phase, busy })) return;
+      void getProactiveEvent()
+        .then((response) => {
+          if (!response.active || !shouldApplyProactive({ phase, busy })) return;
+          applyPetResponse(response);
+        })
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [phase, busy]);
 
   const titleMood = useMemo(() => petState.mood, [petState.mood]);
 
@@ -195,3 +250,15 @@ function vibrate(vibration: "none" | "light" | "medium") {
 }
 
 export default App;
+
+type BatteryManager = EventTarget & {
+  charging: boolean;
+  level: number;
+};
+
+function navigatorGetBattery(): (() => Promise<BatteryManager>) | null {
+  const candidate = navigator as Navigator & {
+    getBattery?: () => Promise<BatteryManager>;
+  };
+  return candidate.getBattery ?? null;
+}

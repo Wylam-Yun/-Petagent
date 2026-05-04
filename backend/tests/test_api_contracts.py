@@ -20,7 +20,8 @@ def test_runtime_contracts():
         "runtime": "PetAgent",
         "pet": "Momo",
     }
-    assert client.get("/api/runtime/skills").json() == {"skills": []}
+    skills = client.get("/api/runtime/skills").json()["skills"]
+    assert {skill["id"] for skill in skills} == {"device.info", "weather.current"}
 
 
 def test_pet_state_contract():

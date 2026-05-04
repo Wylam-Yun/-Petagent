@@ -1,3 +1,14 @@
-skills: []
+skills:
+  - id: device.info
+    enabled: true
+    permissions:
+      - device
+  - id: weather.current
+    enabled: true
+    permissions:
+      - network
+    config:
+      default_location: current
 limits:
-  max_skill_calls_per_event: 0
+  max_skill_calls_per_event: 2
+  timeout_ms: 8000

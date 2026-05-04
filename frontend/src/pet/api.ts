@@ -1,6 +1,8 @@
 import type {
   ActivationResponse,
+  DeviceStatePayload,
   PetEventType,
+  ProactiveResponse,
   PetResponse,
   PetState,
   VoiceChatResponse
@@ -16,6 +18,18 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function getPetState(): Promise<PetState> {
   return requestJson<PetState>("/api/pet/state");
+}
+
+export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceStatePayload> {
+  return requestJson<DeviceStatePayload>("/api/device/state", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getProactiveEvent(): Promise<ProactiveResponse> {
+  return requestJson<ProactiveResponse>("/api/pet/proactive");
 }
 
 export function postPetEvent(event: PetEventType): Promise<PetResponse> {

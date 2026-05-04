@@ -63,6 +63,15 @@ export type PetResponse = {
   };
 };
 
+export type DeviceStatePayload = {
+  battery: number | null;
+  is_charging: boolean | null;
+};
+
+export type ProactiveResponse =
+  | ({ active: true } & PetResponse)
+  | { active: false };
+
 export type AudioUnderstanding = {
   user_text: string;
   detected_emotion:

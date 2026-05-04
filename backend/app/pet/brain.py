@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.config import Settings
-from app.pet.prompt_builder import build_pet_messages
+from app.pet.prompt_builder import build_pet_messages, build_skill_plan_messages
 from app.providers.llm_mimo import LLMProvider
 from app.runtime.context import RuntimeContext
 from app.runtime.events import PetEvent
@@ -16,4 +16,10 @@ class PetBrain:
 
     def generate_action(self, event: PetEvent, context: RuntimeContext) -> Dict[str, Any]:
         messages = build_pet_messages(self.settings, event, context)
+        return self.provider.complete_json(messages)
+
+    def generate_skill_plan(
+        self, event: PetEvent, context: RuntimeContext
+    ) -> Dict[str, Any]:
+        messages = build_skill_plan_messages(self.settings, event, context)
         return self.provider.complete_json(messages)

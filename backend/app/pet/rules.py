@@ -40,6 +40,14 @@ EVENT_DELTAS = {
     "voice_message": {"intimacy": 1, "loneliness": -4},
     "wake_phrase": {"mood": "happy", "loneliness": -3},
     "exit_phrase": {"mood": "sleepy", "sleepiness": 2},
+    "morning": {"mood": "happy", "energy": 1, "loneliness": -1},
+    "night": {"mood": "sleepy", "sleepiness": 3, "energy": -1},
+    "long_idle": {"mood": "lonely", "loneliness": 2},
+    "battery_low": {"mood": "sleepy", "energy": -3, "sleepiness": 2},
+    "charging_started": {"mood": "happy", "energy": 5, "hunger": -5},
+    "charging_stopped": {"mood": "idle"},
+    "sleepy_time": {"mood": "sleepy", "sleepiness": 3},
+    "user_return": {"mood": "happy", "loneliness": -5},
 }
 
 
