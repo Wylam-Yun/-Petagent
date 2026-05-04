@@ -15,6 +15,7 @@ from app.providers.audio_omni import (
     MiMoAudioUnderstandingProvider,
     MockAudioUnderstandingProvider,
 )
+from app.providers.asr_http import HttpASRProvider
 from app.providers.asr_mock import MockASRProvider
 from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
@@ -47,6 +48,8 @@ def _select_audio_provider(settings: Settings, testing: bool):
 def _select_asr_provider(settings: Settings, testing: bool):
     if testing or settings.asr is None:
         return MockASRProvider()
+    if settings.asr.name in {"http_asr", "nvidia_http_asr"}:
+        return HttpASRProvider(settings.asr)
     return NvidiaParakeetASRProvider(settings.asr)
 
 

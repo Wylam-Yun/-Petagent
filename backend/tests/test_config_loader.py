@@ -91,13 +91,15 @@ providers:
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
   asr:
-    name: nvidia_parakeet
+    name: nvidia_http_asr
     model: parakeet-ctc-0.6b-zh-cn
-    base_url_env: NVIDIA_RIVA_SERVER
+    base_url_env: NVIDIA_HTTP_ASR_BASE_URL
     api_key_env: NVIDIA_API_KEY
     timeout_seconds: 15
-    function_id_env: NVIDIA_PARKEET_FUNCTION_ID
+    endpoint: /v1/audio/transcriptions
     language_code: zh-CN
+    auth_scheme: bearer
+    proxy_url_env: PETAGENT_ASR_PROXY_URL
   tts:
     name: mimo
     model: mimo-v2.5-tts
@@ -118,9 +120,9 @@ providers:
         env={
             "MIMO_BASE_URL": "https://mimo.example/v1",
             "MIMO_API_KEY": "test-mimo-secret",
-            "NVIDIA_RIVA_SERVER": "grpc.nvcf.nvidia.com:443",
+            "NVIDIA_HTTP_ASR_BASE_URL": "https://asr.example",
             "NVIDIA_API_KEY": "test-nvidia-secret",
-            "NVIDIA_PARKEET_FUNCTION_ID": "function-id",
+            "PETAGENT_ASR_PROXY_URL": "http://127.0.0.1:7897",
         },
     )
 
@@ -128,8 +130,10 @@ providers:
     assert settings.llm_fast.model == "mimo-v2-flash"
     assert settings.asr is not None
     assert settings.asr.model == "parakeet-ctc-0.6b-zh-cn"
-    assert settings.asr.base_url == "grpc.nvcf.nvidia.com:443"
-    assert settings.asr.extra["function_id"] == "function-id"
+    assert settings.asr.name == "nvidia_http_asr"
+    assert settings.asr.base_url == "https://asr.example"
+    assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
+    assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
     assert settings.voice_routing["allowed_audio_types"] == ["audio/wav"]
     assert settings.voice_routing["max_audio_bytes"] == 4096
     rendered = repr(settings)
