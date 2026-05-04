@@ -74,7 +74,10 @@ class SkillRegistry:
                 error="skill failed",
             )
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
 
     def run_skill_dict(self, skill_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return asdict(self.run_skill(skill_id, payload))
