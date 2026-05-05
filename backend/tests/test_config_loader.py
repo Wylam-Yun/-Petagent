@@ -92,7 +92,7 @@ providers:
     timeout_seconds: 60
   asr:
     name: configurable_http_asr
-    model: parakeet-ctc-0.6b-zh-cn
+    model: TeleAI/TeleSpeechASR
     base_url_env:
       - ASR_BASE_URL
       - NVIDIA_HTTP_ASR_BASE_URL
@@ -127,8 +127,8 @@ providers:
         env={
             "MIMO_BASE_URL": "https://mimo.example/v1",
             "MIMO_API_KEY": "test-mimo-secret",
-            "NVIDIA_HTTP_ASR_BASE_URL": "https://asr.example",
-            "NVIDIA_API_KEY": "test-nvidia-secret",
+            "ASR_BASE_URL": "https://api.siliconflow.cn",
+            "ASR_API_KEY": "test-asr-secret",
             "PETAGENT_ASR_PROXY_URL": "http://127.0.0.1:7897",
         },
     )
@@ -136,10 +136,10 @@ providers:
     assert settings.llm_fast is not None
     assert settings.llm_fast.model == "mimo-v2-flash"
     assert settings.asr is not None
-    assert settings.asr.model == "parakeet-ctc-0.6b-zh-cn"
+    assert settings.asr.model == "TeleAI/TeleSpeechASR"
     assert settings.asr.name == "configurable_http_asr"
-    assert settings.asr.base_url == "https://asr.example"
-    assert settings.asr.api_key == "test-nvidia-secret"
+    assert settings.asr.base_url == "https://api.siliconflow.cn"
+    assert settings.asr.api_key == "test-asr-secret"
     assert settings.asr.extra["protocol"] == "http"
     assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
     assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
@@ -147,4 +147,4 @@ providers:
     assert settings.voice_routing["max_audio_bytes"] == 4096
     rendered = repr(settings)
     assert "test-mimo-secret" not in rendered
-    assert "test-nvidia-secret" not in rendered
+    assert "test-asr-secret" not in rendered

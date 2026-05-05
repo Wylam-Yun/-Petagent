@@ -43,9 +43,10 @@ def test_tick_update_recovers_energy_while_charging():
     state["energy"] = 40
     state["hunger"] = 40
     state_store.save_state(state)
-    tick.set_last_tick(datetime.utcnow() - timedelta(minutes=10))
+    now = datetime(2026, 5, 5, 12, 0, 0)
+    tick.set_last_tick(now - timedelta(minutes=10))
 
-    updated = tick.apply_if_due(now=datetime.utcnow())
+    updated = tick.apply_if_due(now=now)
 
     assert updated["energy"] > 40
     assert updated["hunger"] < 40

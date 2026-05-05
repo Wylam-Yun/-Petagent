@@ -19,7 +19,7 @@ providers:
     timeout_seconds: 60
   asr:
     name: configurable_http_asr
-    model: parakeet-ctc-0.6b-zh-cn
+    model: TeleAI/TeleSpeechASR
     base_url_env:
       - ASR_BASE_URL
       - NVIDIA_HTTP_ASR_BASE_URL
