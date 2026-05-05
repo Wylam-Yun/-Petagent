@@ -79,11 +79,13 @@ providers:
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
   llm_fast:
-    name: mimo_flash
-    model: mimo-v2-flash
+    name: mimo_v25_fast
+    model: mimo-v2.5
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 20
+    chat_template_kwargs:
+      enable_thinking: false
   audio_understanding:
     name: mimo
     model: mimo-v2-omni
@@ -134,7 +136,11 @@ providers:
     )
 
     assert settings.llm_fast is not None
-    assert settings.llm_fast.model == "mimo-v2-flash"
+    assert settings.llm_fast.name == "mimo_v25_fast"
+    assert settings.llm_fast.model == "mimo-v2.5"
+    assert settings.llm_fast.extra["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }
     assert settings.asr is not None
     assert settings.asr.model == "TeleAI/TeleSpeechASR"
     assert settings.asr.name == "configurable_http_asr"

@@ -66,17 +66,27 @@ class MiMoLLMProvider:
         if not self.provider_config.base_url:
             raise RuntimeError("MIMO_BASE_URL is not configured")
 
+        payload = {
+            "model": self.provider_config.model,
+            "messages": messages,
+            "temperature": self.provider_config.extra.get("temperature", 0.8),
+        }
+        for key in (
+            "chat_template_kwargs",
+            "max_tokens",
+            "top_p",
+            "response_format",
+        ):
+            if key in self.provider_config.extra:
+                payload[key] = self.provider_config.extra[key]
+
         response = requests.post(
             self.provider_config.base_url.rstrip("/") + "/chat/completions",
             headers={
                 "api-key": api_key,
                 "content-type": "application/json",
             },
-            json={
-                "model": self.provider_config.model,
-                "messages": messages,
-                "temperature": 0.8,
-            },
+            json=payload,
             timeout=self.provider_config.timeout_seconds,
         )
         response.raise_for_status()
