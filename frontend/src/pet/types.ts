@@ -91,6 +91,11 @@ export type VoiceChatResponse = PetResponse & {
   user_text: string;
   audio_understanding: AudioUnderstanding;
   voice_route?: VoiceRouteInfo;
+  activation?: {
+    type: "wake" | "exit";
+    active: boolean;
+    session_id: string | null;
+  };
 };
 
 export type VoiceRouteInfo = {

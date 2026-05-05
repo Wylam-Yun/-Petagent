@@ -17,6 +17,7 @@ ALLOWED_EVENTS = {
     "voice_message",
     "wake_phrase",
     "exit_phrase",
+    "context_refresh",
     "morning",
     "night",
     "long_idle",

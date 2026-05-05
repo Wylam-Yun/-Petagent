@@ -61,3 +61,13 @@ proactive:
   mode: low_cost
   synthesize_voice: false
   poll_interval_seconds: 30
+cognition_context:
+  raw_retention_hours: 24
+  raw_max_rows: 3000
+  idle_episode_minutes: 45
+  recent_exact_turns: 6
+  recent_episode_summaries: 2
+  relevant_memory_items: 4
+  max_context_chars: 4500
+  timezone: Asia/Shanghai
+  debug_enabled: false

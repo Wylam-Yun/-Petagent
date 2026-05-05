@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api import activation as activation_api
+from app.api import context as context_api
 from app.api import device as device_api
 from app.api import pet as pet_api
 from app.api import runtime as runtime_api
@@ -25,6 +26,8 @@ from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
 from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
+from app.runtime.context_manager import ContextManager
+from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.device import DeviceStateStore
 from app.runtime.proactive import ProactiveService
@@ -74,6 +77,12 @@ def create_app(testing: bool = False) -> FastAPI:
     tick_service = TickService(state_store, device_store)
     proactive_service = ProactiveService(state_store, device_store)
     registry = SkillRegistry(settings=settings, device_store=device_store)
+
+    # Stage 3.5: Cognition Context stores
+    episode_manager = EpisodeStore(state_store.connection)
+    event_log_store = EventLogStore(state_store.connection)
+    cc_config = settings.app_config.get("cognition_context", {})
+    context_manager = ContextManager(cc_config)
     slow_llm_provider = _select_llm_provider(
         settings, testing, settings.llm, "mock_slow_llm"
     )
@@ -95,6 +104,9 @@ def create_app(testing: bool = False) -> FastAPI:
         interaction_log=interaction_log,
         device_store=device_store,
         tick_service=tick_service,
+        episode_manager=episode_manager,
+        event_log_store=event_log_store,
+        context_manager=context_manager,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -108,6 +120,7 @@ def create_app(testing: bool = False) -> FastAPI:
         asr_min_confidence=float(settings.voice_routing.get("asr_min_confidence", 0.0)),
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
+        activation_manager=activation_manager,
     )
 
     app = FastAPI(title="PetAgent Momo", version=settings.schema_version)
@@ -132,6 +145,9 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.voice_pipeline = voice_pipeline
     app.state.activation_manager = activation_manager
     app.state.proactive_brain = proactive_brain
+    app.state.episode_manager = episode_manager
+    app.state.event_log_store = event_log_store
+    app.state.context_manager = context_manager
 
     @app.get("/api/health")
     def health():
@@ -143,6 +159,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(activation_api.router)
     app.include_router(device_api.router)
     app.include_router(skills_api.router)
+    app.include_router(context_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)

@@ -85,4 +85,6 @@ async def post_voice_chat(
     route_info["timings_ms"] = dict(route_info.get("timings_ms", {}))
     route_info["timings_ms"].setdefault("upload_save", upload_save_ms)
     body["voice_route"] = route_info
+    if result.activation is not None:
+        body["activation"] = result.activation
     return body

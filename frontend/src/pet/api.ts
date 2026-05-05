@@ -76,6 +76,23 @@ export function exitMomo(phrase: string, confidence: number): Promise<Activation
   });
 }
 
+export type ContextRefreshResponse = {
+  ok: boolean;
+  episode: {
+    episode_id: string;
+    status: string;
+    started_at_utc: string;
+  };
+  reply: string;
+};
+
+export function refreshContext(): Promise<ContextRefreshResponse> {
+  return requestJson<ContextRefreshResponse>("/api/context/refresh", {
+    method: "POST",
+    headers: { "content-type": "application/json" }
+  });
+}
+
 function eventDescription(event: PetEventType): string {
   switch (event) {
     case "pet_head":

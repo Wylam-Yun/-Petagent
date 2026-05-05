@@ -11,6 +11,7 @@ import {
   getPetState,
   getProactiveEvent,
   postPetEvent,
+  refreshContext,
   reportDeviceState,
   wakeMomo
 } from "./pet/api";
@@ -161,6 +162,13 @@ function App() {
   }
 
   async function handleVoiceResponse(response: VoiceChatResponse) {
+    // If backend already handled wake/exit via VoicePipeline, apply directly
+    if (response.activation) {
+      setActiveSession(response.activation.active ? response.activation.session_id : null);
+      applyPetResponse(response);
+      return;
+    }
+
     const intent = detectActivationIntent(
       response.user_text,
       response.audio_understanding.confidence
@@ -212,6 +220,21 @@ function App() {
     }
   }
 
+  async function handleRefreshContext() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await refreshContext();
+      setBubbleText(response.reply);
+      setFaceType("idle");
+      setAnimation("breathing");
+    } catch {
+      setBubbleText("换个话题的时候出了点小状况。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
       <StatusBar state={petState} />
@@ -231,6 +254,15 @@ function App() {
           onVoiceResponse={handleVoiceResponse}
         />
         <TouchArea disabled={busy || phase === "thinking"} onPetEvent={handlePetEvent} />
+      </div>
+      <div className="secondary-actions">
+        <button
+          className="context-refresh-btn"
+          disabled={busy}
+          onClick={handleRefreshContext}
+        >
+          换个话题
+        </button>
       </div>
     </main>
   );

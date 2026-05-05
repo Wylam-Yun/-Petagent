@@ -58,3 +58,4 @@ class VoicePipelineResult:
     response: Any
     route_info: VoiceRouteInfo
     fallback_reason: Optional[str] = None
+    activation: Optional[Dict[str, Any]] = None
