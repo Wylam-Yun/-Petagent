@@ -93,6 +93,20 @@ export function refreshContext(): Promise<ContextRefreshResponse> {
   });
 }
 
+export type RuntimeResetResponse = {
+  ok: boolean;
+  pet_state: PetState;
+  reply: string;
+};
+
+export function resetRuntime(): Promise<RuntimeResetResponse> {
+  return requestJson<RuntimeResetResponse>("/api/runtime/reset", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "重新认识" })
+  });
+}
+
 function eventDescription(event: PetEventType): string {
   switch (event) {
     case "pet_head":

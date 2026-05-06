@@ -27,6 +27,8 @@ class ContextManager:
         memory_store: Any = None,
         device_state: Optional[Dict[str, Any]] = None,
         skill_results: Optional[List[Dict[str, Any]]] = None,
+        memory_manager: Any = None,
+        episode_summary_store: Any = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
         now_utc = datetime.utcnow()
@@ -69,19 +71,42 @@ class ContextManager:
                 recent_exact_events.append(entry)
             recent_exact_events.reverse()
 
-        # Relevant memories
-        relevant_memories: List[str] = []
-        if memory_store:
+        # Scored memories from MemoryManager (Stage 3.6)
+        relevant_memories: List[Dict[str, Any]] = []
+        if memory_manager is not None:
+            user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")
             try:
-                relevant_memories = memory_store.recent_memory(
-                    limit=self.relevant_memory_items
+                relevant_memories = memory_manager.scored_memories(
+                    limit=self.relevant_memory_items,
+                    user_text=user_text,
                 )
             except Exception:
                 relevant_memories = []
+        elif memory_store is not None:
+            # Backward compat: old MemoryStore returns List[str]
+            try:
+                raw = memory_store.recent_memory(limit=self.relevant_memory_items)
+                relevant_memories = [{"content": m, "type": "unknown"} for m in raw]
+            except Exception:
+                relevant_memories = []
 
-        # Episode summaries and important quotes are placeholders for Stage 3.6
+        # Episode summaries (Stage 3.6)
         episode_summaries: List[Dict[str, Any]] = []
+        if episode_summary_store is not None:
+            try:
+                episode_summaries = episode_summary_store.recent(
+                    limit=self.recent_episode_summaries
+                )
+            except Exception:
+                episode_summaries = []
+
+        # Important quotes from memory table (Stage 3.6)
         important_quotes: List[Dict[str, Any]] = []
+        if memory_manager is not None:
+            try:
+                important_quotes = memory_manager.important_quotes(limit=4)
+            except Exception:
+                important_quotes = []
 
         # Build context and trim to budget
         context = {

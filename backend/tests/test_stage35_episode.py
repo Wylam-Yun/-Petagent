@@ -12,11 +12,13 @@ def test_consecutive_voice_events_same_episode():
     state_store = PetStateStore(None)
     episodes = EpisodeStore(state_store.connection)
 
-    ep1 = episodes.get_or_create_current()
+    ep1, closed1 = episodes.get_or_create_current()
+    assert closed1 is None
     episodes.update_event_count(ep1["episode_id"])
     episodes.update_event_count(ep1["episode_id"])
 
-    ep2 = episodes.get_or_create_current()
+    ep2, closed2 = episodes.get_or_create_current()
+    assert closed2 is None
     assert ep2["episode_id"] == ep1["episode_id"]
     assert ep2["event_count"] == 2
 
@@ -26,13 +28,15 @@ def test_45min_idle_creates_new_episode():
     episodes = EpisodeStore(state_store.connection)
 
     old_time = (datetime.utcnow() - timedelta(minutes=50)).isoformat()
-    ep1 = episodes.get_or_create_current(now_utc=old_time)
+    ep1, closed1 = episodes.get_or_create_current(now_utc=old_time)
+    assert closed1 is None
 
     now = datetime.utcnow().isoformat()
-    ep2 = episodes.get_or_create_current(now_utc=now, idle_minutes=45)
+    ep2, closed2 = episodes.get_or_create_current(now_utc=now, idle_minutes=45)
 
     assert ep2["episode_id"] != ep1["episode_id"]
     assert ep2["status"] == "open"
+    assert closed2 == ep1["episode_id"]  # idle timeout returns closed episode id
 
     # Old episode should be closed
     old = episodes.get_episode(ep1["episode_id"])
@@ -44,7 +48,7 @@ def test_context_refresh_closes_and_creates_episode():
     state_store = PetStateStore(None)
     episodes = EpisodeStore(state_store.connection)
 
-    ep1 = episodes.get_or_create_current()
+    ep1, _ = episodes.get_or_create_current()
     new_ep = episodes.refresh_topic()
 
     assert new_ep["episode_id"] != ep1["episode_id"]
@@ -59,7 +63,7 @@ def test_exit_phrase_closes_episode():
     state_store = PetStateStore(None)
     episodes = EpisodeStore(state_store.connection)
 
-    ep1 = episodes.get_or_create_current()
+    ep1, _ = episodes.get_or_create_current()
     episodes.update_event_count(ep1["episode_id"])
     closed_id = episodes.close_current("exit_phrase")
 

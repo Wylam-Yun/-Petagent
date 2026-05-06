@@ -71,3 +71,12 @@ cognition_context:
   max_context_chars: 4500
   timezone: Asia/Shanghai
   debug_enabled: false
+memory:
+  raw_retention_hours: 24
+  episode_summary_days: 7
+  daily_summary_days: 30
+  max_candidate_chars: 160
+  max_memory_items_in_context: 4
+  curator_batch_size: 8
+  maintenance_min_interval_seconds: 300
+  maintenance_max_items_per_tick: 8

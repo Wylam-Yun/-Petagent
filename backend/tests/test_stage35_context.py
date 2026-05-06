@@ -13,7 +13,7 @@ def test_context_manager_respects_budget():
     episodes = EpisodeStore(state_store.connection)
     event_log = EventLogStore(state_store.connection)
 
-    episode = episodes.get_or_create_current()
+    episode, _ = episodes.get_or_create_current()
     cm = ContextManager({"max_context_chars": 500, "recent_exact_turns": 6})
 
     # Add many events to exceed budget
@@ -131,7 +131,7 @@ def test_episode_rollover_on_idle():
 
     # Create episode at old time
     old_time = (datetime.utcnow() - timedelta(minutes=50)).isoformat()
-    ep1 = episodes.get_or_create_current(now_utc=old_time)
+    ep1, _ = episodes.get_or_create_current(now_utc=old_time)
     event_log.record(
         event_id="evt-old",
         episode_id=ep1["episode_id"],
@@ -143,10 +143,11 @@ def test_episode_rollover_on_idle():
 
     # Now trigger rollover
     event = PetEvent(type="voice_message", source="voice_fast", payload={"user_text": "新消息"})
+    ep2, _ = episodes.get_or_create_current()
     context = cm.build(
         event=event,
         pet_state=state_store.get_state(),
-        episode=episodes.get_or_create_current(),
+        episode=ep2,
         event_log_store=event_log,
     )
 

@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import activation as activation_api
 from app.api import context as context_api
 from app.api import device as device_api
+from app.api import memory as memory_api
 from app.api import pet as pet_api
 from app.api import runtime as runtime_api
 from app.api import skills as skills_api
@@ -30,8 +31,19 @@ from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.device import DeviceStateStore
+from app.runtime.maintenance import MaintenanceService
+from app.runtime.memory_curator import MemoryCurator
+from app.runtime.memory_store import (
+    DailySummaryStore,
+    EpisodeSummaryStore,
+    MaintenanceStateStore,
+    MemoryCandidateStore,
+    MemoryManager,
+    SummaryJobStore,
+)
 from app.runtime.proactive import ProactiveService
 from app.runtime.registry import SkillRegistry
+from app.runtime.summary_manager import SummaryManager
 from app.runtime.tick import TickService
 from app.runtime.voice_pipeline import VoicePipeline
 
@@ -83,6 +95,16 @@ def create_app(testing: bool = False) -> FastAPI:
     event_log_store = EventLogStore(state_store.connection)
     cc_config = settings.app_config.get("cognition_context", {})
     context_manager = ContextManager(cc_config)
+
+    # Stage 3.6: Memory stores and managers
+    memory_config = settings.app_config.get("memory", {})
+    memory_manager = MemoryManager(state_store.connection)
+    memory_candidate_store = MemoryCandidateStore(state_store.connection)
+    summary_job_store = SummaryJobStore(state_store.connection)
+    episode_summary_store = EpisodeSummaryStore(state_store.connection)
+    daily_summary_store = DailySummaryStore(state_store.connection)
+    maintenance_state = MaintenanceStateStore(state_store.connection)
+
     slow_llm_provider = _select_llm_provider(
         settings, testing, settings.llm, "mock_slow_llm"
     )
@@ -92,6 +114,33 @@ def create_app(testing: bool = False) -> FastAPI:
     brain = PetBrain(settings, slow_llm_provider)
     fast_brain = PetBrain(settings, fast_llm_provider)
     proactive_brain = PetBrain(settings, ProactiveRuleProvider())
+
+    memory_curator = MemoryCurator(
+        brain_provider=slow_llm_provider,
+        memory_manager=memory_manager,
+        max_batch=memory_config.get("curator_batch_size", 8),
+    )
+    summary_manager = SummaryManager(
+        brain_provider=slow_llm_provider,
+        episode_summary_store=episode_summary_store,
+        daily_summary_store=daily_summary_store,
+        candidate_store=memory_candidate_store,
+        timezone_name=cc_config.get("timezone", "Asia/Shanghai"),
+    )
+    maintenance_service = MaintenanceService(
+        curator=memory_curator,
+        summary_manager=summary_manager,
+        candidate_store=memory_candidate_store,
+        summary_job_store=summary_job_store,
+        memory_manager=memory_manager,
+        episode_summary_store=episode_summary_store,
+        daily_summary_store=daily_summary_store,
+        maintenance_state=maintenance_state,
+        event_log_store=event_log_store,
+        episode_store=episode_manager,
+        config=memory_config,
+    )
+
     audio_provider = _select_audio_provider(settings, testing)
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings, state_store.connection)
@@ -107,6 +156,11 @@ def create_app(testing: bool = False) -> FastAPI:
         episode_manager=episode_manager,
         event_log_store=event_log_store,
         context_manager=context_manager,
+        memory_candidate_store=memory_candidate_store,
+        summary_job_store=summary_job_store,
+        maintenance_service=maintenance_service,
+        memory_manager=memory_manager,
+        episode_summary_store=episode_summary_store,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -148,6 +202,15 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.episode_manager = episode_manager
     app.state.event_log_store = event_log_store
     app.state.context_manager = context_manager
+    app.state.memory_manager = memory_manager
+    app.state.memory_candidate_store = memory_candidate_store
+    app.state.summary_job_store = summary_job_store
+    app.state.episode_summary_store = episode_summary_store
+    app.state.daily_summary_store = daily_summary_store
+    app.state.maintenance_state = maintenance_state
+    app.state.memory_curator = memory_curator
+    app.state.summary_manager = summary_manager
+    app.state.maintenance_service = maintenance_service
 
     @app.get("/api/health")
     def health():
@@ -160,6 +223,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(device_api.router)
     app.include_router(skills_api.router)
     app.include_router(context_api.router)
+    app.include_router(memory_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)

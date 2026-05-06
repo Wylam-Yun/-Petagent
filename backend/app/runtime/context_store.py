@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 
@@ -65,8 +65,13 @@ class EpisodeStore:
 
     def get_or_create_current(
         self, now_utc: Optional[str] = None, idle_minutes: int = 45
-    ) -> Dict[str, Any]:
-        """Return the current open episode, creating one if needed."""
+    ) -> Tuple[Dict[str, Any], Optional[str]]:
+        """Return (current_episode, closed_episode_id_or_None).
+
+        When idle timeout triggers, the old episode is closed and
+        closed_episode_id is returned so the dispatcher can enqueue
+        a summary job.
+        """
         now = now_utc or datetime.utcnow().isoformat()
         with self.connection.locked():
             row = self.connection.execute(
@@ -82,10 +87,12 @@ class EpisodeStore:
             if row is not None:
                 last_event = row["last_event_at_utc"]
                 if self._should_rollover(last_event, now, idle_minutes):
-                    self._close(row["episode_id"], "idle_timeout", now)
-                    return self._create(now)
-                return dict(row)
-            return self._create(now)
+                    closed_id = row["episode_id"]
+                    self._close(closed_id, "idle_timeout", now)
+                    new_ep = self._create(now)
+                    return new_ep, closed_id
+                return dict(row), None
+            return self._create(now), None
 
     def peek_current(self) -> Optional[Dict[str, Any]]:
         """Return the current open episode without creating one. Returns None if no open episode."""

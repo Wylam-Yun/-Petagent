@@ -442,6 +442,7 @@ button {
 .secondary-actions {
   display: flex;
   justify-content: center;
+  gap: 12px;
   padding-bottom: 8px;
 }
 
@@ -462,6 +463,27 @@ button {
 }
 
 .context-refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1px solid rgba(220, 60, 60, 0.25);
+  border-radius: 16px;
+  padding: 6px 18px;
+  font-size: 0.82rem;
+  color: rgba(220, 60, 60, 0.6);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.reset-btn:hover:not(:disabled) {
+  color: rgba(220, 60, 60, 0.85);
+  border-color: rgba(220, 60, 60, 0.45);
+}
+
+.reset-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

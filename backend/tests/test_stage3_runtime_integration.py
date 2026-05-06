@@ -38,6 +38,9 @@ def test_voice_chat_can_persist_memory_update_from_brain():
             }
 
     app.state.voice_pipeline.fast_brain.provider = MemoryLLM()
+
+    # Disable maintenance tick so candidates aren't processed mid-test
+    app.state.dispatcher.maintenance_service = None
     client = TestClient(app)
 
     response = client.post(
@@ -46,7 +49,10 @@ def test_voice_chat_can_persist_memory_update_from_brain():
     )
 
     assert response.status_code == 200
-    assert "用户今天很累，需要温柔陪伴。" in app.state.memory_store.recent_memory()
+    # Stage 3.6: memory_update goes to candidate store, not directly to memory
+    pending = app.state.memory_candidate_store.pending(limit=5)
+    texts = [c["candidate_text"] for c in pending]
+    assert "用户今天很累，需要温柔陪伴。" in texts
 
 
 def test_voice_weather_question_uses_skill_plan_before_final_reply():

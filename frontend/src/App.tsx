@@ -13,6 +13,7 @@ import {
   postPetEvent,
   refreshContext,
   reportDeviceState,
+  resetRuntime,
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
@@ -235,6 +236,27 @@ function App() {
     }
   }
 
+  async function handleResetRuntime() {
+    if (busy) return;
+    const confirmed = window.confirm(
+      "Momo 会忘掉测试记忆，并回到初始状态。确定要重新认识吗？"
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const response = await resetRuntime();
+      setPetState(response.pet_state);
+      setBubbleText(response.reply);
+      setFaceType("idle");
+      setAnimation("breathing");
+      setActiveSession(null);
+    } catch {
+      setBubbleText("重新认识的时候出了点小状况。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
       <StatusBar state={petState} />
@@ -262,6 +284,13 @@ function App() {
           onClick={handleRefreshContext}
         >
           换个话题
+        </button>
+        <button
+          className="reset-btn"
+          disabled={busy}
+          onClick={handleResetRuntime}
+        >
+          重新认识
         </button>
       </div>
     </main>
