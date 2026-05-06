@@ -13,6 +13,14 @@ from app.runtime.memory_store import (
 
 logger = logging.getLogger(__name__)
 
+_TZ_OFFSETS = {
+    "Asia/Shanghai": timedelta(hours=8),
+    "Asia/Tokyo": timedelta(hours=9),
+    "US/Eastern": timedelta(hours=-5),
+    "US/Pacific": timedelta(hours=-8),
+    "Europe/London": timedelta(hours=0),
+}
+
 EPISODE_SUMMARY_PROMPT = """你是 Momo 的记忆助手。请根据以下对话事件，生成一份 episode 摘要。
 
 输出 JSON：
@@ -181,11 +189,11 @@ class SummaryManager:
         if not episode_summaries:
             return None
 
-        # Filter to today's episodes (approximate by checking ended_at)
+        # Filter to today's episodes by converting ended_at_utc to local date
         today_summaries = []
         for ep in episode_summaries:
             ended = ep.get("ended_at_utc", "")
-            if ended and ended.startswith(local_date[:7]):  # Same month at least
+            if ended and self._utc_to_local_date(ended) == local_date:
                 today_summaries.append(ep)
 
         if not today_summaries:
@@ -212,11 +220,39 @@ class SummaryManager:
             stable_memory_candidates=stable_candidates[:3],
         )
 
+        # Promote stable candidates into memory_candidate for curator review
+        for cand in stable_candidates[:3]:
+            content = str(cand.get("content", "")).strip()
+            if content:
+                try:
+                    self.candidate_store.add(
+                        source_event_id="daily_summary:%s" % local_date,
+                        episode_id="",
+                        candidate_text=content[:200],
+                        trigger_reason="daily_summary",
+                    )
+                except Exception:
+                    logger.warning("Failed to enqueue daily candidate", exc_info=True)
+
         return {
             "local_date": local_date,
             "summary": summary_text,
             "key_events": key_events,
         }
+
+    def _utc_to_local_date(self, utc_iso: str) -> str:
+        """Convert a UTC ISO timestamp to local YYYY-MM-DD string."""
+        try:
+            dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            # Fallback: try parsing without timezone
+            try:
+                dt = datetime.strptime(utc_iso[:19], "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                return ""
+        offset = _TZ_OFFSETS.get(self.timezone_name, timedelta(hours=8))
+        local_dt = dt + offset
+        return local_dt.strftime("%Y-%m-%d")
 
     def cleanup_expired(self) -> Dict[str, int]:
         """Clean up expired summaries. Returns counts."""

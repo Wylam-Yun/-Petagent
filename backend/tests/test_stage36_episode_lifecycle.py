@@ -63,10 +63,11 @@ def test_context_refresh_closes_and_creates():
     episodes = EpisodeStore(state_store.connection)
 
     ep1, _ = episodes.get_or_create_current(now_utc="2024-01-01T00:00:00")
-    ep2 = episodes.refresh_topic(now_utc="2024-01-01T00:01:00")
+    ep2, closed_id = episodes.refresh_topic(now_utc="2024-01-01T00:01:00")
 
     assert ep2["episode_id"] != ep1["episode_id"]
     assert ep2["status"] == "open"
+    assert closed_id == ep1["episode_id"]
 
     stored1 = episodes.get_episode(ep1["episode_id"])
     assert stored1["status"] == "closed"
@@ -117,17 +118,15 @@ def test_summary_job_enqueued_on_context_refresh():
 
     ep1, _ = episodes.get_or_create_current(now_utc="2024-01-01T00:00:00")
 
-    # refresh_topic closes current and creates new
-    ep2 = episodes.refresh_topic(now_utc="2024-01-01T00:01:00")
+    # refresh_topic closes current and creates new, returns closed id
+    ep2, closed_id = episodes.refresh_topic(now_utc="2024-01-01T00:01:00")
 
-    # The old episode should be closeable — but refresh_topic doesn't return
-    # the closed id. In the dispatcher, close_current is called separately.
-    # Here we verify the old episode is closed.
     stored = episodes.get_episode(ep1["episode_id"])
     assert stored["status"] == "closed"
 
-    # Enqueue manually (dispatcher would do this)
-    sjs.enqueue(ep1["episode_id"])
+    # Enqueue summary job using the returned closed id
+    assert closed_id == ep1["episode_id"]
+    sjs.enqueue(closed_id)
     pending = sjs.pending(limit=5)
     assert len(pending) == 1
 

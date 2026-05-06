@@ -328,7 +328,7 @@ class MemoryManager:
 class MemoryCandidateStore:
     """Stores pending memory candidates for curator processing."""
 
-    VALID_REASONS = {"explicit_command", "llm_suggestion", "episode_end"}
+    VALID_REASONS = {"explicit_command", "llm_suggestion", "episode_end", "daily_summary"}
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection

@@ -49,10 +49,11 @@ def test_context_refresh_closes_and_creates_episode():
     episodes = EpisodeStore(state_store.connection)
 
     ep1, _ = episodes.get_or_create_current()
-    new_ep = episodes.refresh_topic()
+    new_ep, closed_id = episodes.refresh_topic()
 
     assert new_ep["episode_id"] != ep1["episode_id"]
     assert new_ep["status"] == "open"
+    assert closed_id == ep1["episode_id"]
 
     old = episodes.get_episode(ep1["episode_id"])
     assert old["status"] == "closed"

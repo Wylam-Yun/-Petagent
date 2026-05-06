@@ -126,11 +126,14 @@ class EpisodeStore:
             self._close(row["episode_id"], reason, now)
             return row["episode_id"]
 
-    def refresh_topic(self, now_utc: Optional[str] = None) -> Dict[str, Any]:
-        """Close current episode (reason=context_refresh) and create a new one."""
+    def refresh_topic(self, now_utc: Optional[str] = None) -> tuple:
+        """Close current episode (reason=context_refresh) and create a new one.
+
+        Returns (new_episode, closed_episode_id_or_None).
+        """
         now = now_utc or datetime.utcnow().isoformat()
-        self.close_current("context_refresh", now)
-        return self._create(now)
+        closed_id = self.close_current("context_refresh", now)
+        return self._create(now), closed_id
 
     def update_event_count(self, episode_id: str, now_utc: Optional[str] = None) -> None:
         """Increment event_count and update last_event_at for an episode."""

@@ -19,9 +19,14 @@ def context_refresh(request: Request) -> Dict[str, Any]:
     with dispatcher._event_lock:
         episode_manager = request.app.state.episode_manager
         event_log_store = request.app.state.event_log_store
+        summary_job_store = request.app.state.summary_job_store
 
         # Close old episode and create new one
-        new_episode = episode_manager.refresh_topic()
+        new_episode, closed_episode_id = episode_manager.refresh_topic()
+
+        # Enqueue summary job for the closed episode
+        if closed_episode_id and summary_job_store is not None:
+            summary_job_store.enqueue(closed_episode_id)
 
         # Record context_refresh event in the event log and update episode count
         if event_log_store is not None:

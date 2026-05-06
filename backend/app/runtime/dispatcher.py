@@ -276,9 +276,13 @@ class RuntimeDispatcher:
                     break
 
     def _try_maintenance_tick(self) -> None:
-        """Run one maintenance tick outside the event lock."""
+        """Run one maintenance tick in a background thread — never blocks the response."""
         if self.maintenance_service is None:
             return
+        t = threading.Thread(target=self._run_maintenance_tick, daemon=True)
+        t.start()
+
+    def _run_maintenance_tick(self) -> None:
         try:
             self.maintenance_service.tick()
         except Exception:
