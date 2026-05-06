@@ -35,4 +35,18 @@ fi
 cd "$PROJECT_DIR/backend"
 PYTHONPATH="$PROJECT_DIR/backend" nohup "$PYTHON_BIN" -m uvicorn app.main:app --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
 echo "$!" > "$PID_FILE"
-echo "PetAgent runtime started on $HOST:$PORT"
+echo "PetAgent runtime starting on $HOST:$PORT ..."
+
+HEALTH_URL="http://127.0.0.1:$PORT/api/health"
+ATTEMPTS=0
+MAX_ATTEMPTS=60
+while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+  if curl -s --connect-timeout 2 "$HEALTH_URL" 2>/dev/null | grep -q '"ok":true'; then
+    echo "PetAgent runtime ready on $HOST:$PORT"
+    exit 0
+  fi
+  ATTEMPTS=$((ATTEMPTS + 1))
+  sleep 2
+done
+echo "PetAgent runtime started but health check timed out after $((MAX_ATTEMPTS * 2))s"
+exit 1

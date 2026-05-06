@@ -87,6 +87,21 @@ class EpisodeStore:
                 return dict(row)
             return self._create(now)
 
+    def peek_current(self) -> Optional[Dict[str, Any]]:
+        """Return the current open episode without creating one. Returns None if no open episode."""
+        with self.connection.locked():
+            row = self.connection.execute(
+                """
+                SELECT episode_id, status, started_at_utc, ended_at_utc,
+                       last_event_at_utc, close_reason, event_count
+                FROM episode
+                WHERE status = 'open'
+                ORDER BY last_event_at_utc DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return dict(row) if row else None
+
     def close_current(self, reason: str, now_utc: Optional[str] = None) -> Optional[str]:
         """Close the current open episode. Returns the closed episode_id or None."""
         now = now_utc or datetime.utcnow().isoformat()

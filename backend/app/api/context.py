@@ -55,8 +55,8 @@ def context_debug(request: Request) -> Dict[str, Any]:
     cc_config = settings.app_config.get("cognition_context", {})
     debug_enabled = cc_config.get("debug_enabled", False)
 
-    # Current episode
-    current_episode = episode_manager.get_or_create_current()
+    # Current episode (peek only, don't create)
+    current_episode = episode_manager.peek_current()
 
     # Event count
     event_count = event_log_store.count() if event_log_store else 0
@@ -70,10 +70,11 @@ def context_debug(request: Request) -> Dict[str, Any]:
 
     if debug_enabled:
         # Return detailed info with desensitized text
+        ep_id = current_episode.get("episode_id") if current_episode else None
         recent = event_log_store.recent_events(
-            episode_id=current_episode.get("episode_id"),
+            episode_id=ep_id,
             limit=10,
-        ) if event_log_store else []
+        ) if event_log_store and ep_id else []
         desensitized_events = []
         for evt in recent:
             desensitized_events.append({
