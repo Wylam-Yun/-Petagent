@@ -65,5 +65,5 @@ providers:
     timeout_seconds: 120
     style:
       name: cute_soft
-      speed: slightly_slow
+      speed: slightly_fast
       emotion: warm

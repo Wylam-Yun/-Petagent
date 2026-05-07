@@ -3,7 +3,7 @@ from pathlib import Path
 from app.config import ProviderConfig
 from app.providers.llm_mimo import MockLLMProvider
 from app.providers.llm_mimo import MiMoLLMProvider
-from app.providers.tts_mimo import MockTTSProvider
+from app.providers.tts_mimo import MockTTSProvider, build_voice_prompt
 from app.pet.guard import guard_action
 
 
@@ -79,3 +79,11 @@ def test_mock_tts_provider_can_return_none(tmp_path: Path):
     provider = MockTTSProvider(audio_dir=tmp_path, fail=True)
 
     assert provider.synthesize("Momo 在呢。") is None
+
+
+def test_tts_voice_prompt_uses_speed_style():
+    prompt = build_voice_prompt({"speed": "slightly_fast", "emotion": "warm"}, "happy")
+
+    assert "语速稍快" in prompt
+    assert "温暖" in prompt
+    assert "开心" in prompt

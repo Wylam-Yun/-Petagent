@@ -21,6 +21,8 @@ STATE_DELTA_LIMITS = {
     "sleepiness": (-5, 5),
 }
 
+DEFAULT_MAX_REPLY_CHARS = 500
+
 FALLBACK_ACTION = {
     "reply": "嗯嗯，Momo 在这儿。",
     "mood": "happy",
@@ -65,7 +67,16 @@ def _clamp_delta(delta: Dict[str, Any]) -> Dict[str, int]:
     return guarded
 
 
-def guard_action(raw: Any) -> PetAction:
+def _trim_reply(reply: str, max_reply_chars: int) -> str:
+    max_chars = max(1, int(max_reply_chars or DEFAULT_MAX_REPLY_CHARS))
+    if len(reply) <= max_chars:
+        return reply
+    if max_chars == 1:
+        return "…"
+    return reply[: max_chars - 1] + "…"
+
+
+def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> PetAction:
     data = _parse_action(raw)
     if not data.get("reply"):
         data = dict(FALLBACK_ACTION)
@@ -89,9 +100,7 @@ def guard_action(raw: Any) -> PetAction:
     if vibration not in ALLOWED_VIBRATIONS:
         vibration = "none"
 
-    reply = str(data.get("reply", FALLBACK_ACTION["reply"])).strip()
-    if len(reply) > 45:
-        reply = reply[:44] + "…"
+    reply = _trim_reply(str(data.get("reply", FALLBACK_ACTION["reply"])).strip(), max_reply_chars)
 
     return PetAction(
         reply=reply,

@@ -167,7 +167,10 @@ class RuntimeDispatcher:
             raw_action = active_brain.generate_action(event, context)
         except Exception:
             raw_action = None
-        action = guard_action(raw_action)
+        action = guard_action(
+            raw_action,
+            max_reply_chars=self._max_reply_chars(active_brain),
+        )
 
         # 10. Apply state delta and save
         final_state = apply_state_delta(ruled_state, action.state_delta)
@@ -271,6 +274,14 @@ class RuntimeDispatcher:
                         trigger_reason="explicit_command",
                     )
                     break
+
+    def _max_reply_chars(self, brain: PetBrain) -> int:
+        persona = getattr(getattr(brain, "settings", None), "persona_config", {}) or {}
+        policy = persona.get("reply_policy") or {}
+        try:
+            return int(policy.get("max_chars", 500))
+        except (TypeError, ValueError):
+            return 500
 
     def _try_maintenance_tick(self) -> None:
         """Run one maintenance tick in a background thread — never blocks the response."""

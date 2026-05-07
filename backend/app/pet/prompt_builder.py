@@ -9,7 +9,7 @@ from app.runtime.events import PetEvent
 
 
 OUTPUT_SCHEMA_HINT = {
-    "reply": "短回复，不输出 kaomoji",
+    "reply": "自然简短的回复；需要解释或完成任务时可以适度展开；不输出 kaomoji",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
     "face_type": "同 mood 枚举",
     "animation": "breathing/bounce/droop/slowBlink/shake/wiggle/blink/tilt/jump/small",
@@ -63,6 +63,7 @@ def build_pet_messages(
     settings: Settings, event: PetEvent, context: RuntimeContext
 ) -> List[Dict[str, str]]:
     system_prompt = settings.persona_config.get("system_prompt", "")
+    reply_policy = settings.persona_config.get("reply_policy") or {}
     if event.type == "voice_message":
         system_prompt += (
             "\n\n语音事件规则：\n"
@@ -95,6 +96,8 @@ def build_pet_messages(
         skill_results=context.skill_results or None,
         device_state=context.device_state or None,
     )
+    if reply_policy:
+        payload["response_policy"] = reply_policy
     payload["output_schema"] = OUTPUT_SCHEMA_HINT
 
     return [

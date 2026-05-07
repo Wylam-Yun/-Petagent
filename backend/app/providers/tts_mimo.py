@@ -17,6 +17,39 @@ VOICE_PROMPT = (
     "不要像客服，不要像播音员，不要过度甜腻。"
 )
 
+SPEED_PROMPTS = {
+    "slightly_slow": "语速稍慢一点，像温柔贴近地说话。",
+    "normal": "语速自然。",
+    "slightly_fast": "语速稍快一点，节奏轻快但吐字清楚。",
+}
+
+EMOTION_PROMPTS = {
+    "warm": "整体情绪温暖。",
+    "happy": "整体情绪开心。",
+    "calm": "整体情绪平静。",
+}
+
+VOICE_STYLE_PROMPTS = {
+    "happy": "这句可以更开心一点。",
+    "sleepy": "这句可以更困倦、更轻一点。",
+    "shy": "这句可以更害羞、更软一点。",
+    "soft": "这句保持柔软亲近。",
+    "normal": "这句保持自然。",
+}
+
+
+def build_voice_prompt(style: Dict[str, Any], voice_style: str = "soft") -> str:
+    parts = [VOICE_PROMPT]
+    speed = str((style or {}).get("speed") or "normal")
+    emotion = str((style or {}).get("emotion") or "")
+    if speed in SPEED_PROMPTS:
+        parts.append(SPEED_PROMPTS[speed])
+    if emotion in EMOTION_PROMPTS:
+        parts.append(EMOTION_PROMPTS[emotion])
+    if voice_style in VOICE_STYLE_PROMPTS:
+        parts.append(VOICE_STYLE_PROMPTS[voice_style])
+    return "".join(parts)
+
 
 def build_tts_payload(
     *, voice_prompt: str, spoken_text: str, model: str, voice: str, audio_format: str
@@ -60,7 +93,7 @@ class MiMoTTSProvider:
             return None
 
         payload = build_tts_payload(
-            voice_prompt=VOICE_PROMPT,
+            voice_prompt=build_voice_prompt(self.settings.tts.style or {}, voice_style),
             spoken_text=text,
             model=self.settings.tts.model,
             voice=self.settings.tts.voice or "冰糖",
