@@ -15,7 +15,7 @@ from app.api import voice as voice_api
 from app.config import Settings, load_settings
 from app.db import create_state_store
 from app.pet.brain import PetBrain
-from app.pet.memory import InteractionLogStore, MemoryStore
+from app.pet.memory import InteractionLogStore
 from app.providers.audio_omni import (
     MiMoAudioUnderstandingProvider,
     MockAudioUnderstandingProvider,
@@ -83,7 +83,6 @@ def create_app(testing: bool = False) -> FastAPI:
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     state_store = create_state_store(settings, testing=testing)
-    memory_store = MemoryStore(state_store.connection)
     interaction_log = InteractionLogStore(state_store.connection)
     device_store = DeviceStateStore(state_store.connection)
     tick_service = TickService(state_store, device_store)
@@ -98,7 +97,7 @@ def create_app(testing: bool = False) -> FastAPI:
 
     # Stage 3.6: Memory stores and managers
     memory_config = settings.app_config.get("memory", {})
-    memory_manager = MemoryManager(state_store.connection)
+    memory_manager = MemoryManager(state_store.connection, config=memory_config)
     memory_candidate_store = MemoryCandidateStore(state_store.connection)
     summary_job_store = SummaryJobStore(state_store.connection)
     episode_summary_store = EpisodeSummaryStore(state_store.connection)
@@ -149,7 +148,6 @@ def create_app(testing: bool = False) -> FastAPI:
         brain=brain,
         tts_provider=_select_tts_provider(settings, testing),
         registry=registry,
-        memory_store=memory_store,
         interaction_log=interaction_log,
         device_store=device_store,
         tick_service=tick_service,
@@ -161,6 +159,7 @@ def create_app(testing: bool = False) -> FastAPI:
         maintenance_service=maintenance_service,
         memory_manager=memory_manager,
         episode_summary_store=episode_summary_store,
+        daily_summary_store=daily_summary_store,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -187,7 +186,6 @@ def create_app(testing: bool = False) -> FastAPI:
     )
     app.state.settings = settings
     app.state.state_store = state_store
-    app.state.memory_store = memory_store
     app.state.interaction_log = interaction_log
     app.state.device_store = device_store
     app.state.tick_service = tick_service

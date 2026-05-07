@@ -242,6 +242,8 @@ class MockDailyLLM:
 
 
 def test_daily_stable_candidates_promoted_to_candidate_store():
+    from datetime import datetime, timedelta, timezone
+
     state_store = PetStateStore(None)
     conn = state_store.connection
     episodes = EpisodeStore(conn)
@@ -262,16 +264,20 @@ def test_daily_stable_candidates_promoted_to_candidate_store():
         user_text="明天有面试",
         pet_reply="加油",
     )
-    sm = SummaryManager(MockQuoteLLM(), ess, dss, cs)
+    sm = SummaryManager(MockQuoteLLM(), ess, dss, cs, timezone_name="Asia/Shanghai")
     sm.generate_episode_summary(
         episode_id=ep["episode_id"],
         event_log_store=event_log,
         episode_store=episodes,
     )
 
+    # Use today's local date so episode summary's ended_at_utc matches
+    tz = timezone(timedelta(hours=8))
+    local_date = datetime.now(tz).strftime("%Y-%m-%d")
+
     # Now generate daily summary
-    sm_daily = SummaryManager(MockDailyLLM(), ess, dss, cs)
-    sm_daily.generate_daily_summary("2024-01-01")
+    sm_daily = SummaryManager(MockDailyLLM(), ess, dss, cs, timezone_name="Asia/Shanghai")
+    sm_daily.generate_daily_summary(local_date)
 
     # Stable candidates should be in candidate store with trigger_reason=daily_summary
     pending = cs.pending(limit=20)

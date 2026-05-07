@@ -197,7 +197,7 @@ class SummaryManager:
                 today_summaries.append(ep)
 
         if not today_summaries:
-            today_summaries = episode_summaries[:3]
+            return None
 
         try:
             result = self._call_daily_llm(today_summaries)

@@ -34,9 +34,19 @@ class MemoryManager:
         "habit",
     }
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(self, connection: sqlite3.Connection, config: Optional[Dict[str, Any]] = None) -> None:
         self.connection = connection
         self._migrate()
+        cfg = config or {}
+        self._TYPE_HALF_LIFE_DAYS = {
+            "user_preference": cfg.get("decay_half_life_stable_days", 90),
+            "relationship": cfg.get("decay_half_life_stable_days", 90),
+            "habit": cfg.get("decay_half_life_stable_days", 90),
+            "stable_memory": cfg.get("decay_half_life_stable_days", 90) * 2 / 3,
+            "important_quote": 30,
+            "recent_mood": cfg.get("decay_half_life_volatile_days", 14) / 2,
+            "important_event": cfg.get("decay_half_life_volatile_days", 14),
+        }
 
     def _migrate(self) -> None:
         with self.connection.locked():
@@ -163,7 +173,7 @@ class MemoryManager:
         user_text: str = "",
         exclude_expired: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Select relevant memories by type priority + time + usage + keywords."""
+        """Select relevant memories by type priority + time + decay + keywords."""
         now = datetime.utcnow().isoformat()
         with self.connection.locked():
             rows = self.connection.execute(
@@ -183,10 +193,13 @@ class MemoryManager:
 
         scored = []
         keywords = self._extract_keywords(user_text)
+        keyword_matched_ids: List[int] = []
         for row in rows:
             row_dict = dict(row)
-            score = self._score_row(row_dict, keywords)
+            score, had_keyword_match = self._score_row(row_dict, keywords)
             scored.append((score, row_dict))
+            if had_keyword_match:
+                keyword_matched_ids.append(row_dict["id"])
 
         scored.sort(key=lambda x: x[0], reverse=True)
         result = []
@@ -201,18 +214,39 @@ class MemoryManager:
                 entry["summary"] = row_dict["summary"]
             result.append(entry)
 
-        # Update last_used_at for selected memories
-        if result:
-            ids = [e["id"] for e in result]
-            placeholders = ",".join("?" for _ in ids)
-            with self.connection.locked():
-                self.connection.execute(
-                    "UPDATE memory SET last_used_at = ?, usage_count = usage_count + 1 WHERE id IN (%s)" % placeholders,
-                    (now, *ids),
-                )
-                self.connection.commit()
+        # Only increment usage_count for keyword-matched memories (not all selected)
+        if keyword_matched_ids:
+            matched_in_result = [mid for mid in keyword_matched_ids if any(e["id"] == mid for e in result)]
+            if matched_in_result:
+                placeholders = ",".join("?" for _ in matched_in_result)
+                with self.connection.locked():
+                    self.connection.execute(
+                        "UPDATE memory SET last_used_at = ?, usage_count = usage_count + 1 WHERE id IN (%s)" % placeholders,
+                        (now, *matched_in_result),
+                    )
+                    self.connection.commit()
 
         return result
+
+    def record_usage(self, memory_id: int) -> None:
+        """Increment usage_count for a specific memory. Called on keyword match."""
+        now = datetime.utcnow().isoformat()
+        with self.connection.locked():
+            self.connection.execute(
+                "UPDATE memory SET last_used_at = ?, usage_count = usage_count + 1 WHERE id = ?",
+                (now, memory_id),
+            )
+            self.connection.commit()
+
+    def _decay_factor(self, created_at: str, memory_type: str) -> float:
+        """Return 0.0-1.0 decay multiplier based on age."""
+        try:
+            created = datetime.fromisoformat(created_at)
+            age_days = max(0, (datetime.utcnow() - created).total_seconds() / 86400)
+        except (ValueError, TypeError):
+            return 1.0
+        half_life = self._TYPE_HALF_LIFE_DAYS.get(memory_type, 30)
+        return 0.5 ** (age_days / half_life)
 
     def important_quotes(self, limit: int = 4) -> List[Dict[str, Any]]:
         """Fetch recent important_quote memories."""
@@ -268,7 +302,8 @@ class MemoryManager:
             ).fetchone()
         return row["cnt"] if row else 0
 
-    def _score_row(self, row: Dict[str, Any], keywords: List[str]) -> float:
+    def _score_row(self, row: Dict[str, Any], keywords: List[str]) -> tuple:
+        """Score a memory row. Returns (score, had_keyword_match)."""
         score = 0.0
         # Type priority
         type_priority = {
@@ -284,11 +319,6 @@ class MemoryManager:
 
         # Importance bonus
         score += row.get("importance", 3) * 0.5
-
-        # Usage bonus
-        usage = row.get("usage_count", 0)
-        if usage > 0:
-            score += min(usage, 10) * 0.3
 
         # Recency bonus (only for non-stable types)
         mem_type = row.get("type", "")
@@ -306,23 +336,37 @@ class MemoryManager:
                     pass
 
         # Keyword match bonus
+        had_keyword_match = False
         content = row.get("content", "")
         if keywords and content:
             matches = sum(1 for kw in keywords if kw in content)
-            score += matches * 2
+            if matches > 0:
+                had_keyword_match = True
+                score += matches * 2
 
-        return score
+        # Apply decay to total score (stable types decay slowly, volatile fast)
+        created_at = row.get("created_at", "")
+        decay = self._decay_factor(created_at, mem_type)
+
+        # Very restrained usage boost: capped at 15%
+        usage = row.get("usage_count", 0)
+        usage_boost = 1.0 + min(usage * 0.03, 0.15)
+
+        final_score = score * decay * usage_boost
+        return final_score, had_keyword_match
 
     def _extract_keywords(self, text: str) -> List[str]:
-        """Extract simple Chinese keywords from text."""
+        """Extract simple Chinese keywords from text using bigrams."""
         if not text:
             return []
-        # Simple approach: split on punctuation and whitespace, filter short tokens
         import re
-        tokens = re.findall(r"[\u4e00-\u9fff]+|[a-zA-Z]+", text)
-        # Filter out very common short words
-        stop_words = {"的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "这", "那", "有", "和", "吗", "吧", "呢", "啊"}
-        return [t for t in tokens if len(t) >= 2 and t not in stop_words]
+        chars = re.findall(r"[\u4e00-\u9fff]", text)
+        stop_chars = {"的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "这", "那", "有", "和", "吗", "吧", "呢", "啊"}
+        # Single meaningful chars
+        singles = [c for c in chars if c not in stop_chars]
+        # Bigrams for better matching
+        bigrams = [chars[i] + chars[i + 1] for i in range(len(chars) - 1)]
+        return singles + bigrams
 
 
 class MemoryCandidateStore:
@@ -499,6 +543,52 @@ class SummaryJobStore:
                 (now, job_id),
             )
             self.connection.commit()
+
+    def count_pending_for_date(
+        self,
+        target_date: str,
+        episode_store: Any = None,
+        timezone_name: str = "Asia/Shanghai",
+    ) -> int:
+        """Count pending episode summary jobs whose episode ended on target_date.
+
+        Looks up the closed episode's ended_at_utc from the episode table
+        (not episode_summary, since pending jobs have no summary row yet).
+        """
+        with self.connection.locked():
+            rows = self.connection.execute(
+                "SELECT episode_id FROM summary_job WHERE status = 'pending' AND job_type = 'episode'"
+            ).fetchall()
+        if not rows:
+            return 0
+        if episode_store is None:
+            return 0
+
+        from app.runtime.summary_manager import _TZ_OFFSETS
+        from datetime import timedelta
+
+        tz_offset = _TZ_OFFSETS.get(timezone_name, timedelta(hours=8))
+        count = 0
+        for row in rows:
+            ep_id = row["episode_id"]
+            # Look up episode ended_at from the episode table
+            try:
+                episode = episode_store.get_episode(ep_id)
+            except Exception:
+                continue
+            if not episode:
+                continue
+            ended = episode.get("ended_at_utc", "")
+            if not ended:
+                continue
+            try:
+                dt = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+                local_date = (dt + tz_offset).strftime("%Y-%m-%d")
+                if local_date == target_date:
+                    count += 1
+            except (ValueError, AttributeError):
+                pass
+        return count
 
     def clear_all(self) -> None:
         with self.connection.locked():

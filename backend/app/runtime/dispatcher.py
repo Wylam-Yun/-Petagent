@@ -38,7 +38,6 @@ class RuntimeDispatcher:
         brain: PetBrain,
         tts_provider: MockTTSProvider,
         registry: SkillRegistry,
-        memory_store=None,
         interaction_log=None,
         device_store=None,
         tick_service=None,
@@ -50,12 +49,12 @@ class RuntimeDispatcher:
         maintenance_service=None,
         memory_manager=None,
         episode_summary_store=None,
+        daily_summary_store=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
         self.tts_provider = tts_provider
         self.registry = registry
-        self.memory_store = memory_store
         self.interaction_log = interaction_log
         self.device_store = device_store
         self.tick_service = tick_service
@@ -67,6 +66,7 @@ class RuntimeDispatcher:
         self.maintenance_service = maintenance_service
         self.memory_manager = memory_manager
         self.episode_summary_store = episode_summary_store
+        self.daily_summary_store = daily_summary_store
         self._event_lock = threading.RLock()
 
     def handle_event(
@@ -123,11 +123,11 @@ class RuntimeDispatcher:
                 pet_state=ruled_state,
                 episode=episode,
                 event_log_store=self.event_log_store,
-                memory_store=self.memory_store,
                 device_state=self._device_state(),
                 skill_results=[],
                 memory_manager=self.memory_manager,
                 episode_summary_store=self.episode_summary_store,
+                daily_summary_store=self.daily_summary_store,
             )
 
         # 6. Build planning context (backward compat + cognition_context)
@@ -148,11 +148,11 @@ class RuntimeDispatcher:
                 pet_state=ruled_state,
                 episode=episode,
                 event_log_store=self.event_log_store,
-                memory_store=self.memory_store,
                 device_state=self._device_state(),
                 skill_results=skill_results,
                 memory_manager=self.memory_manager,
                 episode_summary_store=self.episode_summary_store,
+                daily_summary_store=self.daily_summary_store,
             )
         context = build_runtime_context(
             event,
@@ -250,7 +250,7 @@ class RuntimeDispatcher:
         """Route memory_update to candidate store. Also detect explicit commands."""
         user_text = str(event.payload.get("user_text", ""))
 
-        # LLM suggestion
+        # LLM suggestion — only via candidate store (no fallback)
         if self.memory_candidate_store is not None:
             if action.memory_update.should_save and action.memory_update.content:
                 self.memory_candidate_store.add(
@@ -259,9 +259,6 @@ class RuntimeDispatcher:
                     candidate_text=action.memory_update.content.strip(),
                     trigger_reason="llm_suggestion",
                 )
-        elif self.memory_store is not None:
-            # Fallback for backward compat when no candidate store
-            self.memory_store.save_from_update(action.memory_update)
 
         # Explicit command detection
         if self.memory_candidate_store is not None and user_text:

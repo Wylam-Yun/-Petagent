@@ -1,44 +1,35 @@
-from app.pet.memory import MemoryStore
+"""Stage 3 memory tests — updated to use MemoryManager (old MemoryStore removed)."""
 from app.pet.state import PetStateStore
-from app.runtime.actions import MemoryUpdate
+from app.runtime.memory_store import MemoryManager
 
 
-def test_memory_update_false_does_not_write_memory():
+def test_memory_manager_save_curated():
     state_store = PetStateStore(None)
-    memory = MemoryStore(state_store.connection)
+    mm = MemoryManager(state_store.connection)
 
-    saved = memory.save_from_update(MemoryUpdate(should_save=False, content="用户今天很累"))
-
-    assert saved is False
-    assert memory.recent_memory() == []
-
-
-def test_memory_store_saves_short_companionship_memory():
-    state_store = PetStateStore(None)
-    memory = MemoryStore(state_store.connection)
-
-    saved = memory.save_from_update(
-        MemoryUpdate(should_save=True, content="用户今天很累，需要温柔陪伴。")
+    mid = mm.save_curated(
+        memory_type="user_preference",
+        content="用户喜欢短回复",
+        importance=4,
     )
 
-    assert saved is True
-    assert memory.recent_memory() == ["用户今天很累，需要温柔陪伴。"]
+    assert mid is not None
+    scored = mm.scored_memories(limit=10)
+    contents = [m["content"] for m in scored]
+    assert "用户喜欢短回复" in contents
 
 
-def test_memory_store_rejects_sensitive_or_too_long_content():
+def test_memory_manager_rejects_invalid_type():
     state_store = PetStateStore(None)
-    memory = MemoryStore(state_store.connection)
+    mm = MemoryManager(state_store.connection)
 
-    assert (
-        memory.save_from_update(
-            MemoryUpdate(should_save=True, content="用户的身份证号码可能是 123456。")
-        )
-        is False
-    )
-    assert (
-        memory.save_from_update(
-            MemoryUpdate(should_save=True, content="用户今天说" + "很累" * 40)
-        )
-        is False
-    )
-    assert memory.recent_memory() == []
+    mid = mm.save_curated(memory_type="invalid_type", content="test")
+    assert mid is None
+
+
+def test_memory_manager_rejects_empty_content():
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+
+    mid = mm.save_curated(memory_type="user_preference", content="")
+    assert mid is None

@@ -80,3 +80,9 @@ memory:
   curator_batch_size: 8
   maintenance_min_interval_seconds: 300
   maintenance_max_items_per_tick: 8
+  daily_summary_trigger_hour: 6
+  candidate_cleanup_days: 7
+  job_cleanup_days: 3
+  consolidation_enabled: true
+  decay_half_life_stable_days: 90
+  decay_half_life_volatile_days: 14

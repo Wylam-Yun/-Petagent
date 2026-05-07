@@ -1,5 +1,6 @@
 """Stage 3.6: Schema migration tests."""
-from app.pet.memory import MemoryStore
+from datetime import datetime
+
 from app.pet.state import PetStateStore
 from app.runtime.memory_store import (
     DailySummaryStore,
@@ -26,11 +27,26 @@ def test_memory_manager_creates_new_columns():
 
 def test_existing_data_preserved_after_migration():
     state_store = PetStateStore(None)
-    # Create old-style memory table and insert data
-    old_store = MemoryStore(state_store.connection)
-    old_store.save_from_update(
-        type("MU", (), {"should_save": True, "content": "旧记忆"})()
-    )
+    # Insert old-style data directly (simulating pre-Migration MemoryStore)
+    now = datetime.utcnow().isoformat()
+    with state_store.connection.locked():
+        state_store.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                importance INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT
+            )
+            """
+        )
+        state_store.connection.execute(
+            "INSERT INTO memory (type, content, importance, created_at) VALUES (?, ?, ?, ?)",
+            ("user_preference", "旧记忆", 3, now),
+        )
+        state_store.connection.commit()
 
     # Now run migration
     mm = MemoryManager(state_store.connection)

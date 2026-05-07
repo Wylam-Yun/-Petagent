@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
-from app.pet.memory import SENSITIVE_MARKERS, infer_memory_type
+from app.runtime.memory_policy import SENSITIVE_MARKERS, infer_memory_type
 from app.runtime.context_store import desensitize_text
 from app.runtime.memory_store import MemoryCandidateStore, MemoryManager
 
@@ -166,3 +166,132 @@ class MemoryCurator:
             merge_with_id=merge_id,
         )
         return memory_id is not None
+
+    def consolidate_batch(self, memory_manager: MemoryManager, limit: int = 4) -> Dict[str, int]:
+        """Find and merge duplicate/similar memories. Returns {merged, skipped}."""
+        result: Dict[str, int] = {"merged": 0, "skipped": 0}
+        try:
+            pairs = self._find_similar_pairs(memory_manager, limit)
+            if not pairs:
+                return result
+            decisions = self._call_consolidation_llm(pairs)
+            for i, (mem_a, mem_b) in enumerate(pairs):
+                decision = decisions[i] if i < len(decisions) else None
+                if decision is None or not decision.get("merge", False):
+                    result["skipped"] += 1
+                    continue
+                try:
+                    self._execute_merge(mem_a, mem_b, decision, memory_manager)
+                    result["merged"] += 1
+                except Exception:
+                    logger.warning("Merge execution failed", exc_info=True)
+                    result["skipped"] += 1
+        except Exception:
+            logger.warning("Consolidation batch failed", exc_info=True)
+        return result
+
+    def _find_similar_pairs(
+        self, memory_manager: MemoryManager, limit: int
+    ) -> List[tuple]:
+        """Find pairs of memories with overlapping keywords by type."""
+        pairs: List[tuple] = []
+        with memory_manager.connection.locked():
+            rows = memory_manager.connection.execute(
+                "SELECT id, type, content, importance FROM memory ORDER BY type, id DESC LIMIT 100"
+            ).fetchall()
+
+        by_type: Dict[str, List[dict]] = {}
+        for row in rows:
+            d = dict(row)
+            by_type.setdefault(d["type"], []).append(d)
+
+        for mem_type, members in by_type.items():
+            if len(members) < 2:
+                continue
+            for i in range(len(members)):
+                for j in range(i + 1, len(members)):
+                    a_bigrams = self._chinese_bigrams(members[i]["content"])
+                    b_bigrams = self._chinese_bigrams(members[j]["content"])
+                    if not a_bigrams or not b_bigrams:
+                        continue
+                    overlap = len(a_bigrams & b_bigrams) / min(len(a_bigrams), len(b_bigrams))
+                    if overlap >= 0.4:
+                        pairs.append((members[i], members[j]))
+                        if len(pairs) >= limit:
+                            return pairs
+        return pairs
+
+    @staticmethod
+    def _chinese_bigrams(text: str) -> set:
+        """Extract Chinese character bigrams for similarity comparison."""
+        import re
+        chars = re.findall(r"[\u4e00-\u9fff]", text)
+        if len(chars) < 2:
+            return set(chars)
+        return {chars[i] + chars[i + 1] for i in range(len(chars) - 1)}
+
+    def _call_consolidation_llm(self, pairs: List[tuple]) -> List[Dict[str, Any]]:
+        """Ask LLM which pairs to merge and how."""
+        pair_text = ""
+        for i, (a, b) in enumerate(pairs):
+            pair_text += "\n%d. [%s] A: \"%s\" (importance=%d) vs B: \"%s\" (importance=%d)" % (
+                i + 1, a["type"], a["content"], a["importance"],
+                b["content"], b["importance"],
+            )
+
+        system_prompt = (
+            "你是记忆整合助手。判断以下记忆对是否重复/相似，是否应合并。\n\n"
+            "输出 JSON：\n"
+            '{"decisions": [{"merge": true, "keep_id": 1, "merged_content": "合并后内容", "merged_importance": 4, "reason": "..."}]}\n\n'
+            "规则：\n"
+            "1. 只有真正重复或高度相似才合并\n"
+            "2. 保留更完整/更重要的那条\n"
+            "3. merged_content 不超过 100 字\n"
+            "4. 不确定就不合并 (merge=false)"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "记忆对：%s" % pair_text},
+        ]
+        raw = self.provider.complete_json(messages)
+        decisions = raw.get("decisions", [])
+        if not isinstance(decisions, list):
+            return []
+        return decisions
+
+    def _execute_merge(
+        self,
+        mem_a: Dict[str, Any],
+        mem_b: Dict[str, Any],
+        decision: Dict[str, Any],
+        memory_manager: MemoryManager,
+    ) -> None:
+        """Execute a merge: update one memory, delete the other."""
+        keep_id = decision.get("keep_id")
+        if keep_id is None:
+            keep_id = mem_a["id"]
+        try:
+            keep_id = int(keep_id)
+        except (TypeError, ValueError):
+            keep_id = mem_a["id"]
+
+        merged_content = str(decision.get("merged_content", "")).strip()
+        if not merged_content:
+            merged_content = mem_a["content"] if keep_id == mem_a["id"] else mem_b["content"]
+
+        merged_importance = int(decision.get("merged_importance", max(mem_a["importance"], mem_b["importance"])))
+        merged_importance = max(1, min(5, merged_importance))
+
+        delete_id = mem_b["id"] if keep_id == mem_a["id"] else mem_a["id"]
+
+        now = datetime.utcnow().isoformat()
+        with memory_manager.connection.locked():
+            memory_manager.connection.execute(
+                "UPDATE memory SET content = ?, importance = ?, updated_at = ? WHERE id = ?",
+                (merged_content, merged_importance, now, keep_id),
+            )
+            memory_manager.connection.execute(
+                "DELETE FROM memory WHERE id = ?", (delete_id,)
+            )
+            memory_manager.connection.commit()

@@ -4,105 +4,18 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List
 
-from app.runtime.actions import MemoryUpdate
-
-
-SENSITIVE_MARKERS = {
-    "身份证",
-    "银行卡",
-    "密码",
-    "api key",
-    "token",
-    "密钥",
-    "住址",
-}
-
-
-def infer_memory_type(content: str) -> str:
-    lowered = content.lower()
-    if "喜欢" in content or "不喜欢" in content or "偏好" in content:
-        return "user_preference"
-    if "累" in content or "烦" in content or "难过" in content or "开心" in content:
-        return "recent_mood"
-    if "明天" in content or "面试" in content or "项目" in content:
-        return "important_event"
-    if "经常" in content or "习惯" in content:
-        return "habit"
-    if "叫我" in content or "称呼" in content or "william" in lowered:
-        return "relationship"
-    return "important_event"
-
-
-class MemoryStore:
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        self.connection = connection
-        self.initialize()
-
-    def initialize(self) -> None:
-        with self.connection.locked():
-            self.connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    type TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    importance INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    last_used_at TEXT
-                )
-                """
-            )
-            self.connection.commit()
-
-    def save_from_update(self, update: MemoryUpdate) -> bool:
-        if not update.should_save:
-            return False
-        content = str(update.content or "").strip()
-        if not self._is_allowed(content):
-            return False
-        now = datetime.utcnow().isoformat()
-        with self.connection.locked():
-            self.connection.execute(
-                """
-                INSERT INTO memory (type, content, importance, created_at, last_used_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (infer_memory_type(content), content, 3, now, None),
-            )
-            self.connection.commit()
-        return True
-
-    def recent_memory(self, limit: int = 6) -> List[str]:
-        with self.connection.locked():
-            rows = self.connection.execute(
-                """
-                SELECT id, content FROM memory
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-            now = datetime.utcnow().isoformat()
-            ids = [row["id"] for row in rows]
-            if ids:
-                placeholders = ",".join("?" for _ in ids)
-                self.connection.execute(
-                    "UPDATE memory SET last_used_at = ? WHERE id IN (%s)" % placeholders,
-                    (now, *ids),
-                )
-                self.connection.commit()
-        return [str(row["content"]) for row in rows]
-
-    def _is_allowed(self, content: str) -> bool:
-        if not content:
-            return False
-        if len(content) > 60:
-            return False
-        lowered = content.lower()
-        return not any(marker in lowered for marker in SENSITIVE_MARKERS)
+# DEPRECATED: SENSITIVE_MARKERS and infer_memory_type moved to app.runtime.memory_policy
+# Import from there instead. Kept here for backward compatibility.
+from app.runtime.memory_policy import SENSITIVE_MARKERS, infer_memory_type  # noqa: F401
 
 
 class InteractionLogStore:
+    """DEPRECATED: kept for /api/runtime/reset and Stage 3 tests.
+
+    The new EventLogStore (app.runtime.context_store) is the primary event logger.
+    This store is only used by the reset API to clear interaction_log table.
+    """
+
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
         self.initialize()

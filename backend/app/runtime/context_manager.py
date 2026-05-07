@@ -24,11 +24,11 @@ class ContextManager:
         pet_state: Dict[str, Any],
         episode: Optional[Dict[str, Any]],
         event_log_store: Any,
-        memory_store: Any = None,
         device_state: Optional[Dict[str, Any]] = None,
         skill_results: Optional[List[Dict[str, Any]]] = None,
         memory_manager: Any = None,
         episode_summary_store: Any = None,
+        daily_summary_store: Any = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
         now_utc = datetime.utcnow()
@@ -71,7 +71,7 @@ class ContextManager:
                 recent_exact_events.append(entry)
             recent_exact_events.reverse()
 
-        # Scored memories from MemoryManager (Stage 3.6)
+        # Scored memories from MemoryManager
         relevant_memories: List[Dict[str, Any]] = []
         if memory_manager is not None:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")
@@ -82,15 +82,8 @@ class ContextManager:
                 )
             except Exception:
                 relevant_memories = []
-        elif memory_store is not None:
-            # Backward compat: old MemoryStore returns List[str]
-            try:
-                raw = memory_store.recent_memory(limit=self.relevant_memory_items)
-                relevant_memories = [{"content": m, "type": "unknown"} for m in raw]
-            except Exception:
-                relevant_memories = []
 
-        # Episode summaries (Stage 3.6)
+        # Episode summaries
         episode_summaries: List[Dict[str, Any]] = []
         if episode_summary_store is not None:
             try:
@@ -100,7 +93,7 @@ class ContextManager:
             except Exception:
                 episode_summaries = []
 
-        # Important quotes from memory table (Stage 3.6)
+        # Important quotes from memory table
         important_quotes: List[Dict[str, Any]] = []
         if memory_manager is not None:
             try:
@@ -108,12 +101,23 @@ class ContextManager:
             except Exception:
                 important_quotes = []
 
+        # Daily digest (Stage 3.7)
+        daily_digest = None
+        if daily_summary_store is not None:
+            try:
+                recent_daily = daily_summary_store.recent(limit=1)
+                if recent_daily:
+                    daily_digest = recent_daily[0]
+            except Exception:
+                daily_digest = None
+
         # Build context and trim to budget
         context = {
             "current_time": current_time,
             "current_episode": current_episode,
             "recent_exact_events": recent_exact_events,
             "episode_summaries": episode_summaries,
+            "daily_digest": daily_digest,
             "relevant_memories": relevant_memories,
             "important_quotes": important_quotes,
             "context_budget": {
@@ -140,10 +144,14 @@ class ContextManager:
                 + len(context.get("relevant_memories", []))
                 + len(context.get("episode_summaries", []))
                 + len(context.get("important_quotes", []))
+                + (1 if context.get("daily_digest") else 0)
             )
             return context
 
-        # Trim: first drop episode summaries, then important quotes, then trim events
+        # Trim: daily_digest first, then episode summaries, then important quotes, then events
+        if context.get("daily_digest"):
+            context["daily_digest"] = None
+            notes.append("dropped daily_digest to fit budget")
         if context.get("episode_summaries"):
             context["episode_summaries"] = []
             notes.append("dropped episode_summaries to fit budget")
@@ -175,6 +183,7 @@ class ContextManager:
             + len(context.get("relevant_memories", []))
             + len(context.get("episode_summaries", []))
             + len(context.get("important_quotes", []))
+            + (1 if context.get("daily_digest") else 0)
         )
         return context
 
