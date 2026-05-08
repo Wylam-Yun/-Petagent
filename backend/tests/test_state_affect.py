@@ -1,5 +1,8 @@
+from app.db import create_state_store
+from app.config import load_settings
 from app.pet.guard import guard_action
 from app.runtime.actions import PetAction, PetResponse, StateAffect
+from app.runtime.context_store import EventLogStore
 
 
 def test_pet_action_accepts_state_affect():
@@ -79,3 +82,31 @@ def test_pet_response_can_expose_state_affect():
     )
 
     assert response.state_affect["interaction_tone"] == "affectionate"
+
+
+def test_event_log_records_state_affect_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("PETAGENT_DATA_DIR", str(tmp_path / "data"))
+    settings = load_settings()
+    state_store = create_state_store(settings, testing=True)
+    store = EventLogStore(state_store.connection)
+
+    store.record(
+        event_id="evt-affect",
+        episode_id="ep-affect",
+        event_type="praise_momo",
+        source="runtime",
+        user_text="夸夸",
+        pet_reply="嘿嘿。",
+        state_before={"energy": 70},
+        state_after={"energy": 71},
+        mood_after="happy",
+        state_affect={
+            "interaction_tone": "affectionate",
+            "pet_effort": "low",
+            "emotional_effect": "encouraged",
+            "reason": "用户夸了 Momo。",
+        },
+    )
+
+    rows = store.recent_events("ep-affect", limit=1)
+    assert rows[0]["state_affect"]["interaction_tone"] == "affectionate"

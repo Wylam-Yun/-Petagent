@@ -194,6 +194,7 @@ class RuntimeDispatcher:
                 state_before=state_before,
                 state_after=saved_state,
                 mood_after=action.mood,
+                state_affect=action.state_affect.dict(),
             )
 
         # 12. Update episode event count

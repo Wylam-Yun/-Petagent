@@ -245,6 +245,15 @@ class EventLogStore:
                 """
             )
             self.connection.commit()
+        self._ensure_state_affect_column()
+
+    def _ensure_state_affect_column(self) -> None:
+        with self.connection.locked():
+            rows = self.connection.execute("PRAGMA table_info(raw_event_log)").fetchall()
+            columns = {row["name"] for row in rows}
+            if "state_affect_json" not in columns:
+                self.connection.execute("ALTER TABLE raw_event_log ADD COLUMN state_affect_json TEXT")
+                self.connection.commit()
 
     def record(
         self,
@@ -258,6 +267,7 @@ class EventLogStore:
         state_before: Optional[Dict[str, Any]] = None,
         state_after: Optional[Dict[str, Any]] = None,
         mood_after: str = "",
+        state_affect: Optional[Dict[str, Any]] = None,
         created_at_utc: Optional[str] = None,
         created_at_local: Optional[str] = None,
         timezone_name: str = "Asia/Shanghai",
@@ -277,9 +287,10 @@ class EventLogStore:
                     event_id, episode_id, event_type, source,
                     user_text, pet_reply, skill_results_json,
                     state_before_json, state_after_json, mood_after,
+                    state_affect_json,
                     created_at_utc, created_at_local, timezone,
                     importance_hint, summary_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw')
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw')
                 """,
                 (
                     event_id,
@@ -292,6 +303,7 @@ class EventLogStore:
                     json.dumps(state_before, ensure_ascii=False) if state_before else None,
                     json.dumps(state_after, ensure_ascii=False) if state_after else None,
                     mood_after or None,
+                    json.dumps(state_affect, ensure_ascii=False) if state_affect else None,
                     now_utc,
                     created_at_local,
                     timezone_name,
@@ -308,7 +320,8 @@ class EventLogStore:
                 rows = self.connection.execute(
                     """
                     SELECT event_id, episode_id, event_type, source,
-                           user_text, pet_reply, mood_after, created_at_utc
+                           user_text, pet_reply, mood_after, created_at_utc,
+                           state_affect_json
                     FROM raw_event_log
                     WHERE episode_id = ?
                     ORDER BY id DESC LIMIT ?
@@ -319,13 +332,20 @@ class EventLogStore:
                 rows = self.connection.execute(
                     """
                     SELECT event_id, episode_id, event_type, source,
-                           user_text, pet_reply, mood_after, created_at_utc
+                           user_text, pet_reply, mood_after, created_at_utc,
+                           state_affect_json
                     FROM raw_event_log
                     ORDER BY id DESC LIMIT ?
                     """,
                     (limit,),
                 ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            {
+                **dict(row),
+                "state_affect": json.loads(row["state_affect_json"]) if row["state_affect_json"] else None,
+            }
+            for row in rows
+        ]
 
     def recall_events(
         self,
@@ -345,7 +365,8 @@ class EventLogStore:
             rows = self.connection.execute(
                 """
                 SELECT event_id, episode_id, event_type, source,
-                       user_text, pet_reply, mood_after, created_at_utc
+                       user_text, pet_reply, mood_after, created_at_utc,
+                       state_affect_json
                 FROM raw_event_log
                 WHERE {where}
                   AND (user_text IS NOT NULL OR pet_reply IS NOT NULL)
@@ -354,7 +375,13 @@ class EventLogStore:
                 """.format(where=where),
                 params,
             ).fetchall()
-        result = [dict(row) for row in rows]
+        result = [
+            {
+                **dict(row),
+                "state_affect": json.loads(row["state_affect_json"]) if row["state_affect_json"] else None,
+            }
+            for row in rows
+        ]
         result.reverse()
         return result
 
