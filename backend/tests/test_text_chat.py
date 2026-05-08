@@ -1,0 +1,84 @@
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+
+
+def test_text_chat_uses_fast_route_by_default():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post("/api/text/chat", json={"text": "我今天有点累"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_text"] == "我今天有点累"
+    assert body["text_route"]["selected"] == "fast"
+    assert body["text_route"]["thinking_mode"] is False
+    assert body["text_route"]["brain_provider"] == "mock_fast_llm"
+    assert body["voice_url"]
+    assert body["runtime"]["event_id"]
+
+
+def test_text_chat_uses_slow_route_when_thinking_mode_is_enabled():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post(
+        "/api/text/chat",
+        json={"text": "帮我认真想想这个问题", "thinking_mode": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["text_route"]["selected"] == "slow"
+    assert body["text_route"]["thinking_mode"] is True
+    assert body["text_route"]["brain_provider"] == "mock_slow_llm"
+
+
+def test_text_chat_rejects_empty_text():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post("/api/text/chat", json={"text": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Text message is empty"
+
+
+def test_text_chat_rejects_too_long_text():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post("/api/text/chat", json={"text": "x" * 2500})
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Text message is too long"
+
+
+def test_text_chat_handles_wake_and_exit_phrases():
+    client = TestClient(create_app(testing=True))
+
+    wake = client.post("/api/text/chat", json={"text": "嗨 momo"})
+    exit_response = client.post("/api/text/chat", json={"text": "momo休息吧"})
+
+    assert wake.status_code == 200
+    assert wake.json()["activation"]["type"] == "wake"
+    assert wake.json()["activation"]["active"] is True
+    assert exit_response.status_code == 200
+    assert exit_response.json()["activation"]["type"] == "exit"
+    assert exit_response.json()["activation"]["active"] is False
+
+
+def test_text_message_can_trigger_skill_planner():
+    from app.skills.base import SkillResult
+
+    app = create_app(testing=True)
+    app.state.registry.run_skill = lambda skill_id, payload: SkillResult(
+        skill_id=skill_id,
+        ok=True,
+        content="当前多云，约 22 度。",
+        data={},
+        confidence=0.9,
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/text/chat", json={"text": "今天适合出门吗"})
+
+    assert response.status_code == 200
+    assert "weather.current" in response.json()["runtime"]["skills_used"]

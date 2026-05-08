@@ -317,7 +317,7 @@ class RuntimeDispatcher:
         return results
 
     def _planned_skill_requests(self, event, brain: PetBrain, context) -> List[tuple]:
-        if event.type != "voice_message":
+        if event.type not in {"voice_message", "text_message"}:
             return []
         if not self._looks_like_external_request(event):
             return []

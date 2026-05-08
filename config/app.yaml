@@ -89,3 +89,6 @@ memory:
   consolidation_enabled: true
   decay_half_life_stable_days: 90
   decay_half_life_volatile_days: 14
+
+text_chat:
+  max_text_chars: 2000

@@ -13,6 +13,7 @@ from app.api import memory as memory_api
 from app.api import pet as pet_api
 from app.api import runtime as runtime_api
 from app.api import skills as skills_api
+from app.api import text as text_api
 from app.api import voice as voice_api
 from app.config import Settings, load_settings
 from app.db import create_state_store
@@ -47,6 +48,7 @@ from app.runtime.proactive import ProactiveService
 from app.runtime.registry import SkillRegistry
 from app.runtime.summary_manager import SummaryManager
 from app.runtime.tick import TickService
+from app.runtime.text_pipeline import TextPipeline
 from app.runtime.voice_pipeline import VoicePipeline
 
 
@@ -205,6 +207,14 @@ def create_app(testing: bool = False) -> FastAPI:
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
         activation_manager=activation_manager,
     )
+    text_pipeline = TextPipeline(
+        dispatcher=dispatcher,
+        fast_brain=fast_brain,
+        slow_brain=brain,
+        fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
+        slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
+        activation_manager=activation_manager,
+    )
 
     app = FastAPI(title="PetAgent Momo", version=settings.schema_version)
     app.add_middleware(
@@ -225,6 +235,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.audio_provider = audio_provider
     app.state.asr_provider = asr_provider
     app.state.voice_pipeline = voice_pipeline
+    app.state.text_pipeline = text_pipeline
     app.state.activation_manager = activation_manager
     app.state.proactive_brain = proactive_brain
     app.state.episode_manager = episode_manager
@@ -252,6 +263,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(skills_api.router)
     app.include_router(context_api.router)
     app.include_router(memory_api.router)
+    app.include_router(text_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)
