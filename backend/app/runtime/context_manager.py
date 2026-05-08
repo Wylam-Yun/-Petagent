@@ -17,6 +17,8 @@ class ContextManager:
         self.max_context_chars = cfg.get("max_context_chars", 4500)
         self.raw_max_rows = cfg.get("raw_max_rows", 3000)
         self.idle_episode_minutes = cfg.get("idle_episode_minutes", 45)
+        self.recall_event_limit = cfg.get("recall_event_limit", 6)
+        self.recall_lookback_hours = cfg.get("recall_lookback_hours", 48)
 
     def build(
         self,
@@ -71,6 +73,32 @@ class ContextManager:
                 recent_exact_events.append(entry)
             recent_exact_events.reverse()
 
+        temporal_recall_events: List[Dict[str, Any]] = []
+        if event_log_store and self._wants_temporal_recall(event):
+            cutoff = (now_utc - timedelta(hours=self.recall_lookback_hours)).isoformat()
+            current_episode_id = episode.get("episode_id") if episode else None
+            try:
+                recall_events = event_log_store.recall_events(
+                    since_utc=cutoff,
+                    limit=self.recall_event_limit,
+                    exclude_episode_id=current_episode_id,
+                )
+            except Exception:
+                recall_events = []
+            for evt in recall_events:
+                entry = {
+                    "event_type": evt.get("event_type", ""),
+                    "created_at": evt.get("created_at_utc", ""),
+                    "episode_id": evt.get("episode_id", ""),
+                }
+                if evt.get("user_text"):
+                    entry["user"] = evt["user_text"]
+                if evt.get("pet_reply"):
+                    entry["pet"] = evt["pet_reply"]
+                if evt.get("mood_after"):
+                    entry["mood"] = evt["mood_after"]
+                temporal_recall_events.append(entry)
+
         # Scored memories from MemoryManager
         relevant_memories: List[Dict[str, Any]] = []
         if memory_manager is not None:
@@ -116,6 +144,7 @@ class ContextManager:
             "current_time": current_time,
             "current_episode": current_episode,
             "recent_exact_events": recent_exact_events,
+            "temporal_recall_events": temporal_recall_events,
             "episode_summaries": episode_summaries,
             "daily_digest": daily_digest,
             "relevant_memories": relevant_memories,
@@ -141,6 +170,7 @@ class ContextManager:
             context["context_budget"]["used_chars"] = used
             context["context_budget"]["items_selected"] = (
                 len(context.get("recent_exact_events", []))
+                + len(context.get("temporal_recall_events", []))
                 + len(context.get("relevant_memories", []))
                 + len(context.get("episode_summaries", []))
                 + len(context.get("important_quotes", []))
@@ -175,11 +205,20 @@ class ContextManager:
                 notes.append("trimmed oldest memory")
             context["relevant_memories"] = mems
 
+        serialized = json.dumps(context, ensure_ascii=False)
+        if len(serialized) > self.max_context_chars:
+            recall_events = context.get("temporal_recall_events", [])
+            while recall_events and len(json.dumps(context, ensure_ascii=False)) > self.max_context_chars:
+                recall_events.pop(0)
+                notes.append("trimmed oldest temporal recall event")
+            context["temporal_recall_events"] = recall_events
+
         context["selection_notes"] = notes
         final = json.dumps(context, ensure_ascii=False)
         context["context_budget"]["used_chars"] = len(final)
         context["context_budget"]["items_selected"] = (
             len(context.get("recent_exact_events", []))
+            + len(context.get("temporal_recall_events", []))
             + len(context.get("relevant_memories", []))
             + len(context.get("episode_summaries", []))
             + len(context.get("important_quotes", []))
@@ -208,3 +247,24 @@ class ContextManager:
             "Europe/London": timedelta(hours=0),
         }
         return offsets.get(self.timezone_name, timedelta(hours=8))
+
+    def _wants_temporal_recall(self, event: Any) -> bool:
+        payload = getattr(event, "payload", {}) or {}
+        text = str(payload.get("user_text") or payload.get("text") or "")
+        if not text:
+            return False
+        keywords = [
+            "昨天",
+            "前天",
+            "刚刚",
+            "之前",
+            "上次",
+            "回顾",
+            "聊了啥",
+            "聊了什么",
+            "说了啥",
+            "说了什么",
+            "记得",
+            "想起来",
+        ]
+        return any(keyword in text for keyword in keywords)

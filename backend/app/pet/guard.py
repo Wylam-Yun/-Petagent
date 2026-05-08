@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict
 
 from app.runtime.actions import (
@@ -76,6 +77,14 @@ def _trim_reply(reply: str, max_reply_chars: int) -> str:
     return reply[: max_chars - 1] + "…"
 
 
+def _strip_reasoning(reply: str) -> str:
+    """Remove model thinking traces that accidentally landed in reply."""
+    cleaned = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I).strip()
+    cleaned = re.sub(r"(?is)^思考过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
+    cleaned = re.sub(r"(?is)^推理过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
+    return cleaned or FALLBACK_ACTION["reply"]
+
+
 def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> PetAction:
     data = _parse_action(raw)
     if not data.get("reply"):
@@ -100,7 +109,10 @@ def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> Pe
     if vibration not in ALLOWED_VIBRATIONS:
         vibration = "none"
 
-    reply = _trim_reply(str(data.get("reply", FALLBACK_ACTION["reply"])).strip(), max_reply_chars)
+    reply = _trim_reply(
+        _strip_reasoning(str(data.get("reply", FALLBACK_ACTION["reply"])).strip()),
+        max_reply_chars,
+    )
 
     return PetAction(
         reply=reply,

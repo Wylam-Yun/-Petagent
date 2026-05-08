@@ -66,6 +66,8 @@ cognition_context:
   raw_max_rows: 3000
   idle_episode_minutes: 45
   recent_exact_turns: 6
+  recall_event_limit: 6
+  recall_lookback_hours: 48
   recent_episode_summaries: 2
   relevant_memory_items: 4
   max_context_chars: 4500
@@ -80,6 +82,7 @@ memory:
   curator_batch_size: 8
   maintenance_min_interval_seconds: 300
   maintenance_max_items_per_tick: 8
+  summary_job_max_attempts: 3
   daily_summary_trigger_hour: 6
   candidate_cleanup_days: 7
   job_cleanup_days: 3

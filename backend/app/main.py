@@ -118,7 +118,10 @@ def create_app(testing: bool = False) -> FastAPI:
     memory_config = settings.app_config.get("memory", {})
     memory_manager = MemoryManager(state_store.connection, config=memory_config)
     memory_candidate_store = MemoryCandidateStore(state_store.connection)
-    summary_job_store = SummaryJobStore(state_store.connection)
+    summary_job_store = SummaryJobStore(
+        state_store.connection,
+        max_attempts=int(memory_config.get("summary_job_max_attempts", 3)),
+    )
     episode_summary_store = EpisodeSummaryStore(state_store.connection)
     daily_summary_store = DailySummaryStore(state_store.connection)
     maintenance_state = MaintenanceStateStore(state_store.connection)

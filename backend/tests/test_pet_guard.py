@@ -43,3 +43,17 @@ def test_guard_truncates_at_configured_reply_limit():
 
     assert len(action.reply) == 500
     assert action.reply.endswith("…")
+
+
+def test_guard_strips_reasoning_from_reply():
+    action = guard_action(
+        {
+            "reply": "<think>先分析用户昨天问了什么，再组织回答。</think>昨天我们主要聊了记忆测试。",
+            "mood": "thinking",
+        },
+        max_reply_chars=500,
+    )
+
+    assert "<think>" not in action.reply
+    assert "先分析" not in action.reply
+    assert action.reply == "昨天我们主要聊了记忆测试。"

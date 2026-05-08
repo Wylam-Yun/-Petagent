@@ -327,6 +327,37 @@ class EventLogStore:
                 ).fetchall()
         return [dict(row) for row in rows]
 
+    def recall_events(
+        self,
+        *,
+        since_utc: str,
+        limit: int = 6,
+        exclude_episode_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return recent raw events useful for temporal recall questions."""
+        where = "created_at_utc >= ?"
+        params: list = [since_utc]
+        if exclude_episode_id:
+            where += " AND episode_id != ?"
+            params.append(exclude_episode_id)
+        params.append(limit)
+        with self.connection.locked():
+            rows = self.connection.execute(
+                """
+                SELECT event_id, episode_id, event_type, source,
+                       user_text, pet_reply, mood_after, created_at_utc
+                FROM raw_event_log
+                WHERE {where}
+                  AND (user_text IS NOT NULL OR pet_reply IS NOT NULL)
+                ORDER BY id DESC
+                LIMIT ?
+                """.format(where=where),
+                params,
+            ).fetchall()
+        result = [dict(row) for row in rows]
+        result.reverse()
+        return result
+
     def count(self) -> int:
         with self.connection.locked():
             row = self.connection.execute(

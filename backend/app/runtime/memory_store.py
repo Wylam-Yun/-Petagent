@@ -473,8 +473,9 @@ class MemoryCandidateStore:
 class SummaryJobStore:
     """Stores pending summary jobs for maintenance processing."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(self, connection: sqlite3.Connection, max_attempts: int = 3) -> None:
         self.connection = connection
+        self.max_attempts = max_attempts
         self._ensure_table()
 
     def _ensure_table(self) -> None:
@@ -491,6 +492,8 @@ class SummaryJobStore:
                 )
                 """
             )
+            _ensure_column(self.connection, "summary_job", "attempt_count", "INTEGER", "0")
+            _ensure_column(self.connection, "summary_job", "last_error", "TEXT")
             self.connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_summary_job_status
@@ -516,13 +519,14 @@ class SummaryJobStore:
         with self.connection.locked():
             rows = self.connection.execute(
                 """
-                SELECT id, episode_id, job_type, created_at
+                SELECT id, episode_id, job_type, created_at, attempt_count, last_error
                 FROM summary_job
                 WHERE status = 'pending'
+                   OR (status = 'failed' AND attempt_count < ?)
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (self.max_attempts, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -535,12 +539,20 @@ class SummaryJobStore:
             )
             self.connection.commit()
 
-    def mark_failed(self, job_id: int) -> None:
+    def mark_failed(self, job_id: int, error_message: str = "") -> None:
         now = datetime.utcnow().isoformat()
+        message = str(error_message or "")[:500]
         with self.connection.locked():
             self.connection.execute(
-                "UPDATE summary_job SET status = 'failed', processed_at = ? WHERE id = ?",
-                (now, job_id),
+                """
+                UPDATE summary_job
+                SET status = 'failed',
+                    processed_at = ?,
+                    attempt_count = attempt_count + 1,
+                    last_error = ?
+                WHERE id = ?
+                """,
+                (now, message, job_id),
             )
             self.connection.commit()
 
@@ -557,7 +569,15 @@ class SummaryJobStore:
         """
         with self.connection.locked():
             rows = self.connection.execute(
-                "SELECT episode_id FROM summary_job WHERE status = 'pending' AND job_type = 'episode'"
+                """
+                SELECT episode_id FROM summary_job
+                WHERE job_type = 'episode'
+                  AND (
+                    status = 'pending'
+                    OR (status = 'failed' AND attempt_count < ?)
+                  )
+                """,
+                (self.max_attempts,),
             ).fetchall()
         if not rows:
             return 0

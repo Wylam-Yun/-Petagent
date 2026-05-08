@@ -267,7 +267,10 @@ class MaintenanceService:
             if result:
                 self.summary_job_store.mark_done(job_id)
             else:
-                self.summary_job_store.mark_failed(job_id)
-        except Exception:
+                self.summary_job_store.mark_failed(
+                    job_id,
+                    error_message="summary manager returned no summary",
+                )
+        except Exception as exc:
             logger.warning("Episode summary failed for %s", episode_id, exc_info=True)
-            self.summary_job_store.mark_failed(job_id)
+            self.summary_job_store.mark_failed(job_id, error_message=str(exc))

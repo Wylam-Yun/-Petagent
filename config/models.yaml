@@ -7,6 +7,8 @@ providers:
     timeout_seconds: 45
     auth_scheme: bearer
     max_tokens: 1200
+    chat_template_kwargs:
+      enable_thinking: false
     proxy_url_env:
       - SILICONFLOW_PROXY_URL
       - PETAGENT_PROXY_URL
@@ -19,6 +21,8 @@ providers:
     timeout_seconds: 20
     auth_scheme: bearer
     max_tokens: 900
+    chat_template_kwargs:
+      enable_thinking: false
     proxy_url_env:
       - SILICONFLOW_PROXY_URL
       - PETAGENT_PROXY_URL
