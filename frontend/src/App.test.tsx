@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import App from "./App";
 
@@ -62,4 +62,60 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
   });
 
   await waitFor(() => expect(screen.getByText("嘿嘿，Momo 在呢。")).toBeInTheDocument());
+});
+
+describe("text chat", () => {
+  test("typed text sends POST and applies response", async () => {
+    const petStateResponse = {
+      schema_version: "0.1",
+      name: "Momo",
+      mood: "idle",
+      energy: 72,
+      intimacy: 40,
+      hunger: 30,
+      cleanliness: 85,
+      loneliness: 35,
+      sleepiness: 15,
+      mode: "idle"
+    };
+
+    const textChatResponse = {
+      reply: "好呀，Momo 帮你想。",
+      mood: "thinking",
+      face_type: "thinking",
+      animation: "tilt",
+      vibration: "none",
+      voice_url: null,
+      user_text: "帮我写两数之和",
+      text_route: {
+        selected: "slow",
+        thinking_mode: true,
+        brain_provider: "test",
+        timings_ms: {}
+      },
+      pet_state: { ...petStateResponse, mood: "thinking" as const },
+      runtime: { event_id: "evt-text", skills_used: [] }
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Momo");
+
+    const input = screen.getByPlaceholderText("输入一句话……");
+    fireEvent.change(input, { target: { value: "帮我写两数之和" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(screen.getByText("好呀，Momo 帮你想。")).toBeInTheDocument());
+
+    const [, textInit] = fetchMock.mock.calls[1];
+    expect(textInit.method).toBe("POST");
+    expect(JSON.parse(textInit.body as string)).toMatchObject({
+      text: "帮我写两数之和",
+      thinking_mode: false
+    });
+  });
 });

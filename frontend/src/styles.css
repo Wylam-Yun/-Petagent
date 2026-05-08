@@ -134,6 +134,67 @@ button {
   gap: 10px;
 }
 
+.text-input-bar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.text-input-bar input {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid rgba(23, 32, 51, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  font: inherit;
+  font-size: 0.95rem;
+  color: #172033;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.text-input-bar input:focus {
+  border-color: rgba(67, 179, 174, 0.5);
+}
+
+.text-input-bar input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.text-input-bar button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(67, 179, 174, 0.32);
+  border-radius: 8px;
+  background: #43b3ae;
+  color: #ffffff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.text-input-bar button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.text-input-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.text-input-error {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: rgba(220, 60, 60, 0.75);
+}
+
 .voice-mode-toggle {
   min-height: 48px;
   display: grid;
@@ -261,8 +322,31 @@ button {
   width: min(760px, 100%);
   margin: 0 auto;
   display: grid;
+  gap: 10px;
+}
+
+.touch-primary {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.touch-more {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.touch-button.compact {
+  min-height: 44px;
+  font-size: 0.82rem;
+  gap: 5px;
+  padding: 6px 4px;
+}
+
+.touch-button.compact svg {
+  width: 16px;
+  height: 16px;
 }
 
 .touch-button {
@@ -408,8 +492,12 @@ button {
     min-height: 48px;
   }
 
-  .touch-area {
-    grid-template-columns: 1fr;
+  .touch-primary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .touch-more {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

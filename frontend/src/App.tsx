@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PetBubble } from "./components/PetBubble";
 import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
+import { TextInputBar } from "./components/TextInputBar";
 import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
 import { VoiceModeToggle } from "./components/VoiceModeToggle";
@@ -14,6 +15,7 @@ import {
   refreshContext,
   reportDeviceState,
   resetRuntime,
+  sendTextChat,
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
@@ -27,6 +29,7 @@ import type {
   PetResponse,
   PetState,
   PetUIPhase,
+  TextChatResponse,
   VoiceChatResponse
 } from "./pet/types";
 
@@ -47,6 +50,17 @@ const optimistic: Record<PetEventType, { mood: Mood; animation: AnimationName; t
   pet_head: { mood: "shy", animation: "wiggle", text: "嘿嘿…" },
   poke_face: { mood: "angry", animation: "shake", text: "唔？" },
   hug: { mood: "happy", animation: "bounce", text: "Momo 贴过来啦。" },
+  pet_pat: { mood: "happy", animation: "bounce", text: "拍拍~" },
+  praise_momo: { mood: "shy", animation: "wiggle", text: "被夸了好开心！" },
+  feed_momo: { mood: "happy", animation: "bounce", text: "好吃！" },
+  stay_with_me: { mood: "happy", animation: "breathing", text: "Momo 在这儿陪你。" },
+  comfort_me: { mood: "concerned", animation: "droop", text: "抱抱你…" },
+  encourage_me: { mood: "excited", animation: "jump", text: "你可以的！" },
+  listen_to_me: { mood: "thinking", animation: "tilt", text: "嗯嗯，说吧。" },
+  tuck_in: { mood: "sleepy", animation: "slowBlink", text: "晚安…" },
+  clean_face: { mood: "happy", animation: "wiggle", text: "擦干净啦。" },
+  quiet_company: { mood: "idle", animation: "breathing", text: "安静陪着你。" },
+  take_a_break: { mood: "sleepy", animation: "slowBlink", text: "休息一下。" },
   debug_happy: { mood: "happy", animation: "bounce", text: "开心模式。" },
   debug_sleepy: { mood: "sleepy", animation: "slowBlink", text: "有点困困的。" },
   debug_angry: { mood: "angry", animation: "shake", text: "小小生气一下。" }
@@ -257,6 +271,29 @@ function App() {
     }
   }
 
+  async function handleTextSubmit(text: string): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    setFaceType("thinking");
+    setAnimation("blink");
+    setBubbleText("Momo 想一下…");
+    try {
+      const response: TextChatResponse = await sendTextChat(text, { thinkingMode });
+      if (response.activation) {
+        setActiveSession(response.activation.active ? response.activation.session_id : null);
+      }
+      applyPetResponse(response);
+      return true;
+    } catch {
+      setFaceType("concerned");
+      setAnimation("tilt");
+      setBubbleText("文字没发出去，再试一次？");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
       <StatusBar state={petState} />
@@ -266,6 +303,7 @@ function App() {
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
+        <TextInputBar disabled={busy || phase === "thinking"} onSubmit={handleTextSubmit} />
         <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
           disabled={busy}
