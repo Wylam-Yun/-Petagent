@@ -247,6 +247,7 @@ class RuntimeDispatcher:
                 "skills_used": [item.get("skill_id") for item in skill_results],
                 "episode_id": episode_id,
             },
+            state_affect=action.state_affect.dict(),
         )
 
     def _collect_memory_candidates(self, event, action, episode_id: str) -> None:

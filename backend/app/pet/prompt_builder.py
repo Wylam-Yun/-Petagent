@@ -21,8 +21,15 @@ OUTPUT_SCHEMA_HINT = {
         "energy": 0,
         "intimacy": 0,
         "hunger": 0,
+        "cleanliness": 0,
         "loneliness": 0,
         "sleepiness": 0,
+    },
+    "state_affect": {
+        "interaction_tone": "affectionate/playful/comforting/encouraging/demanding/tiring/quiet/caregiving/neutral",
+        "pet_effort": "none/low/medium/high",
+        "emotional_effect": "happy/comforted/encouraged/pressured/annoyed/sleepy/calm/lonely_relieved/uncertain",
+        "reason": "一句话说明为什么这样影响 Momo 状态",
     },
     "memory_update": {"should_save": False, "content": ""},
 }
@@ -87,6 +94,15 @@ def build_pet_messages(
             "2. skill 失败时温柔兜底，不暴露接口错误。\n"
             "3. 不要说\u201c根据 API/数据库/工具结果\u201d。"
         )
+
+    system_prompt += (
+        "\n\n状态联动规则：\n"
+        "1. 你必须根据本轮互动和上下文输出 state_affect。\n"
+        "2. state_delta 要保守，不要让数值暴涨暴跌。\n"
+        "3. 用户让你连续做任务时，energy 可以下降，sleepiness 可以小幅上升。\n"
+        "4. 用户夸你、摸你、抱你或陪你时，intimacy 可以上升，loneliness 可以下降。\n"
+        "5. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
+    )
 
     # Use serializer instead of raw context.dict()
     payload = serialize_for_prompt(

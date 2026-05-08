@@ -6,11 +6,15 @@ from typing import Any, Dict
 
 from app.runtime.actions import (
     ALLOWED_ANIMATIONS,
+    ALLOWED_EMOTIONAL_EFFECTS,
+    ALLOWED_INTERACTION_TONES,
     ALLOWED_MOODS,
+    ALLOWED_PET_EFFORTS,
     ALLOWED_VIBRATIONS,
     ALLOWED_VOICE_STYLES,
     MOOD_ANIMATION_MAP,
     PetAction,
+    StateAffect,
 )
 
 
@@ -18,6 +22,7 @@ STATE_DELTA_LIMITS = {
     "energy": (-5, 5),
     "intimacy": (-1, 2),
     "hunger": (-5, 5),
+    "cleanliness": (-2, 2),
     "loneliness": (-5, 2),
     "sleepiness": (-5, 5),
 }
@@ -77,6 +82,28 @@ def _trim_reply(reply: str, max_reply_chars: int) -> str:
     return reply[: max_chars - 1] + "…"
 
 
+def _guard_state_affect(raw: Any) -> StateAffect:
+    data = raw if isinstance(raw, dict) else {}
+    tone = str(data.get("interaction_tone") or "neutral")
+    effort = str(data.get("pet_effort") or "none")
+    effect = str(data.get("emotional_effect") or "uncertain")
+    reason = str(data.get("reason") or "").strip()
+    if tone not in ALLOWED_INTERACTION_TONES:
+        tone = "neutral"
+    if effort not in ALLOWED_PET_EFFORTS:
+        effort = "none"
+    if effect not in ALLOWED_EMOTIONAL_EFFECTS:
+        effect = "uncertain"
+    if len(reason) > 120:
+        reason = reason[:119] + "…"
+    return StateAffect(
+        interaction_tone=tone,
+        pet_effort=effort,
+        emotional_effect=effect,
+        reason=reason,
+    )
+
+
 def _strip_reasoning(reply: str) -> str:
     """Remove model thinking traces that accidentally landed in reply."""
     cleaned = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I).strip()
@@ -124,5 +151,6 @@ def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> Pe
         intent=str(data.get("intent", "stage1_response")),
         autonomy_notes=str(data.get("autonomy_notes", "")),
         state_delta=_clamp_delta(data.get("state_delta") or {}),
+        state_affect=_guard_state_affect(data.get("state_affect") or {}),
         memory_update=data.get("memory_update") or {"should_save": False, "content": ""},
     )
