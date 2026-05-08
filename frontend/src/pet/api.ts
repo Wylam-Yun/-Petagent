@@ -5,6 +5,7 @@ import type {
   ProactiveResponse,
   PetResponse,
   PetState,
+  TextChatResponse,
   VoiceChatResponse
 } from "./types";
 
@@ -38,7 +39,10 @@ export function postPetEvent(event: PetEventType): Promise<PetResponse> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       event,
-      payload: { description: eventDescription(event) }
+      payload: {
+        description: eventDescription(event),
+        interaction_group: interactionGroup(event)
+      }
     })
   });
 }
@@ -107,6 +111,24 @@ export function resetRuntime(): Promise<RuntimeResetResponse> {
   });
 }
 
+export type SendTextOptions = {
+  thinkingMode?: boolean;
+};
+
+export function sendTextChat(
+  text: string,
+  options: SendTextOptions = {}
+): Promise<TextChatResponse> {
+  return requestJson<TextChatResponse>("/api/text/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      text,
+      thinking_mode: options.thinkingMode === true
+    })
+  });
+}
+
 function eventDescription(event: PetEventType): string {
   switch (event) {
     case "pet_head":
@@ -115,6 +137,28 @@ function eventDescription(event: PetEventType): string {
       return "用户轻轻戳了你的脸";
     case "hug":
       return "用户抱了抱你";
+    case "pet_pat":
+      return "用户轻轻拍拍你，像是在鼓励你";
+    case "praise_momo":
+      return "用户夸夸了 Momo";
+    case "feed_momo":
+      return "用户投喂了 Momo";
+    case "stay_with_me":
+      return "用户希望你陪自己一下";
+    case "comfort_me":
+      return "用户希望你安慰自己";
+    case "encourage_me":
+      return "用户希望你鼓励自己";
+    case "listen_to_me":
+      return "用户希望你听自己吐槽";
+    case "tuck_in":
+      return "用户想哄你休息";
+    case "clean_face":
+      return "用户帮你擦擦脸";
+    case "quiet_company":
+      return "用户希望你安静陪着";
+    case "take_a_break":
+      return "用户希望你休息会儿";
     case "debug_happy":
       return "调试：开心";
     case "debug_sleepy":
@@ -124,6 +168,16 @@ function eventDescription(event: PetEventType): string {
     default:
       return "用户和你互动";
   }
+}
+
+function interactionGroup(event: PetEventType): string {
+  if (["pet_head", "poke_face", "hug", "pet_pat", "praise_momo", "feed_momo", "tuck_in", "clean_face"].includes(event)) {
+    return "pet_care";
+  }
+  if (["stay_with_me", "comfort_me", "encourage_me", "listen_to_me", "quiet_company", "take_a_break"].includes(event)) {
+    return "emotional_companion";
+  }
+  return "debug";
 }
 
 function extensionForType(type: string): string {

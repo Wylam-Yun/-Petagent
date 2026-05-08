@@ -26,9 +26,27 @@ export type PetEventType =
   | "pet_head"
   | "poke_face"
   | "hug"
+  | "pet_pat"
+  | "praise_momo"
+  | "feed_momo"
+  | "stay_with_me"
+  | "comfort_me"
+  | "encourage_me"
+  | "listen_to_me"
+  | "tuck_in"
+  | "clean_face"
+  | "quiet_company"
+  | "take_a_break"
   | "debug_happy"
   | "debug_sleepy"
   | "debug_angry";
+
+export type StateAffect = {
+  interaction_tone: string;
+  pet_effort: string;
+  emotional_effect: string;
+  reason: string;
+};
 
 export type PetUIPhase = "idle" | "listening" | "thinking" | "speaking" | "error";
 export type VoiceMode = "fast" | "thinking";
@@ -56,6 +74,7 @@ export type PetResponse = {
   animation: AnimationName;
   vibration: "none" | "light" | "medium";
   voice_url: string | null;
+  state_affect?: StateAffect;
   pet_state: PetState;
   runtime: {
     event_id: string;
@@ -91,6 +110,21 @@ export type VoiceChatResponse = PetResponse & {
   user_text: string;
   audio_understanding: AudioUnderstanding;
   voice_route?: VoiceRouteInfo;
+  activation?: {
+    type: "wake" | "exit";
+    active: boolean;
+    session_id: string | null;
+  };
+};
+
+export type TextChatResponse = PetResponse & {
+  user_text: string;
+  text_route: {
+    selected: "fast" | "slow";
+    thinking_mode: boolean;
+    brain_provider: string;
+    timings_ms: Record<string, number>;
+  };
   activation?: {
     type: "wake" | "exit";
     active: boolean;

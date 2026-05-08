@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { getProactiveEvent, reportDeviceState, uploadVoice } from "./api";
+import { getProactiveEvent, reportDeviceState, sendTextChat, uploadVoice } from "./api";
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -52,5 +52,26 @@ describe("stage 3 API helpers", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/pet/proactive", undefined);
     expect(response).toEqual({ active: false });
+  });
+});
+
+describe("sendTextChat", () => {
+  test("sends text and thinking mode as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ reply: "好呀。" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTextChat("帮我写两数之和", { thinkingMode: true });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/text/chat");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(JSON.parse(init.body as string)).toEqual({
+      text: "帮我写两数之和",
+      thinking_mode: true
+    });
   });
 });
