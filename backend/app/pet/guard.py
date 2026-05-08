@@ -48,6 +48,7 @@ FALLBACK_ACTION = {
         "energy": 0,
         "intimacy": 0,
         "hunger": 0,
+        "cleanliness": 0,
         "loneliness": -1,
         "sleepiness": 0,
     },

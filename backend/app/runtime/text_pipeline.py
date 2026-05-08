@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from app.pet.brain import PetBrain
 from app.runtime.dispatcher import RuntimeDispatcher
-from app.runtime.voice_pipeline import _classify_activation
+from app.runtime.activation import classify_activation as _classify_activation
 
 
 def _now_ms(start: float) -> int:
@@ -63,7 +63,6 @@ class TextPipeline:
             self.slow_brain_provider_name if thinking_mode else self.fast_brain_provider_name
         )
         started = perf_counter()
-        # _classify_activation is a shared utility (currently lives in voice_pipeline.py)
         activation_event = _classify_activation(user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:

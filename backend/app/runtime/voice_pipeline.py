@@ -10,23 +10,8 @@ from app.providers.audio_omni import (
     FALLBACK_AUDIO_UNDERSTANDING,
 )
 from app.runtime.dispatcher import RuntimeDispatcher
+from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
-
-
-def _classify_activation(text, activation_manager):
-    """Check if text matches wake/exit phrases. Returns event dict or None."""
-    if not text or activation_manager is None:
-        return None
-    stripped = text.strip()
-    if not stripped:
-        return None
-    if activation_manager.phrase_matches(stripped, activation_manager.exit_phrases()):
-        activation_manager.exit(stripped, confidence=1.0)
-        return {"type": "exit_phrase", "source": "voice", "payload": {"user_text": stripped}}
-    if activation_manager.phrase_matches(stripped, activation_manager.wake_phrases()):
-        activation_manager.wake(stripped, confidence=1.0, source="voice")
-        return {"type": "wake_phrase", "source": "voice", "payload": {"user_text": stripped}}
-    return None
 
 
 def _now_ms(start: float) -> int:

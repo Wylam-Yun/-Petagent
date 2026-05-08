@@ -159,3 +159,19 @@ class ActivationManager:
                 ),
             )
             self.connection.commit()
+
+
+def classify_activation(text: str, activation_manager: Optional[ActivationManager]) -> Optional[Dict[str, Any]]:
+    """Check if text matches wake/exit phrases. Returns event dict or None."""
+    if not text or activation_manager is None:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if activation_manager.phrase_matches(stripped, activation_manager.exit_phrases()):
+        activation_manager.exit(stripped, confidence=1.0)
+        return {"type": "exit_phrase", "source": "voice", "payload": {"user_text": stripped}}
+    if activation_manager.phrase_matches(stripped, activation_manager.wake_phrases()):
+        activation_manager.wake(stripped, confidence=1.0, source="voice")
+        return {"type": "wake_phrase", "source": "voice", "payload": {"user_text": stripped}}
+    return None
