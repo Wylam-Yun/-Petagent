@@ -8,6 +8,14 @@ from app.runtime.context import RuntimeContext
 from app.runtime.events import PetEvent
 
 
+BUTTON_EVENTS = {
+    "pet_head", "poke_face", "hug",
+    "pet_pat", "praise_momo", "feed_momo",
+    "stay_with_me", "comfort_me", "encourage_me", "listen_to_me",
+    "tuck_in", "clean_face", "quiet_company", "take_a_break",
+}
+
+
 OUTPUT_SCHEMA_HINT = {
     "reply": "自然简短的回复；需要解释或完成任务时可以适度展开；不输出 kaomoji",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
@@ -79,6 +87,20 @@ def build_pet_messages(
             "3. 如果识别置信度低，不要假装完全听懂，可以说刚刚有点没听清。\n"
             "4. 不要复读用户整句话。\n"
             "5. 很多时候陪着就好，不要强行解决问题。"
+        )
+    if event.type == "text_message":
+        system_prompt += (
+            "\n\n文字事件规则：\n"
+            "1. 用户是在打字和你聊天，默认也要自然回应。\n"
+            "2. 可以完成简单任务，但仍保持 Momo 的语气。\n"
+            "3. 不要因为自己是宠物就故意说不会。\n"
+        )
+    if event.type in BUTTON_EVENTS:
+        system_prompt += (
+            "\n\n按钮互动规则：\n"
+            "1. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
+            "2. 如果用户连续点同一按钮，要表现出自然变化。\n"
+            "3. 投喂 feed_momo 是用户主动投喂，不等于手机充电。\n"
         )
     if event.source == "proactive":
         system_prompt += (

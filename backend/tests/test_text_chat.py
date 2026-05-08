@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
 
+from app.config import load_settings
 from app.main import create_app
+from app.pet.prompt_builder import build_pet_messages
+from app.runtime.context import build_runtime_context
+from app.runtime.events import normalize_event
 
 
 def test_text_chat_uses_fast_route_by_default():
@@ -82,3 +86,26 @@ def test_text_message_can_trigger_skill_planner():
 
     assert response.status_code == 200
     assert "weather.current" in response.json()["runtime"]["skills_used"]
+
+
+def test_text_prompt_mentions_state_affect_and_contextual_buttons():
+    settings = load_settings()
+    event = normalize_event(
+        {
+            "event": "praise_momo",
+            "payload": {"description": "用户夸夸 Momo", "interaction_group": "pet_care"},
+        }
+    )
+    context = build_runtime_context(
+        event,
+        {"name": "Momo", "mood": "happy", "energy": 70},
+        cognition_context={"recent_exact_events": [{"user": "刚刚写了代码"}]},
+    )
+
+    messages = build_pet_messages(settings, event, context)
+    system = messages[0]["content"]
+    user = messages[1]["content"]
+
+    assert "state_affect" in user
+    assert "按钮事件也必须结合最近上下文" in system
+    assert "不要只根据按钮名机械回复" in system
