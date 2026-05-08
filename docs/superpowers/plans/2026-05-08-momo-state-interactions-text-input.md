@@ -4,9 +4,9 @@
 
 **Goal:** Add LLM-driven state affect, richer pet/emotional interaction buttons, and text chat with default TTS while preserving the existing voice, memory, context, and summary runtime.
 
-**Architecture:** Keep the existing `RuntimeDispatcher -> ContextManager -> PetBrain -> Guard -> State/EventLog/Memory/TTS` path as the single runtime path. Extend `PetAction` with `state_affect`, route text chat through a new lightweight `TextPipeline`, and keep all button events on `/api/pet/event` so voice, text, and buttons share context and memory. Use `mimo-v2.5` for fast interactions by passing `fast_brain` explicitly, with Guard limiting state deltas and sanitizing affect metadata.
+**Architecture:** Keep the existing `RuntimeDispatcher -> ContextManager -> PetBrain -> Guard -> State/EventLog/Memory/TTS` path as the single runtime path. Extend `PetAction` with `state_affect`, route text chat through a new lightweight `TextPipeline`, and keep all button events on `/api/pet/event` so voice, text, and buttons share context and memory. Provider selection must stay config-driven: fast interactions use `settings.llm_fast or settings.llm`, thinking mode uses `settings.llm`, and speech uses `settings.tts`; the current primary providers are SiliconFlow ASR/LLM/TTS from `config/models.yaml`, with MiMo only as fallback. Do not hardcode `mimo-v2.5` or any model id in runtime code.
 
-**Tech Stack:** FastAPI, Pydantic, SQLite, React, Vite, Vitest, pytest, MiMo LLM/TTS providers.
+**Tech Stack:** FastAPI, Pydantic, SQLite, React, Vite, Vitest, pytest, config-driven LLM/TTS/ASR providers.
 
 ---
 
@@ -40,6 +40,7 @@ Modify:
 - `backend/app/runtime/context_store.py` — migrate `raw_event_log` with `state_affect_json`.
 - `backend/app/runtime/dispatcher.py` — pass event type to Guard, record `state_affect_json`.
 - `backend/app/main.py` — instantiate `TextPipeline`, expose app state, include text router.
+- `config/app.yaml` — add `text_chat.max_text_chars`.
 - `frontend/src/pet/types.ts` — add new event types, `state_affect`, and text response types.
 - `frontend/src/pet/api.ts` — add `sendTextChat`, event descriptions for new buttons.
 - `frontend/src/components/TouchArea.tsx` — main and more interaction buttons.
@@ -299,6 +300,14 @@ return PetAction(
 Modify `backend/app/pet/prompt_builder.py` `OUTPUT_SCHEMA_HINT`:
 
 ```python
+"state_delta": {
+    "energy": 0,
+    "intimacy": 0,
+    "hunger": 0,
+    "cleanliness": 0,
+    "loneliness": 0,
+    "sleepiness": 0,
+},
 "state_affect": {
     "interaction_tone": "affectionate/playful/comforting/encouraging/demanding/tiring/quiet/caregiving/neutral",
     "pet_effort": "none/low/medium/high",
@@ -545,7 +554,17 @@ Use `"idle"` for `quiet_company` because `calm` is not an allowed mood.
 
 - [ ] **Step 5: Make Guard event-aware**
 
-Modify `backend/app/pet/guard.py`:
+Modify `backend/app/pet/guard.py` without replacing the existing mood/face/animation/voice/vibration validation logic. The only intended changes are:
+
+- rename `STATE_DELTA_LIMITS` to `DEFAULT_STATE_DELTA_LIMITS`
+- add event-specific overrides
+- make `_clamp_delta()` accept `event_type`
+- make `guard_action()` accept `event_type`
+- pass `event_type` only into `_clamp_delta()`
+
+Do **not** hardcode `mood="idle"`, `face_type="idle"`, `animation="breathing"`, `voice_style="soft"`, or `vibration="none"` in the final return. Keep the current enum checks and fallback behavior.
+
+Add the limit tables:
 
 ```python
 DEFAULT_STATE_DELTA_LIMITS = {
@@ -564,7 +583,7 @@ EVENT_STATE_DELTA_LIMITS = {
 }
 ```
 
-Replace `_clamp_delta`:
+Replace only `_clamp_delta`:
 
 ```python
 def _limits_for_event(event_type: str = "") -> Dict[str, tuple]:
@@ -588,7 +607,7 @@ def _clamp_delta(delta: Dict[str, Any], event_type: str = "") -> Dict[str, int]:
     return guarded
 ```
 
-Update `guard_action` signature and call:
+Update `guard_action` signature:
 
 ```python
 def guard_action(
@@ -596,16 +615,57 @@ def guard_action(
     max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS,
     event_type: str = "",
 ) -> PetAction:
+```
+
+Then update the existing `PetAction(...)` return so only `state_delta` changes from:
+
+```python
+state_delta=_clamp_delta(data.get("state_delta") or {}),
+```
+
+to:
+
+```python
+state_delta=_clamp_delta(data.get("state_delta") or {}, event_type),
+```
+
+The surrounding return must continue to look like the existing guarded implementation:
+
+```python
     data = _parse_action(raw)
     if not data.get("reply"):
         data = dict(FALLBACK_ACTION)
+
+    mood = data.get("mood", "idle")
+    if mood not in ALLOWED_MOODS:
+        mood = "idle"
+    face_type = data.get("face_type") or mood
+    if face_type not in ALLOWED_MOODS:
+        face_type = mood
+
+    animation = data.get("animation") or MOOD_ANIMATION_MAP.get(mood, "breathing")
+    if animation not in ALLOWED_ANIMATIONS:
+        animation = MOOD_ANIMATION_MAP.get(mood, "breathing")
+
+    voice_style = data.get("voice_style", "soft")
+    if voice_style not in ALLOWED_VOICE_STYLES:
+        voice_style = "soft"
+
+    vibration = data.get("vibration", "none")
+    if vibration not in ALLOWED_VIBRATIONS:
+        vibration = "none"
+
+    reply = _trim_reply(str(data.get("reply", FALLBACK_ACTION["reply"])).strip(), max_reply_chars)
+
     return PetAction(
-        reply=_trim_reply(str(data.get("reply", FALLBACK_ACTION["reply"])).strip(), max_reply_chars),
-        mood="idle",
-        face_type="idle",
-        animation="breathing",
-        voice_style="soft",
-        vibration="none",
+        reply=reply,
+        mood=mood,
+        face_type=face_type,
+        animation=animation,
+        voice_style=voice_style,
+        vibration=vibration,
+        intent=str(data.get("intent", "stage1_response")),
+        autonomy_notes=str(data.get("autonomy_notes", "")),
         state_delta=_clamp_delta(data.get("state_delta") or {}, event_type),
         state_affect=_guard_state_affect(data.get("state_affect") or {}),
         memory_update=data.get("memory_update") or {"should_save": False, "content": ""},
@@ -739,6 +799,16 @@ state_affect_json
 json.dumps(state_affect, ensure_ascii=False) if state_affect else None
 ```
 
+Modify both explicit `SELECT` statements inside `recent_events()` so they fetch the new column. There are two SELECT lists: one for a specific `episode_id` and one for global recent events. Both must include `state_affect_json`, otherwise the row mapping below will fail at runtime.
+
+```python
+SELECT event_id, episode_id, event_type, source,
+       user_text, pet_reply, mood_after, created_at_utc,
+       state_affect_json
+FROM raw_event_log
+...
+```
+
 Modify `recent_events()` row mapping to include:
 
 ```python
@@ -746,6 +816,15 @@ Modify `recent_events()` row mapping to include:
 ```
 
 Modify `recent_events_for_episode()` or any second event reader in the same file with the same mapping.
+
+Add regression coverage for both consumers that read `recent_events()`:
+
+```bash
+cd /Users/wylam/Documents/workspace/Petagent/backend
+../.venv/bin/python -m pytest tests/test_stage35_context.py tests/test_stage36_summary.py -q
+```
+
+Expected: PASS, proving `ContextManager.build()` and episode summary generation still work with `state_affect_json`.
 
 - [ ] **Step 5: Pass `state_affect` from dispatcher**
 
@@ -782,6 +861,8 @@ git commit -m "feat: persist Momo state affect"
 - Create: `backend/app/api/text.py`
 - Modify: `backend/app/main.py`
 - Modify: `backend/app/runtime/events.py`
+- Modify: `backend/app/runtime/dispatcher.py`
+- Modify: `config/app.yaml`
 - Test: `backend/tests/test_text_chat.py`
 - Test: `backend/tests/test_api_contracts.py`
 
@@ -834,6 +915,15 @@ def test_text_chat_rejects_empty_text():
     assert response.json()["detail"] == "Text message is empty"
 
 
+def test_text_chat_rejects_too_long_text():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post("/api/text/chat", json={"text": "x" * 2500})
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Text message is too long"
+
+
 def test_text_chat_handles_wake_and_exit_phrases():
     client = TestClient(create_app(testing=True))
 
@@ -846,6 +936,25 @@ def test_text_chat_handles_wake_and_exit_phrases():
     assert exit_response.status_code == 200
     assert exit_response.json()["activation"]["type"] == "exit"
     assert exit_response.json()["activation"]["active"] is False
+
+
+def test_text_message_can_trigger_skill_planner():
+    from app.skills.base import SkillResult
+
+    app = create_app(testing=True)
+    app.state.registry.run_skill = lambda skill_id, payload: SkillResult(
+        skill_id=skill_id,
+        ok=True,
+        content="当前多云，约 22 度。",
+        data={},
+        confidence=0.9,
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/text/chat", json={"text": "今天适合出门吗"})
+
+    assert response.status_code == 200
+    assert "weather.current" in response.json()["runtime"]["skills_used"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -857,7 +966,7 @@ cd /Users/wylam/Documents/workspace/Petagent/backend
 ../.venv/bin/python -m pytest tests/test_text_chat.py -q
 ```
 
-Expected: FAIL because `/api/text/chat` does not exist.
+Expected: FAIL because `/api/text/chat` does not exist, text length is not validated, and skills currently only plan for voice events.
 
 - [ ] **Step 3: Add text route types**
 
@@ -984,10 +1093,20 @@ from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/text")
 
+DEFAULT_MAX_TEXT_CHARS = 2000
+
 
 class TextChatRequest(BaseModel):
     text: str
     thinking_mode: bool = False
+
+
+def _max_text_chars(request: Request) -> int:
+    config = request.app.state.settings.app_config.get("text_chat", {})
+    try:
+        return int(config.get("max_text_chars", DEFAULT_MAX_TEXT_CHARS))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TEXT_CHARS
 
 
 @router.post("/chat")
@@ -995,6 +1114,8 @@ async def post_text_chat(payload: TextChatRequest, request: Request):
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text message is empty")
+    if len(text) > _max_text_chars(request):
+        raise HTTPException(status_code=413, detail="Text message is too long")
     started = datetime.utcnow()
     request.app.state.tick_service.apply_if_due()
     result = await run_in_threadpool(
@@ -1015,7 +1136,33 @@ async def post_text_chat(payload: TextChatRequest, request: Request):
     return body
 ```
 
-- [ ] **Step 5: Wire text pipeline in `main.py`**
+- [ ] **Step 5: Add text chat config**
+
+Modify `config/app.yaml`:
+
+```yaml
+text_chat:
+  max_text_chars: 2000
+```
+
+This value is intentionally larger than normal pet replies but small enough to protect SQLite, prompt context, TTS, and summaries from huge pasted content.
+
+- [ ] **Step 6: Allow text messages to use runtime skills**
+
+Modify `backend/app/runtime/dispatcher.py` `_planned_skill_requests()` so text and voice share the same skill planner:
+
+```python
+def _planned_skill_requests(self, event, brain: PetBrain, context) -> List[tuple]:
+    if event.type not in {"voice_message", "text_message"}:
+        return []
+    if not self._looks_like_external_request(event):
+        return []
+    ...
+```
+
+Expected behavior: text prompts like “今天适合出门吗？” can use `weather.current`, while ordinary text chat and button events still skip skill planning.
+
+- [ ] **Step 7: Wire text pipeline in `main.py`**
 
 Modify imports in `backend/app/main.py`:
 
@@ -1049,22 +1196,22 @@ Include router:
 app.include_router(text_api.router)
 ```
 
-- [ ] **Step 6: Run focused tests**
+- [ ] **Step 8: Run focused tests**
 
 Run:
 
 ```bash
 cd /Users/wylam/Documents/workspace/Petagent/backend
-../.venv/bin/python -m pytest tests/test_text_chat.py tests/test_api_contracts.py -q
+../.venv/bin/python -m pytest tests/test_text_chat.py tests/test_api_contracts.py tests/test_stage3_runtime_integration.py -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [ ] **Step 9: Commit Task 4**
 
 ```bash
 cd /Users/wylam/Documents/workspace/Petagent
-git add backend/app/runtime/text_pipeline.py backend/app/api/text.py backend/app/main.py backend/app/runtime/events.py backend/tests/test_text_chat.py backend/tests/test_api_contracts.py
+git add backend/app/runtime/text_pipeline.py backend/app/api/text.py backend/app/main.py backend/app/runtime/events.py backend/app/runtime/dispatcher.py config/app.yaml backend/tests/test_text_chat.py backend/tests/test_api_contracts.py
 git commit -m "feat: add Momo text chat pipeline"
 ```
 
@@ -1274,6 +1421,17 @@ describe("TextInputBar", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("夸夸 Momo");
   });
+
+  test("keeps text when submission fails without leaking rejection", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("network"));
+    render(<TextInputBar disabled={false} onSubmit={onSubmit} />);
+
+    const input = screen.getByPlaceholderText("输入一句话……");
+    fireEvent.change(input, { target: { value: "别丢掉这句话" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByDisplayValue("别丢掉这句话")).toBeInTheDocument();
+  });
 });
 ```
 
@@ -1382,21 +1540,27 @@ import { useState } from "react";
 
 type TextInputBarProps = {
   disabled: boolean;
-  onSubmit: (text: string) => Promise<void> | void;
+  onSubmit: (text: string) => Promise<boolean | void> | boolean | void;
 };
 
 export function TextInputBar({ disabled, onSubmit }: TextInputBarProps) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const isDisabled = disabled || submitting;
 
   async function submit() {
     const text = value.trim();
     if (!text || isDisabled) return;
     setSubmitting(true);
+    setError("");
     try {
-      await onSubmit(text);
-      setValue("");
+      const ok = await onSubmit(text);
+      if (ok !== false) {
+        setValue("");
+      }
+    } catch {
+      setError("发送没成功，文字还留着。");
     } finally {
       setSubmitting(false);
     }
@@ -1427,6 +1591,7 @@ export function TextInputBar({ disabled, onSubmit }: TextInputBarProps) {
         <SendHorizontal aria-hidden="true" />
         <span>发送</span>
       </button>
+      {error ? <span className="text-input-error">{error}</span> : null}
     </form>
   );
 }
@@ -1884,8 +2049,8 @@ async function handleTextResponse(response: TextChatResponse) {
 Add submit handler:
 
 ```typescript
-async function handleTextSubmit(text: string) {
-  if (busy) return;
+async function handleTextSubmit(text: string): Promise<boolean> {
+  if (busy) return false;
   setBusy(true);
   setPhase("thinking");
   setFaceType("thinking");
@@ -1894,18 +2059,19 @@ async function handleTextSubmit(text: string) {
   try {
     const response = await sendTextChat(text, { thinkingMode });
     await handleTextResponse(response);
+    return true;
   } catch {
     setFaceType("concerned");
     setAnimation("tilt");
     setBubbleText("Momo 刚刚没接稳，你那句话还可以再发一次。");
-    throw new Error("text_chat_failed");
+    return false;
   } finally {
     setBusy(false);
   }
 }
 ```
 
-Use `throw new Error("text_chat_failed")` so `TextInputBar` keeps the text on failed submission.
+Returning `false` tells `TextInputBar` to keep the text on failed submission. Do not throw from this handler for expected network/API failures; the component also catches unexpected errors so `void submit()` does not create unhandled promise rejections.
 
 - [ ] **Step 5: Render TextInputBar**
 
@@ -1959,6 +2125,13 @@ Modify `frontend/src/styles.css`:
 .text-input-bar input:disabled {
   cursor: wait;
   opacity: 0.62;
+}
+
+.text-input-error {
+  grid-column: 1 / -1;
+  min-height: 18px;
+  color: #9f3f46;
+  font-size: 0.82rem;
 }
 ```
 
@@ -2027,10 +2200,11 @@ Run:
 ```bash
 cd /Users/wylam/Documents/workspace/Petagent
 git diff --check
-git diff --cached --name-only | xargs rg -n "(tp-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{20,}|MIMO_API_KEY=.+|ASR_API_KEY=.+|NVIDIA_API_KEY=.+)" -- 2>/dev/null || true
+git diff --cached --name-only | xargs rg -n "(tp-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{20,}|MIMO_API_KEY=.+|SILICONFLOW_API_KEY=.+|ASR_API_KEY=.+|NVIDIA_API_KEY=.+)" -- 2>/dev/null || true
+if git diff --cached --name-only | rg -q '(^|/)\.env$'; then echo "ERROR: staged .env"; exit 1; fi
 ```
 
-Expected: `git diff --check` exits 0 and secret scan prints no real secrets.
+Expected: `git diff --check` exits 0, `.env` is not staged, and secret scan prints no real secrets. `.env.example` may contain empty variables only.
 
 - [ ] **Step 5: Commit verification fixes**
 
@@ -2087,7 +2261,8 @@ Run:
 
 ```bash
 ssh -o BatchMode=yes nubia 'curl -s http://127.0.0.1:8000/api/health; echo'
-curl -s http://172.20.10.2:8000/api/health
+PHONE_IP=$(ssh -o BatchMode=yes nubia "ip route get 1.1.1.1 | awk '{print \\$7; exit}'")
+curl -s "http://${PHONE_IP}:8000/api/health"
 ```
 
 Expected:
@@ -2101,7 +2276,13 @@ Expected:
 Open:
 
 ```text
-http://172.20.10.2:8000/
+http://<nubia-current-ip>:8000/
+```
+
+Current hotspot IPs can change. Resolve the current address with:
+
+```bash
+ssh -o BatchMode=yes nubia "ip route get 1.1.1.1 | awk '{print \$7; exit}'"
 ```
 
 Perform these checks:
@@ -2159,9 +2340,12 @@ git -c http.version=HTTP/1.1 push origin main
 - [ ] Frontend test suite passes.
 - [ ] Frontend build succeeds.
 - [ ] `/api/text/chat` works in fast and slow modes.
+- [ ] `/api/text/chat` rejects empty and over-limit text before dispatcher.
+- [ ] Text messages that ask for weather/device facts can use the same skill planner as voice messages.
 - [ ] `state_affect` appears in API responses and raw event log.
 - [ ] All expanded buttons send supported event names.
 - [ ] Text input defaults to TTS playback through normal `PetResponse.voice_url`.
 - [ ] Buttons, text, and voice all go through `RuntimeDispatcher`.
+- [ ] Secret scan includes SiliconFlow/MiMo/ASR/NVIDIA key patterns and `.env` is not staged.
 - [ ] Nubia runtime starts and health endpoint responds.
 - [ ] GitHub `origin/main` contains the final commits.
