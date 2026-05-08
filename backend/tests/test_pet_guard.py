@@ -18,7 +18,7 @@ def test_guard_replaces_invalid_mood_and_limits_delta():
     assert action.face_type == "idle"
     assert action.animation == "breathing"
     assert action.state_delta["intimacy"] == 2
-    assert action.state_delta["loneliness"] == -5
+    assert action.state_delta["loneliness"] == -6
 
 
 def test_guard_uses_fallback_for_invalid_json():

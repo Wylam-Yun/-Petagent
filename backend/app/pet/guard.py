@@ -18,13 +18,19 @@ from app.runtime.actions import (
 )
 
 
-STATE_DELTA_LIMITS = {
+DEFAULT_STATE_DELTA_LIMITS = {
     "energy": (-5, 5),
     "intimacy": (-1, 2),
-    "hunger": (-5, 5),
+    "hunger": (-3, 3),
     "cleanliness": (-2, 2),
-    "loneliness": (-5, 2),
-    "sleepiness": (-5, 5),
+    "loneliness": (-6, 3),
+    "sleepiness": (-3, 5),
+}
+
+EVENT_STATE_DELTA_LIMITS = {
+    "feed_momo": {"hunger": (-8, 2), "energy": (-3, 5)},
+    "charging_started": {"hunger": (-5, 2), "energy": (-3, 8)},
+    "clean_face": {"cleanliness": (-2, 8)},
 }
 
 DEFAULT_MAX_REPLY_CHARS = 500
@@ -60,9 +66,17 @@ def _parse_action(raw: Any) -> Dict[str, Any]:
     return dict(FALLBACK_ACTION)
 
 
-def _clamp_delta(delta: Dict[str, Any]) -> Dict[str, int]:
+def _limits_for_event(event_type: str = "") -> Dict[str, tuple]:
+    limits = dict(DEFAULT_STATE_DELTA_LIMITS)
+    for key, value in EVENT_STATE_DELTA_LIMITS.get(event_type, {}).items():
+        limits[key] = value
+    return limits
+
+
+def _clamp_delta(delta: Dict[str, Any], event_type: str = "") -> Dict[str, int]:
     guarded: Dict[str, int] = {}
-    for key, limits in STATE_DELTA_LIMITS.items():
+    limits_by_key = _limits_for_event(event_type)
+    for key, limits in limits_by_key.items():
         value = delta.get(key, 0)
         try:
             number = int(value)
@@ -112,7 +126,11 @@ def _strip_reasoning(reply: str) -> str:
     return cleaned or FALLBACK_ACTION["reply"]
 
 
-def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> PetAction:
+def guard_action(
+    raw: Any,
+    max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS,
+    event_type: str = "",
+) -> PetAction:
     data = _parse_action(raw)
     if not data.get("reply"):
         data = dict(FALLBACK_ACTION)
@@ -150,7 +168,7 @@ def guard_action(raw: Any, max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS) -> Pe
         vibration=vibration,
         intent=str(data.get("intent", "stage1_response")),
         autonomy_notes=str(data.get("autonomy_notes", "")),
-        state_delta=_clamp_delta(data.get("state_delta") or {}),
+        state_delta=_clamp_delta(data.get("state_delta") or {}, event_type),
         state_affect=_guard_state_affect(data.get("state_affect") or {}),
         memory_update=data.get("memory_update") or {"should_save": False, "content": ""},
     )

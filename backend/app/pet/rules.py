@@ -48,6 +48,18 @@ EVENT_DELTAS = {
     "charging_stopped": {"mood": "idle"},
     "sleepy_time": {"mood": "sleepy", "sleepiness": 3},
     "user_return": {"mood": "happy", "loneliness": -5},
+    "pet_pat": {"mood": "shy", "energy": 1, "intimacy": 1, "loneliness": -3},
+    "praise_momo": {"mood": "happy", "energy": 1, "intimacy": 1, "loneliness": -2},
+    "feed_momo": {"mood": "happy", "energy": 1, "intimacy": 1, "hunger": -4, "loneliness": -1},
+    "stay_with_me": {"mood": "concerned", "intimacy": 1, "loneliness": -4},
+    "comfort_me": {"mood": "concerned", "intimacy": 1, "loneliness": -3},
+    "encourage_me": {"mood": "happy", "energy": 1, "intimacy": 1, "loneliness": -2},
+    "listen_to_me": {"mood": "concerned", "intimacy": 1, "loneliness": -2},
+    "tuck_in": {"mood": "sleepy", "sleepiness": 3, "energy": -1, "loneliness": -1},
+    "clean_face": {"mood": "shy", "cleanliness": 5, "intimacy": 1},
+    "quiet_company": {"mood": "idle", "loneliness": -2},
+    "take_a_break": {"mood": "sleepy", "sleepiness": 2, "energy": 1},
+    "text_message": {"intimacy": 1, "loneliness": -3},
 }
 
 

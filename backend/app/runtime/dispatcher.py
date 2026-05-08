@@ -170,6 +170,7 @@ class RuntimeDispatcher:
         action = guard_action(
             raw_action,
             max_reply_chars=self._max_reply_chars(active_brain),
+            event_type=event.type,
         )
 
         # 10. Apply state delta and save
