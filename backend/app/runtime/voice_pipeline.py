@@ -69,27 +69,35 @@ class VoicePipeline:
     ) -> VoicePipelineResult:
         requested = requested_route if requested_route in {"auto", "fast", "slow"} else "auto"
         if thinking_mode or requested == "slow":
-            return self._run_slow(
+            return self._run_asr_route(
                 audio_path,
                 content_type,
                 requested=requested,
+                selected="slow",
                 thinking_mode=thinking_mode,
-                fallback_reason="",
+                brain=self.slow_brain,
+                brain_provider_name=self.slow_brain_provider_name,
             )
-        return self._run_fast(
+        return self._run_asr_route(
             audio_path,
             content_type,
             requested=requested,
+            selected="fast",
             thinking_mode=thinking_mode,
+            brain=self.fast_brain,
+            brain_provider_name=self.fast_brain_provider_name,
         )
 
-    def _run_fast(
+    def _run_asr_route(
         self,
         audio_path: Path,
         content_type: str,
         *,
         requested: str,
+        selected: str,
         thinking_mode: bool,
+        brain: PetBrain,
+        brain_provider_name: str,
     ) -> VoicePipelineResult:
         timings: Dict[str, int] = {}
         started = perf_counter()
@@ -117,7 +125,7 @@ class VoicePipeline:
 
         if fallback_reason:
             if self.slow_fallback_enabled:
-                result = self._run_slow(
+                result = self._run_audio_fallback(
                     audio_path,
                     content_type,
                     requested=requested,
@@ -160,19 +168,19 @@ class VoicePipeline:
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:
-            response = self.dispatcher.handle_event(activation_event, brain=self.fast_brain)
+            response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
             response = self.dispatcher.handle_event(
                 {
                     "type": "voice_message",
-                    "source": "voice_fast",
+                    "source": "voice_%s" % selected,
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
                     },
                 },
-                brain=self.fast_brain,
+                brain=brain,
             )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
@@ -182,12 +190,12 @@ class VoicePipeline:
             response=response,
             route_info=VoiceRouteInfo(
                 requested=requested,
-                selected="fast",
+                selected=selected,
                 thinking_mode=thinking_mode,
                 asr_provider=transcript.provider,
                 asr_error_code=transcript.error_code,
                 asr_error_message=transcript.error_message,
-                brain_provider=self.fast_brain_provider_name,
+                brain_provider=brain_provider_name,
                 fallback_reason=fallback_reason,
                 timings_ms=timings,
             ),
@@ -195,7 +203,7 @@ class VoicePipeline:
             activation=activation_info,
         )
 
-    def _run_slow(
+    def _run_audio_fallback(
         self,
         audio_path: Path,
         content_type: str,

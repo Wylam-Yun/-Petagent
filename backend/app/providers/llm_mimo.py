@@ -51,6 +51,22 @@ class MockLLMProvider:
         }
 
 
+class FallbackLLMProvider:
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.name = "%s_with_%s_fallback" % (
+            getattr(primary, "name", "primary"),
+            getattr(fallback, "name", "fallback"),
+        )
+
+    def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        try:
+            return self.primary.complete_json(messages)
+        except Exception:
+            return self.fallback.complete_json(messages)
+
+
 class MiMoLLMProvider:
     def __init__(
         self, settings: Settings, provider_config: ProviderConfig = None
@@ -82,11 +98,9 @@ class MiMoLLMProvider:
 
         response = requests.post(
             self.provider_config.base_url.rstrip("/") + "/chat/completions",
-            headers={
-                "api-key": api_key,
-                "content-type": "application/json",
-            },
+            headers=self._headers(api_key),
             json=payload,
+            proxies=self._proxies(),
             timeout=self.provider_config.timeout_seconds,
         )
         response.raise_for_status()
@@ -95,3 +109,24 @@ class MiMoLLMProvider:
         if isinstance(content, dict):
             return content
         return json.loads(_extract_json_text(str(content)))
+
+    def _headers(self, api_key: str) -> Dict[str, str]:
+        headers = {"content-type": "application/json"}
+        scheme = str(self.provider_config.extra.get("auth_scheme") or "api-key").lower()
+        if scheme == "bearer":
+            headers["Authorization"] = "Bearer %s" % api_key
+            return headers
+        if scheme == "custom":
+            header = str(self.provider_config.extra.get("api_key_header") or "Authorization")
+            prefix = str(self.provider_config.extra.get("api_key_prefix") or "")
+            headers[header] = ("%s %s" % (prefix, api_key)).strip()
+            return headers
+        header = str(self.provider_config.extra.get("api_key_header") or "api-key")
+        headers[header] = api_key
+        return headers
+
+    def _proxies(self) -> Dict[str, str]:
+        proxy_url = str(self.provider_config.extra.get("proxy_url") or "").strip()
+        if not proxy_url:
+            return {}
+        return {"http": proxy_url, "https": proxy_url}

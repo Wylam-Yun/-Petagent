@@ -42,9 +42,12 @@ class Settings:
     ui_theme: Dict[str, Any]
     llm: ProviderConfig
     llm_fast: Optional[ProviderConfig]
+    llm_fallback: Optional[ProviderConfig]
+    llm_fast_fallback: Optional[ProviderConfig]
     audio_understanding: ProviderConfig
     asr: Optional[ProviderConfig]
     tts: ProviderConfig
+    tts_fallback: Optional[ProviderConfig]
     voice_routing: Dict[str, Any]
     api_key: Optional[str] = field(default=None, repr=False)
 
@@ -174,12 +177,26 @@ def load_settings(
     llm = _provider_config(providers.get("llm", {}), env_values)
     llm_fast_raw = providers.get("llm_fast")
     llm_fast = _provider_config(llm_fast_raw, env_values) if llm_fast_raw else None
+    llm_fallback_raw = providers.get("llm_fallback")
+    llm_fallback = (
+        _provider_config(llm_fallback_raw, env_values) if llm_fallback_raw else None
+    )
+    llm_fast_fallback_raw = providers.get("llm_fast_fallback")
+    llm_fast_fallback = (
+        _provider_config(llm_fast_fallback_raw, env_values)
+        if llm_fast_fallback_raw
+        else None
+    )
     audio_understanding = _provider_config(
         providers.get("audio_understanding", providers.get("llm", {})), env_values
     )
     asr_raw = providers.get("asr")
     asr = _provider_config(asr_raw, env_values) if asr_raw else None
     tts = _provider_config(providers.get("tts", {}), env_values)
+    tts_fallback_raw = providers.get("tts_fallback")
+    tts_fallback = (
+        _provider_config(tts_fallback_raw, env_values) if tts_fallback_raw else None
+    )
     api_key = env_values.get(tts.api_key_env) or env_values.get(llm.api_key_env)
     voice_routing = app_config.get("voice", {})
 
@@ -204,6 +221,9 @@ def load_settings(
         audio_understanding=audio_understanding,
         asr=asr,
         tts=tts,
+        tts_fallback=tts_fallback,
+        llm_fallback=llm_fallback,
+        llm_fast_fallback=llm_fast_fallback,
         voice_routing=voice_routing,
         api_key=api_key,
     )

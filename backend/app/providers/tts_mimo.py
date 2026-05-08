@@ -84,13 +84,28 @@ class MockTTSProvider:
         return "/static/audio/" + filename
 
 
+class FallbackTTSProvider:
+    def __init__(self, primary, fallback) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    def synthesize(self, text: str, voice_style: str = "soft") -> Optional[str]:
+        voice_url = self.primary.synthesize(text, voice_style)
+        if voice_url:
+            return voice_url
+        return self.fallback.synthesize(text, voice_style)
+
+
 class MiMoTTSProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
     def synthesize(self, text: str, voice_style: str = "soft") -> Optional[str]:
-        if not self.settings.api_key or not self.settings.tts.base_url:
+        api_key = self.settings.tts.api_key or self.settings.api_key
+        if not api_key or not self.settings.tts.base_url:
             return None
+        if str(self.settings.tts.extra.get("api_style") or "").lower() == "openai_speech":
+            return self._synthesize_openai_speech(text, voice_style, api_key)
 
         payload = build_tts_payload(
             voice_prompt=build_voice_prompt(self.settings.tts.style or {}, voice_style),
@@ -102,16 +117,73 @@ class MiMoTTSProvider:
         try:
             response = requests.post(
                 self.settings.tts.base_url.rstrip("/") + "/chat/completions",
-                headers={
-                    "api-key": self.settings.api_key,
-                    "content-type": "application/json",
-                },
+                headers=self._headers(api_key),
                 json=payload,
+                proxies=self._proxies(),
                 timeout=self.settings.tts.timeout_seconds,
             )
             response.raise_for_status()
             audio_bytes = extract_audio_bytes(response.json())
         except Exception:
+            return None
+        return self._write_audio(audio_bytes)
+
+    def _synthesize_openai_speech(
+        self, text: str, voice_style: str, api_key: str
+    ) -> Optional[str]:
+        endpoint = str(self.settings.tts.extra.get("endpoint") or "/audio/speech")
+        payload = {
+            "model": self.settings.tts.model,
+            "input": self._speech_input(text, voice_style),
+            "voice": self.settings.tts.voice,
+            "response_format": self.settings.tts.audio_format or "mp3",
+        }
+        speed = self.settings.tts.extra.get("speed")
+        if speed is not None:
+            payload["speed"] = speed
+        try:
+            response = requests.post(
+                self.settings.tts.base_url.rstrip("/") + "/" + endpoint.lstrip("/"),
+                headers=self._headers(api_key),
+                json=payload,
+                proxies=self._proxies(),
+                timeout=self.settings.tts.timeout_seconds,
+            )
+            response.raise_for_status()
+            audio_bytes = response.content
+        except Exception:
+            return None
+        return self._write_audio(audio_bytes)
+
+    def _speech_input(self, text: str, voice_style: str) -> str:
+        if not bool(self.settings.tts.extra.get("include_voice_prompt", True)):
+            return text
+        prompt = build_voice_prompt(self.settings.tts.style or {}, voice_style)
+        return "%s<|endofprompt|>%s" % (prompt, text)
+
+    def _headers(self, api_key: str) -> Dict[str, str]:
+        headers = {"content-type": "application/json"}
+        scheme = str(self.settings.tts.extra.get("auth_scheme") or "api-key").lower()
+        if scheme == "bearer":
+            headers["Authorization"] = "Bearer %s" % api_key
+            return headers
+        if scheme == "custom":
+            header = str(self.settings.tts.extra.get("api_key_header") or "Authorization")
+            prefix = str(self.settings.tts.extra.get("api_key_prefix") or "")
+            headers[header] = ("%s %s" % (prefix, api_key)).strip()
+            return headers
+        header = str(self.settings.tts.extra.get("api_key_header") or "api-key")
+        headers[header] = api_key
+        return headers
+
+    def _proxies(self) -> Dict[str, str]:
+        proxy_url = str(self.settings.tts.extra.get("proxy_url") or "").strip()
+        if not proxy_url:
+            return {}
+        return {"http": proxy_url, "https": proxy_url}
+
+    def _write_audio(self, audio_bytes: bytes) -> Optional[str]:
+        if not audio_bytes:
             return None
 
         self.settings.audio_dir.mkdir(parents=True, exist_ok=True)

@@ -117,6 +117,26 @@ providers:
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 120
+  llm_fallback:
+    name: mimo
+    model: mimo-v2-omni
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 60
+  llm_fast_fallback:
+    name: mimo
+    model: mimo-v2-omni
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 60
+  tts_fallback:
+    name: mimo
+    model: mimo-v2.5-tts
+    voice: 冰糖
+    format: wav
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 120
 """,
         encoding="utf-8",
     )
@@ -149,6 +169,11 @@ providers:
     assert settings.asr.extra["protocol"] == "http"
     assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
     assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
+    assert settings.llm_fallback is not None
+    assert settings.llm_fallback.model == "mimo-v2-omni"
+    assert settings.llm_fast_fallback is not None
+    assert settings.tts_fallback is not None
+    assert settings.tts_fallback.model == "mimo-v2.5-tts"
     assert settings.voice_routing["allowed_audio_types"] == ["audio/wav"]
     assert settings.voice_routing["max_audio_bytes"] == 4096
     rendered = repr(settings)

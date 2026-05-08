@@ -1,18 +1,28 @@
 providers:
   llm:
-    name: mimo
-    model: mimo-v2-omni
-    base_url_env: MIMO_BASE_URL
-    api_key_env: MIMO_API_KEY
-    timeout_seconds: 60
+    name: siliconflow_slow
+    model: deepseek-ai/DeepSeek-V4-Flash
+    base_url_env: SILICONFLOW_BASE_URL
+    api_key_env: SILICONFLOW_API_KEY
+    timeout_seconds: 45
+    auth_scheme: bearer
+    max_tokens: 1200
+    proxy_url_env:
+      - SILICONFLOW_PROXY_URL
+      - PETAGENT_PROXY_URL
+      - PETAGENT_ASR_PROXY_URL
   llm_fast:
-    name: mimo_v25_fast
-    model: mimo-v2.5
-    base_url_env: MIMO_BASE_URL
-    api_key_env: MIMO_API_KEY
+    name: siliconflow_fast
+    model: Qwen/Qwen3-30B-A3B-Instruct-2507
+    base_url_env: SILICONFLOW_BASE_URL
+    api_key_env: SILICONFLOW_API_KEY
     timeout_seconds: 20
-    chat_template_kwargs:
-      enable_thinking: false
+    auth_scheme: bearer
+    max_tokens: 900
+    proxy_url_env:
+      - SILICONFLOW_PROXY_URL
+      - PETAGENT_PROXY_URL
+      - PETAGENT_ASR_PROXY_URL
   audio_understanding:
     name: mimo
     model: mimo-v2-omni
@@ -21,16 +31,16 @@ providers:
     timeout_seconds: 60
   asr:
     name: configurable_http_asr
-    model: TeleAI/TeleSpeechASR
+    model: FunAudioLLM/SenseVoiceSmall
     base_url_env:
+      - SILICONFLOW_BASE_URL
       - ASR_BASE_URL
-      - NVIDIA_HTTP_ASR_BASE_URL
     api_key_env:
+      - SILICONFLOW_API_KEY
       - ASR_API_KEY
-      - NVIDIA_API_KEY
     timeout_seconds: 15
     protocol: http
-    endpoint: /v1/audio/transcriptions
+    endpoint: /audio/transcriptions
     request_format: multipart
     file_field: file
     model_field: model
@@ -38,6 +48,8 @@ providers:
     language_code: zh-CN
     auth_scheme: bearer
     proxy_url_env:
+      - SILICONFLOW_PROXY_URL
+      - PETAGENT_PROXY_URL
       - ASR_PROXY_URL
       - PETAGENT_ASR_PROXY_URL
     transcript_paths:
@@ -56,6 +68,40 @@ providers:
       - results[].alternatives[].confidence
       - results[].channels[].alternatives[].confidence
   tts:
+    name: siliconflow_tts
+    model: FunAudioLLM/CosyVoice2-0.5B
+    voice: FunAudioLLM/CosyVoice2-0.5B:claire
+    format: mp3
+    base_url_env: SILICONFLOW_BASE_URL
+    api_key_env: SILICONFLOW_API_KEY
+    timeout_seconds: 60
+    api_style: openai_speech
+    endpoint: /audio/speech
+    auth_scheme: bearer
+    speed: 1.15
+    proxy_url_env:
+      - SILICONFLOW_PROXY_URL
+      - PETAGENT_PROXY_URL
+      - PETAGENT_ASR_PROXY_URL
+    style:
+      name: cute_soft
+      speed: slightly_fast
+      emotion: warm
+  llm_fallback:
+    name: mimo
+    model: mimo-v2-omni
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 60
+  llm_fast_fallback:
+    name: mimo_fast_fallback
+    model: mimo-v2.5
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 30
+    chat_template_kwargs:
+      enable_thinking: false
+  tts_fallback:
     name: mimo
     model: mimo-v2.5-tts
     voice: 冰糖

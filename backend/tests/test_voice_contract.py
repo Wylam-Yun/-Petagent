@@ -59,6 +59,7 @@ def test_voice_chat_rejects_audio_larger_than_limit():
 
 def test_voice_chat_falls_back_when_audio_provider_fails():
     app = create_app(testing=True)
+    app.state.asr_provider.text = ""
     app.state.audio_provider.fail = True
     client = TestClient(app)
 

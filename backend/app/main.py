@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,9 +25,9 @@ from app.providers.audio_omni import (
 from app.providers.asr_http import HttpASRProvider
 from app.providers.asr_mock import MockASRProvider
 from app.providers.asr_nvidia import NvidiaParakeetASRProvider
-from app.providers.llm_mimo import MiMoLLMProvider, MockLLMProvider
+from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLMProvider
 from app.providers.proactive_rule import ProactiveRuleProvider
-from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider
+from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
@@ -48,17 +50,34 @@ from app.runtime.tick import TickService
 from app.runtime.voice_pipeline import VoicePipeline
 
 
-def _select_llm_provider(settings: Settings, testing: bool, provider_config=None, mock_name: str = "mock_llm"):
+def _select_llm_provider(
+    settings: Settings,
+    testing: bool,
+    provider_config=None,
+    mock_name: str = "mock_llm",
+    fallback_config=None,
+):
     config = provider_config or settings.llm
     if testing or not config.api_key:
         return MockLLMProvider(mock_name)
-    return MiMoLLMProvider(settings, config)
+    primary = MiMoLLMProvider(settings, config)
+    if fallback_config is not None and fallback_config.api_key:
+        return FallbackLLMProvider(primary, MiMoLLMProvider(settings, fallback_config))
+    return primary
 
 
 def _select_tts_provider(settings: Settings, testing: bool):
     if testing:
         return MockTTSProvider(settings.audio_dir)
-    return MiMoTTSProvider(settings)
+    primary = MiMoTTSProvider(settings)
+    if settings.tts_fallback is not None and settings.tts_fallback.api_key:
+        fallback_settings = replace(
+            settings,
+            tts=settings.tts_fallback,
+            api_key=settings.tts_fallback.api_key or settings.api_key,
+        )
+        return FallbackTTSProvider(primary, MiMoTTSProvider(fallback_settings))
+    return primary
 
 
 def _select_audio_provider(settings: Settings, testing: bool):
@@ -105,10 +124,18 @@ def create_app(testing: bool = False) -> FastAPI:
     maintenance_state = MaintenanceStateStore(state_store.connection)
 
     slow_llm_provider = _select_llm_provider(
-        settings, testing, settings.llm, "mock_slow_llm"
+        settings,
+        testing,
+        settings.llm,
+        "mock_slow_llm",
+        fallback_config=settings.llm_fallback,
     )
     fast_llm_provider = _select_llm_provider(
-        settings, testing, settings.llm_fast or settings.llm, "mock_fast_llm"
+        settings,
+        testing,
+        settings.llm_fast or settings.llm,
+        "mock_fast_llm",
+        fallback_config=settings.llm_fast_fallback or settings.llm_fallback,
     )
     brain = PetBrain(settings, slow_llm_provider)
     fast_brain = PetBrain(settings, fast_llm_provider)
