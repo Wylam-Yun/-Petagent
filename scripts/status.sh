@@ -20,3 +20,23 @@ if command -v curl >/dev/null 2>&1; then
   curl -fsS "http://127.0.0.1:$PORT/api/health" || true
   echo
 fi
+
+if command -v python >/dev/null 2>&1; then
+  python - "$PROJECT_DIR/backend/data/pet.db" <<'PY' || true
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+if not db_path.exists():
+    print("database: missing")
+    raise SystemExit(0)
+
+try:
+    con = sqlite3.connect(str(db_path))
+    result = con.execute("PRAGMA quick_check").fetchone()
+    print(f"database: {result[0] if result else 'unknown'}")
+except sqlite3.DatabaseError as exc:
+    print(f"database: malformed ({exc})")
+PY
+fi

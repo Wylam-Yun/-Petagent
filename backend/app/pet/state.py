@@ -23,6 +23,48 @@ STATE_COLUMNS = [
 ]
 
 
+def _database_sidecars(db_path: Path) -> list[Path]:
+    return [db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")]
+
+
+def _backup_dir_for(db_path: Path) -> Path:
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    root = db_path.parent / "db-backups"
+    candidate = root / f"corrupt-{timestamp}"
+    suffix = 1
+    while candidate.exists():
+        candidate = root / f"corrupt-{timestamp}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _quarantine_database(db_path: Path) -> Path:
+    backup_dir = _backup_dir_for(db_path)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for path in _database_sidecars(db_path):
+        if path.exists():
+            path.replace(backup_dir / path.name)
+    return backup_dir
+
+
+def _database_quick_check_ok(db_path: Path) -> bool:
+    if not db_path.exists():
+        # A missing main DB with leftover WAL/SHM files is unsafe to reuse.
+        return not any(path.exists() for path in _database_sidecars(db_path)[1:])
+
+    connection: Optional[sqlite3.Connection] = None
+    try:
+        uri = f"file:{db_path}?mode=ro&immutable=1"
+        connection = sqlite3.connect(uri, uri=True)
+        row = connection.execute("PRAGMA quick_check").fetchone()
+        return bool(row and row[0] == "ok")
+    except sqlite3.DatabaseError:
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 class LockedSQLiteConnection:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
@@ -69,8 +111,34 @@ def default_state(name: str = "Momo") -> Dict[str, Any]:
 class PetStateStore:
     def __init__(self, db_path: Optional[Path], pet_name: str = "Momo") -> None:
         self.pet_name = pet_name
+        recovered_once = False
         if db_path is not None:
             db_path.parent.mkdir(parents=True, exist_ok=True)
+            if not _database_quick_check_ok(db_path):
+                _quarantine_database(db_path)
+                recovered_once = True
+
+        raw_connection: Optional[sqlite3.Connection] = None
+        try:
+            raw_connection = self._open_connection(db_path)
+            self.connection = LockedSQLiteConnection(raw_connection)
+            self.initialize()
+        except sqlite3.DatabaseError:
+            if db_path is None or recovered_once:
+                raise
+            if raw_connection is not None:
+                try:
+                    raw_connection.close()
+                except Exception:
+                    pass
+            _quarantine_database(db_path)
+            raw_connection = self._open_connection(db_path)
+            self.connection = LockedSQLiteConnection(raw_connection)
+            self.initialize()
+
+    @staticmethod
+    def _open_connection(db_path: Optional[Path]) -> sqlite3.Connection:
+        if db_path is not None:
             raw_connection = sqlite3.connect(str(db_path), check_same_thread=False)
         else:
             raw_connection = sqlite3.connect(":memory:", check_same_thread=False)
@@ -79,8 +147,7 @@ class PetStateStore:
         if db_path is not None:
             raw_connection.execute("PRAGMA journal_mode = WAL")
             raw_connection.execute("PRAGMA synchronous = NORMAL")
-        self.connection = LockedSQLiteConnection(raw_connection)
-        self.initialize()
+        return raw_connection
 
     def initialize(self) -> None:
         with self.connection.locked():
