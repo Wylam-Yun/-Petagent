@@ -27,7 +27,8 @@ def test_voice_chat_returns_behavior_package_for_audio_upload():
     }
     assert 0 <= body["audio_understanding"]["confidence"] <= 1
     assert body["reply"]
-    assert body["voice_url"] is not None
+    assert body["voice_url"] is None
+    assert body["audio_job_id"]
     assert body["runtime"]["skills_used"] == []
     assert body["runtime"]["event_id"]
     assert body["pet_state"]["schema_version"] == "0.1"

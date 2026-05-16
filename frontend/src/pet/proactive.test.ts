@@ -4,7 +4,7 @@ import { shouldApplyProactive } from "./proactive";
 import type { PetUIPhase } from "./types";
 
 describe("proactive UI guard", () => {
-  test.each<PetUIPhase>(["listening", "thinking", "speaking"])(
+  test.each<PetUIPhase>(["listening", "thinking", "waiting_voice", "speaking", "audio_error"])(
     "does not apply proactive response while phase is %s",
     (phase) => {
       expect(shouldApplyProactive({ phase, busy: false })).toBe(false);

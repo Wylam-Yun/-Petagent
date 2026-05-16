@@ -308,12 +308,14 @@ button {
 }
 
 .voice-thinking,
+.voice-waiting_voice,
 .voice-speaking {
   background: #172033;
   border-color: #172033;
 }
 
-.voice-error {
+.voice-error,
+.voice-audio_error {
   background: #ffffff;
   color: #172033;
 }

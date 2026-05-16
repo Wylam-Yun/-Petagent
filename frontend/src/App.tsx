@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PetBubble } from "./components/PetBubble";
 import { PetFace } from "./components/PetFace";
@@ -9,6 +9,7 @@ import { VoiceButton } from "./components/VoiceButton";
 import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import {
   exitMomo,
+  getAudioJob,
   getPetState,
   getProactiveEvent,
   postPetEvent,
@@ -75,6 +76,7 @@ function App() {
   const [phase, setPhase] = useState<PetUIPhase>("idle");
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [thinkingMode, setThinkingMode] = useState(false);
+  const audioRunRef = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -152,11 +154,7 @@ function App() {
 
     try {
       const response = await postPetEvent(event);
-      setPetState(response.pet_state);
-      setFaceType(response.face_type);
-      setAnimation(response.animation);
-      setBubbleText(response.reply);
-      playVoice(response.voice_url);
+      applyPetResponse(response);
       vibrate(response.vibration);
     } catch {
       setFaceType("concerned");
@@ -171,9 +169,81 @@ function App() {
     setPetState(response.pet_state);
     setFaceType(response.face_type);
     setAnimation(response.animation);
-    setBubbleText(response.reply);
-    playVoice(response.voice_url, () => setPhase("idle"));
+    setBubbleText(response.audio_job_id || response.voice_url ? "Momo 准备开口…" : "Momo 刚刚没发出声。");
+    playResponseAudio(response);
     vibrate(response.vibration);
+  }
+
+  async function playResponseAudio(response: PetResponse) {
+    const runId = audioRunRef.current + 1;
+    audioRunRef.current = runId;
+
+    if (response.audio_job_id) {
+      setPhase("waiting_voice");
+      try {
+        const job = await waitForReadyAudio(response.audio_job_id, runId);
+        if (audioRunRef.current !== runId) return;
+        if (job.voice_url) {
+          setPhase("speaking");
+          setBubbleText("Momo 在说…");
+          await playVoice(job.voice_url);
+          if (audioRunRef.current === runId) {
+            setPhase("idle");
+            setBubbleText("Momo 说完啦。");
+          }
+          return;
+        }
+        throw new Error(job.error ?? "audio job failed");
+      } catch {
+        if (audioRunRef.current !== runId) return;
+        setPhase("audio_error");
+        setBubbleText("声音刚刚没出来。");
+        await sleep(1600);
+        if (audioRunRef.current === runId) {
+          setPhase("idle");
+        }
+      }
+      return;
+    }
+
+    if (response.voice_url) {
+      setPhase("speaking");
+      setBubbleText("Momo 在说…");
+      let played = false;
+      try {
+        await playVoice(response.voice_url);
+        played = true;
+      } catch {
+        setPhase("audio_error");
+        setBubbleText("声音刚刚没出来。");
+        await sleep(1600);
+      }
+      if (audioRunRef.current === runId && played) {
+        setPhase("idle");
+        setBubbleText("Momo 说完啦。");
+      } else if (audioRunRef.current === runId) {
+        setPhase("idle");
+      }
+      return;
+    }
+
+    setPhase("idle");
+  }
+
+  async function waitForReadyAudio(jobId: string, runId: number) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 15_000) {
+      if (audioRunRef.current !== runId) {
+        throw new Error("audio job superseded");
+      }
+      const job = await getAudioJob(jobId);
+      if (job.status === "ready") return job;
+      if (job.status === "failed" || job.status === "expired") {
+        throw new Error(job.error ?? "audio job failed");
+      }
+      await sleep(500);
+    }
+    throw new Error("audio job timed out");
   }
 
   async function handleVoiceResponse(response: VoiceChatResponse) {
@@ -229,6 +299,14 @@ function App() {
       setFaceType("thinking");
       setAnimation("blink");
       setBubbleText(thinkingMode ? "Momo 多想一下。" : "马上回应你。");
+    } else if (nextPhase === "waiting_voice") {
+      setFaceType("thinking");
+      setAnimation("blink");
+      setBubbleText("Momo 准备开口…");
+    } else if (nextPhase === "audio_error") {
+      setFaceType("concerned");
+      setAnimation("tilt");
+      setBubbleText("声音刚刚没出来。");
     } else if (nextPhase === "error") {
       setFaceType("concerned");
       setAnimation("tilt");
@@ -335,11 +413,29 @@ function App() {
   );
 }
 
-function playVoice(voiceUrl: string | null, onEnded?: () => void) {
-  if (!voiceUrl) return;
+function playVoice(voiceUrl: string, timeoutMs = 20_000): Promise<void> {
+  return new Promise((resolve, reject) => {
   const audio = new Audio(voiceUrl);
-  audio.onended = () => onEnded?.();
-  void audio.play().catch(() => undefined);
+    let settled = false;
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+
+    function finish(ok: boolean) {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      audio.onended = null;
+      audio.onerror = null;
+      ok ? resolve() : reject(new Error("audio playback failed"));
+    }
+
+    audio.onended = () => finish(true);
+    audio.onerror = () => finish(false);
+    void audio.play().catch(() => finish(false));
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function vibrate(vibration: "none" | "light" | "medium") {

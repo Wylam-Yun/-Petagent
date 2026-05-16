@@ -97,4 +97,5 @@ class PetResponse(BaseModel):
     pet_state: Dict[str, Any]
     runtime: Dict[str, Any]
     voice_url: Optional[str] = None
+    audio_job_id: Optional[str] = None
     state_affect: Optional[Dict[str, Any]] = None

@@ -16,7 +16,8 @@ def test_activation_wake_creates_active_session():
     assert body["active"] is True
     assert body["session_id"]
     assert body["reply"]
-    assert body["voice_url"] is not None
+    assert body["voice_url"] is None
+    assert body["audio_job_id"]
 
 
 def test_activation_wake_rejects_low_confidence():
@@ -49,7 +50,8 @@ def test_activation_exit_ends_active_session():
     body = response.json()
     assert body["active"] is False
     assert body["reply"]
-    assert body["voice_url"] is not None
+    assert body["voice_url"] is None
+    assert body["audio_job_id"]
 
 
 def test_activation_normalizes_common_momo_asr_aliases():

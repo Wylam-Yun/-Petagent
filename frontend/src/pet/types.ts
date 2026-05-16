@@ -48,7 +48,14 @@ export type StateAffect = {
   reason: string;
 };
 
-export type PetUIPhase = "idle" | "listening" | "thinking" | "speaking" | "error";
+export type PetUIPhase =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "waiting_voice"
+  | "speaking"
+  | "audio_error"
+  | "error";
 export type VoiceMode = "fast" | "thinking";
 
 export type PetState = {
@@ -74,12 +81,22 @@ export type PetResponse = {
   animation: AnimationName;
   vibration: "none" | "light" | "medium";
   voice_url: string | null;
+  audio_job_id?: string | null;
   state_affect?: StateAffect;
   pet_state: PetState;
   runtime: {
     event_id: string;
     skills_used: unknown[];
   };
+};
+
+export type AudioJob = {
+  job_id: string;
+  status: "pending" | "ready" | "failed" | "expired";
+  voice_url: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type DeviceStatePayload = {

@@ -1,5 +1,6 @@
 import type {
   ActivationResponse,
+  AudioJob,
   DeviceStatePayload,
   PetEventType,
   ProactiveResponse,
@@ -19,6 +20,10 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function getPetState(): Promise<PetState> {
   return requestJson<PetState>("/api/pet/state");
+}
+
+export function getAudioJob(jobId: string): Promise<AudioJob> {
+  return requestJson<AudioJob>(`/api/audio/jobs/${encodeURIComponent(jobId)}`);
 }
 
 export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceStatePayload> {

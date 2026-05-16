@@ -3,6 +3,20 @@ import { describe, expect, test, vi } from "vitest";
 
 import App from "./App";
 
+class MockAudio {
+  onended: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(readonly src: string) {}
+
+  play() {
+    window.setTimeout(() => this.onended?.(), 0);
+    return Promise.resolve();
+  }
+}
+
+vi.stubGlobal("Audio", MockAudio);
+
 test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
   let resolveEvent: (value: unknown) => void = () => undefined;
   const eventPromise = new Promise((resolve) => {
@@ -26,7 +40,18 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
         updated_at: "now"
       })
     })
-    .mockReturnValueOnce(eventPromise);
+    .mockReturnValueOnce(eventPromise)
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job_id: "aud-event",
+        status: "ready",
+        voice_url: "/static/audio/test.wav",
+        error: null,
+        created_at: "now",
+        updated_at: "now"
+      })
+    });
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
@@ -46,6 +71,7 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
         animation: "bounce",
         vibration: "light",
         voice_url: null,
+        audio_job_id: "aud-event",
         pet_state: {
           name: "Momo",
           mood: "happy",
@@ -61,7 +87,7 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
     });
   });
 
-  await waitFor(() => expect(screen.getByText("嘿嘿，Momo 在呢。")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
 });
 
 describe("text chat", () => {
@@ -86,6 +112,7 @@ describe("text chat", () => {
       animation: "tilt",
       vibration: "none",
       voice_url: null,
+      audio_job_id: "aud-text",
       user_text: "帮我写两数之和",
       text_route: {
         selected: "slow",
@@ -99,7 +126,18 @@ describe("text chat", () => {
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
-      .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse });
+      .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          job_id: "aud-text",
+          status: "ready",
+          voice_url: "/static/audio/text.wav",
+          error: null,
+          created_at: "now",
+          updated_at: "now"
+        })
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -109,7 +147,7 @@ describe("text chat", () => {
     fireEvent.change(input, { target: { value: "帮我写两数之和" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    await waitFor(() => expect(screen.getByText("好呀，Momo 帮你想。")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
 
     const [, textInit] = fetchMock.mock.calls[1];
     expect(textInit.method).toBe("POST");

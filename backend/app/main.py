@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api import activation as activation_api
+from app.api import audio as audio_api
 from app.api import context as context_api
 from app.api import device as device_api
 from app.api import memory as memory_api
@@ -30,6 +31,7 @@ from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLM
 from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
+from app.runtime.audio_jobs import AudioJobManager
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
@@ -175,10 +177,15 @@ def create_app(testing: bool = False) -> FastAPI:
     audio_provider = _select_audio_provider(settings, testing)
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings, state_store.connection)
+    tts_provider = _select_tts_provider(settings, testing)
+    audio_job_manager = AudioJobManager(
+        tts_provider,
+        ttl_seconds=int(settings.app_config.get("audio_jobs", {}).get("ttl_seconds", 600)),
+    )
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
         brain=brain,
-        tts_provider=_select_tts_provider(settings, testing),
+        tts_provider=tts_provider,
         registry=registry,
         interaction_log=interaction_log,
         device_store=device_store,
@@ -192,6 +199,7 @@ def create_app(testing: bool = False) -> FastAPI:
         memory_manager=memory_manager,
         episode_summary_store=episode_summary_store,
         daily_summary_store=daily_summary_store,
+        audio_job_manager=audio_job_manager,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -250,6 +258,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.memory_curator = memory_curator
     app.state.summary_manager = summary_manager
     app.state.maintenance_service = maintenance_service
+    app.state.audio_job_manager = audio_job_manager
 
     @app.get("/api/health")
     def health():
@@ -258,6 +267,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(runtime_api.router)
     app.include_router(pet_api.router)
     app.include_router(voice_api.router)
+    app.include_router(audio_api.router)
     app.include_router(activation_api.router)
     app.include_router(device_api.router)
     app.include_router(skills_api.router)

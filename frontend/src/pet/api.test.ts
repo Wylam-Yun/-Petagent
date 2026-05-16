@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { getProactiveEvent, reportDeviceState, sendTextChat, uploadVoice } from "./api";
+import { getAudioJob, getProactiveEvent, reportDeviceState, sendTextChat, uploadVoice } from "./api";
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -22,6 +22,18 @@ describe("uploadVoice", () => {
 });
 
 describe("stage 3 API helpers", () => {
+  test("fetches audio job endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ job_id: "aud-1", status: "pending" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAudioJob("aud-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/audio/jobs/aud-1", undefined);
+  });
+
   test("reports device state as JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

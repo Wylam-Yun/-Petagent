@@ -11,6 +11,7 @@ const voiceResponse: VoiceChatResponse = {
   animation: "tilt",
   vibration: "light",
   voice_url: null,
+  audio_job_id: "aud-test",
   user_text: "我今天好累",
   audio_understanding: {
     user_text: "我今天好累",
@@ -41,7 +42,7 @@ function recorderFactory(blob = new Blob(["voice"], { type: "audio/webm" })) {
 }
 
 describe("VoiceButton", () => {
-  test("moves through listening thinking and speaking phases", async () => {
+  test("moves through listening thinking and waiting voice phases", async () => {
     const onPhaseChange = vi.fn();
     const onVoiceResponse = vi.fn();
     const uploadVoice = vi.fn().mockResolvedValue(voiceResponse);
@@ -65,7 +66,7 @@ describe("VoiceButton", () => {
     fireEvent.mouseUp(screen.getByRole("button", { name: "松开回应" }));
 
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
-    await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("speaking"));
+    await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
     expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), { thinkingMode: false });
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);

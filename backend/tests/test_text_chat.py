@@ -18,7 +18,8 @@ def test_text_chat_uses_fast_route_by_default():
     assert body["text_route"]["selected"] == "fast"
     assert body["text_route"]["thinking_mode"] is False
     assert body["text_route"]["brain_provider"] == "mock_fast_llm"
-    assert body["voice_url"]
+    assert body["voice_url"] is None
+    assert body["audio_job_id"]
     assert body["runtime"]["event_id"]
 
 

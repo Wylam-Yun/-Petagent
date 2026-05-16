@@ -50,6 +50,7 @@ class RuntimeDispatcher:
         memory_manager=None,
         episode_summary_store=None,
         daily_summary_store=None,
+        audio_job_manager=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -67,6 +68,7 @@ class RuntimeDispatcher:
         self.memory_manager = memory_manager
         self.episode_summary_store = episode_summary_store
         self.daily_summary_store = daily_summary_store
+        self.audio_job_manager = audio_job_manager
         self._event_lock = threading.RLock()
 
     def handle_event(
@@ -208,13 +210,17 @@ class RuntimeDispatcher:
             if closed_on_exit and self.summary_job_store is not None:
                 self.summary_job_store.enqueue(closed_on_exit)
 
-        # 14. TTS (failure doesn't block)
+        # 14. TTS job (failure doesn't block the behavior response)
         voice_url = None
+        audio_job_id = None
         if synthesize_voice:
-            try:
-                voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
-            except Exception:
-                voice_url = None
+            if self.audio_job_manager is not None:
+                audio_job_id = self.audio_job_manager.enqueue(action.reply, action.voice_style)
+            else:
+                try:
+                    voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
+                except Exception:
+                    voice_url = None
 
         # 15. Save memory candidates (Stage 3.6 pipeline)
         self._collect_memory_candidates(event, action, episode_id)
@@ -249,6 +255,7 @@ class RuntimeDispatcher:
                 "skills_used": [item.get("skill_id") for item in skill_results],
                 "episode_id": episode_id,
             },
+            audio_job_id=audio_job_id,
             state_affect=action.state_affect.dict(),
         )
 

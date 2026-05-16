@@ -28,6 +28,7 @@ def _activation_response(
         "animation": body["animation"],
         "vibration": body["vibration"],
         "voice_url": body["voice_url"],
+        "audio_job_id": body.get("audio_job_id"),
         "pet_state": body["pet_state"],
         "runtime": body["runtime"],
     }
@@ -49,6 +50,7 @@ def post_activation_wake(payload: ActivationRequest, request: Request):
             "animation": "tilt",
             "vibration": "none",
             "voice_url": None,
+            "audio_job_id": None,
             "pet_state": request.app.state.state_store.get_state(),
             "runtime": {"event_id": None, "skills_used": []},
         }

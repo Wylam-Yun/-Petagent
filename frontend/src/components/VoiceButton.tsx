@@ -68,7 +68,7 @@ export function VoiceButton({
       const blob = await session.stop();
       const response = await uploadVoice(blob, { thinkingMode });
       onVoiceResponse(response);
-      changePhase("speaking");
+      changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
       changePhase("error");
       onError(
@@ -121,8 +121,12 @@ function labelForPhase(phase: PetUIPhase): string {
       return "松开回应";
     case "thinking":
       return "让我想想";
+    case "waiting_voice":
+      return "准备开口";
     case "speaking":
       return "Momo 在说";
+    case "audio_error":
+      return "声音没出来";
     case "error":
       return "再试一次";
     default:
