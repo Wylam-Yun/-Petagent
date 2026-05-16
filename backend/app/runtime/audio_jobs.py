@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import logging
 import threading
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
+
+AUDIO_JOB_TERMINAL = {"ready", "failed", "expired", "superseded"}
 
 
 @dataclass
@@ -15,44 +21,120 @@ class AudioJob:
     voice_style: str
     created_at: str
     updated_at: str
+    run_id: str = ""
+    event_id: str = ""
+    session_id: str = ""
     voice_url: Optional[str] = None
     error: Optional[str] = None
+    provider: str = ""
+    timings_ms: Dict[str, int] = field(default_factory=dict)
 
-    def dict(self) -> Dict[str, Optional[str]]:
+    def dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
+            "run_id": self.run_id,
+            "event_id": self.event_id,
             "status": self.status,
             "voice_url": self.voice_url,
             "error": self.error,
+            "provider": self.provider,
+            "timings_ms": dict(self.timings_ms),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
 
 
 class AudioJobManager:
-    """Runs TTS in background so interaction responses are not blocked by audio."""
+    """Runs TTS in background so interaction responses are not blocked by audio.
 
-    def __init__(self, tts_provider, ttl_seconds: int = 600) -> None:
+    Design:
+    - ThreadPoolExecutor with bounded workers (default 2)
+    - Max job count with LRU eviction of terminal jobs
+    - Per-session pending job limit with supersede semantics
+    - Sanitized error capture
+    - Optional on_complete callback for observation writeback
+    """
+
+    def __init__(
+        self,
+        tts_provider: Any,
+        ttl_seconds: int = 900,
+        max_jobs: int = 100,
+        max_pending_per_session: int = 3,
+        max_workers: int = 2,
+        provider_name: str = "tts",
+        on_complete: Optional[Callable[[str, str, Optional[str]], None]] = None,
+    ) -> None:
         self.tts_provider = tts_provider
         self.ttl_seconds = ttl_seconds
+        self.max_jobs = max_jobs
+        self.max_pending_per_session = max_pending_per_session
+        self.provider_name = provider_name
+        self.on_complete = on_complete
         self._jobs: Dict[str, AudioJob] = {}
+        self._order: List[str] = []
         self._lock = threading.RLock()
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
-    def enqueue(self, text: str, voice_style: str = "soft") -> str:
-        job_id = "aud-%s" % uuid4().hex
+    def enqueue(
+        self,
+        text: str,
+        voice_style: str = "soft",
+        run_id: str = "",
+        event_id: str = "",
+        session_id: str = "",
+    ) -> str:
+        job_id = "aud-" + uuid4().hex[:12]
         now = datetime.utcnow().isoformat()
         job = AudioJob(
             job_id=job_id,
             status="pending",
             text=text,
             voice_style=voice_style,
+            run_id=run_id,
+            event_id=event_id,
+            session_id=session_id,
             created_at=now,
             updated_at=now,
+            provider=self.provider_name,
         )
+
         with self._lock:
+            # Supersede older pending jobs in the same session
+            if session_id:
+                for existing in self._jobs.values():
+                    if (
+                        existing.session_id == session_id
+                        and existing.status == "pending"
+                    ):
+                        existing.status = "superseded"
+                        existing.error = "superseded by newer job"
+                        existing.updated_at = datetime.utcnow().isoformat()
+
+            # Enforce per-session pending limit
+            if session_id:
+                pending_count = sum(
+                    1
+                    for j in self._jobs.values()
+                    if j.session_id == session_id and j.status == "pending"
+                )
+                if pending_count >= self.max_pending_per_session:
+                    # Mark oldest pending in this session as superseded
+                    oldest = None
+                    for j in self._jobs.values():
+                        if j.session_id == session_id and j.status == "pending":
+                            if oldest is None or j.created_at < oldest.created_at:
+                                oldest = j
+                    if oldest:
+                        oldest.status = "superseded"
+                        oldest.error = "pending limit exceeded"
+                        oldest.updated_at = datetime.utcnow().isoformat()
+
             self._jobs[job_id] = job
-        thread = threading.Thread(target=self._run_job, args=(job_id,), daemon=True)
-        thread.start()
+            self._order.append(job_id)
+            self._evict_if_needed()
+
+        self._executor.submit(self._run_job, job_id)
         return job_id
 
     def get(self, job_id: str) -> Optional[AudioJob]:
@@ -69,19 +151,41 @@ class AudioJobManager:
     def _run_job(self, job_id: str) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
-        if job is None:
+        if job is None or job.status != "pending":
             return
 
+        tts_start = datetime.utcnow()
         try:
             voice_url = self.tts_provider.synthesize(job.text, job.voice_style)
-        except Exception:
+            tts_ms = int((datetime.utcnow() - tts_start).total_seconds() * 1000)
+        except Exception as exc:
             voice_url = None
+            tts_ms = int((datetime.utcnow() - tts_start).total_seconds() * 1000)
+            sanitized = _sanitize_error(exc)
+
+            with self._lock:
+                current = self._jobs.get(job_id)
+                if current is None or current.status != "pending":
+                    return
+                current.status = "failed"
+                current.voice_url = None
+                current.error = sanitized
+                current.timings_ms["tts"] = tts_ms
+                current.updated_at = datetime.utcnow().isoformat()
+
+            if self.on_complete:
+                try:
+                    self.on_complete(job_id, "failed", sanitized)
+                except Exception:
+                    logger.warning("on_complete callback failed", exc_info=True)
+            return
 
         with self._lock:
             current = self._jobs.get(job_id)
-            if current is None or current.status == "expired":
+            if current is None or current.status != "pending":
                 return
             current.updated_at = datetime.utcnow().isoformat()
+            current.timings_ms["tts"] = tts_ms
             if voice_url:
                 current.status = "ready"
                 current.voice_url = voice_url
@@ -89,7 +193,14 @@ class AudioJobManager:
             else:
                 current.status = "failed"
                 current.voice_url = None
-                current.error = "tts synthesis failed"
+                current.error = "tts returned empty"
+
+        if self.on_complete:
+            try:
+                status = "ready" if voice_url else "failed"
+                self.on_complete(job_id, status, None if voice_url else "tts returned empty")
+            except Exception:
+                logger.warning("on_complete callback failed", exc_info=True)
 
     def _is_expired(self, job: AudioJob) -> bool:
         try:
@@ -97,3 +208,30 @@ class AudioJobManager:
         except ValueError:
             return False
         return datetime.utcnow() - created > timedelta(seconds=self.ttl_seconds)
+
+    def _evict_if_needed(self) -> None:
+        """Remove oldest terminal-status jobs when over max_jobs."""
+        while len(self._order) > self.max_jobs:
+            old_id = self._order[0]
+            old_job = self._jobs.get(old_id)
+            if old_job and old_job.status in AUDIO_JOB_TERMINAL:
+                self._order.pop(0)
+                self._jobs.pop(old_id, None)
+            else:
+                break
+
+    def shutdown(self) -> None:
+        self._executor.shutdown(wait=False)
+
+
+def _sanitize_error(exc: Exception) -> str:
+    """Return a sanitized error string — no API keys, tokens, or raw provider output."""
+    exc_type = type(exc).__name__
+    msg = str(exc)[:120]
+    # Strip anything that looks like a key or token
+    for marker in ("sk-", "tp-", "nvapi-", "Bearer ", "token="):
+        idx = msg.find(marker)
+        if idx >= 0:
+            msg = msg[:idx] + "[REDACTED]"
+            break
+    return f"{exc_type}: {msg}" if msg else exc_type

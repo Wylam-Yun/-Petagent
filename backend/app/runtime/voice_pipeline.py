@@ -153,6 +153,7 @@ class VoicePipeline:
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
@@ -163,6 +164,7 @@ class VoicePipeline:
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
                     },
                 },
                 brain=brain,
@@ -212,6 +214,7 @@ class VoicePipeline:
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
@@ -222,6 +225,7 @@ class VoicePipeline:
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
                     },
                 },
                 brain=self.slow_brain,

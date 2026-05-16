@@ -126,6 +126,19 @@ def build_pet_messages(
         "5. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
     )
 
+    # Context profile awareness
+    profile = (context.cognition_context or {}).get("context_profile", "")
+    if profile == "fast_companion":
+        system_prompt += "\n\n快速陪伴模式：回复 1-2 句，自然、轻松，不要长篇大论。"
+    elif profile == "proactive":
+        system_prompt += "\n\n主动陪伴模式：回复 1 句，轻声问候，不要催促。"
+    elif profile == "recall":
+        system_prompt += "\n\n回忆模式：用户在问之前的事，尽力回忆并回答，可以稍长。"
+    elif profile == "tool":
+        system_prompt += "\n\n工具模式：用户需要事实信息，先给出事实，再用 Momo 的语气包装。"
+    elif profile == "long_task":
+        system_prompt += "\n\n深度模式：用户需要详细回答，可以展开，但不输出思考过程。"
+
     # Use serializer instead of raw context.dict()
     payload = serialize_for_prompt(
         event=event,

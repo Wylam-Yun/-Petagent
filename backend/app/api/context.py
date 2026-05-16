@@ -50,6 +50,16 @@ def context_refresh(request: Request) -> Dict[str, Any]:
     }
 
 
+@router.get("/api/context/runs")
+def context_runs(request: Request, limit: int = 10) -> Dict[str, Any]:
+    """Debug: recent agent runs with sanitized observations."""
+    registry = getattr(request.app.state, "agent_run_registry", None)
+    if registry is None:
+        return {"ok": False, "reason": "agent_run_registry not configured"}
+    runs = registry.recent(limit=min(limit, 50))
+    return {"ok": True, "runs": runs}
+
+
 @router.get("/api/context/debug")
 def context_debug(request: Request) -> Dict[str, Any]:
     """调试当前 episode、最近事件数、上下文预算."""

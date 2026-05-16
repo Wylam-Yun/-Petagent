@@ -68,6 +68,7 @@ class TextPipeline:
         if activation_event is not None:
             source = "text_slow" if thinking_mode else "text_fast"
             activation_event["source"] = source
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
@@ -75,7 +76,7 @@ class TextPipeline:
                 {
                     "type": "text_message",
                     "source": "text_slow" if thinking_mode else "text_fast",
-                    "payload": {"user_text": user_text},
+                    "payload": {"user_text": user_text, "thinking_mode": thinking_mode},
                 },
                 brain=brain,
             )

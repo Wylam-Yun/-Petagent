@@ -35,6 +35,7 @@ from app.runtime.audio_jobs import AudioJobManager
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
+from app.runtime.agent_run import AgentRunRegistry
 from app.runtime.device import DeviceStateStore
 from app.runtime.maintenance import MaintenanceService
 from app.runtime.memory_curator import MemoryCurator
@@ -178,9 +179,19 @@ def create_app(testing: bool = False) -> FastAPI:
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings, state_store.connection)
     tts_provider = _select_tts_provider(settings, testing)
+    agent_run_registry = AgentRunRegistry(max_runs=50)
+
+    def _on_audio_complete(job_id: str, status: str, error) -> None:
+        run = agent_run_registry.find_by_audio_job_id(job_id)
+        if run:
+            run.record(f"audio_{status}", {"job_id": job_id, "error": error})
+
     audio_job_manager = AudioJobManager(
         tts_provider,
-        ttl_seconds=int(settings.app_config.get("audio_jobs", {}).get("ttl_seconds", 600)),
+        ttl_seconds=int(settings.app_config.get("audio_jobs", {}).get("ttl_seconds", 900)),
+        max_workers=2,
+        provider_name=str(getattr(tts_provider, "name", "tts")),
+        on_complete=_on_audio_complete,
     )
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
@@ -200,6 +211,7 @@ def create_app(testing: bool = False) -> FastAPI:
         episode_summary_store=episode_summary_store,
         daily_summary_store=daily_summary_store,
         audio_job_manager=audio_job_manager,
+        agent_run_registry=agent_run_registry,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -259,6 +271,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.summary_manager = summary_manager
     app.state.maintenance_service = maintenance_service
     app.state.audio_job_manager = audio_job_manager
+    app.state.agent_run_registry = agent_run_registry
 
     @app.get("/api/health")
     def health():

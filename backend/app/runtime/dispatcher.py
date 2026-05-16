@@ -7,17 +7,21 @@ from datetime import datetime
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
+from time import perf_counter
+
 from app.pet.brain import PetBrain
 from app.pet.guard import guard_action
 from app.pet.rules import apply_event_rules, apply_state_delta
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
 from app.runtime.actions import PetResponse
+from app.runtime.agent_run import AgentRun
 from app.runtime.context import build_runtime_context
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.events import normalize_event
 from app.runtime.registry import SkillRegistry
+from app.runtime.route_policy import decide_route
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,7 @@ class RuntimeDispatcher:
         episode_summary_store=None,
         daily_summary_store=None,
         audio_job_manager=None,
+        agent_run_registry=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -69,6 +74,7 @@ class RuntimeDispatcher:
         self.episode_summary_store = episode_summary_store
         self.daily_summary_store = daily_summary_store
         self.audio_job_manager = audio_job_manager
+        self.agent_run_registry = agent_run_registry
         self._event_lock = threading.RLock()
 
     def handle_event(
@@ -91,7 +97,26 @@ class RuntimeDispatcher:
         brain: PetBrain = None,
         synthesize_voice: bool = True,
     ) -> PetResponse:
+        pipeline_start = perf_counter()
         event = normalize_event(raw_event)
+
+        # --- AgentRun lifecycle begins ---
+        run: AgentRun = None
+        decision = None
+        if self.agent_run_registry is not None:
+            run = self.agent_run_registry.create(event_id=event.id)
+            thinking_mode = bool(event.payload.get("thinking_mode", False))
+            user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
+            decision = decide_route(
+                event_type=event.type,
+                event_source=event.source,
+                user_text=user_text,
+                thinking_mode=thinking_mode,
+            )
+            run.route = decision.route
+            run.context_profile = decision.context_profile
+            run.provider = decision.provider_profile
+            run.set_status("planning")
 
         # 1. Apply tick
         if self.tick_service is not None:
@@ -130,7 +155,13 @@ class RuntimeDispatcher:
                 memory_manager=self.memory_manager,
                 episode_summary_store=self.episode_summary_store,
                 daily_summary_store=self.daily_summary_store,
+                context_profile=decision.context_profile if decision else None,
             )
+            if run:
+                run.record("context_built", {
+                    "profile": decision.context_profile if decision else "",
+                    "budget_used": cognition_context.get("context_budget", {}).get("used_chars", 0),
+                })
 
         # 6. Build planning context (backward compat + cognition_context)
         planning_context = build_runtime_context(
@@ -140,8 +171,11 @@ class RuntimeDispatcher:
             cognition_context=cognition_context,
         )
 
-        # 7. Run skills
-        skill_results = self._run_requested_skills(event, active_brain, planning_context)
+        # 7. Run skills (gated by route policy)
+        if decision is None or decision.allow_tools:
+            skill_results = self._run_requested_skills(event, active_brain, planning_context)
+        else:
+            skill_results = []
 
         # 8. Rebuild context with skill results
         if self.context_manager is not None and cognition_context is not None:
@@ -155,7 +189,10 @@ class RuntimeDispatcher:
                 memory_manager=self.memory_manager,
                 episode_summary_store=self.episode_summary_store,
                 daily_summary_store=self.daily_summary_store,
+                context_profile=decision.context_profile if decision else None,
             )
+        if run and skill_results:
+            run.record("skill_finished", {"count": len(skill_results)})
         context = build_runtime_context(
             event,
             ruled_state,
@@ -169,6 +206,11 @@ class RuntimeDispatcher:
             raw_action = active_brain.generate_action(event, context)
         except Exception:
             raw_action = None
+        if run and raw_action is None:
+            run.set_status("failed")
+            run.error = "LLM provider exception"
+        if run and run.status not in {"failed", "superseded"}:
+            run.set_status("action_generated")
         action = guard_action(
             raw_action,
             max_reply_chars=self._max_reply_chars(active_brain),
@@ -198,6 +240,8 @@ class RuntimeDispatcher:
                 mood_after=action.mood,
                 state_affect=action.state_affect.dict(),
             )
+        if run and run.status not in {"failed", "superseded"}:
+            run.set_status("committed")
 
         # 12. Update episode event count
         if self.episode_manager is not None and episode_id:
@@ -215,7 +259,16 @@ class RuntimeDispatcher:
         audio_job_id = None
         if synthesize_voice:
             if self.audio_job_manager is not None:
-                audio_job_id = self.audio_job_manager.enqueue(action.reply, action.voice_style)
+                audio_job_id = self.audio_job_manager.enqueue(
+                    action.reply,
+                    action.voice_style,
+                    run_id=run.run_id if run else "",
+                    event_id=event.id,
+                    session_id=episode_id,
+                )
+                if run and audio_job_id:
+                    run.audio_job_id = audio_job_id
+                    run.record("audio_enqueued", {"job_id": audio_job_id})
             else:
                 try:
                     voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
@@ -242,7 +295,15 @@ class RuntimeDispatcher:
                 current_episode_id=episode_id or None,
             )
 
-        return PetResponse(
+        # Finalize AgentRun
+        if run:
+            if run.status not in {"failed", "superseded"}:
+                run.set_status("completed")
+            run.timings_ms["total"] = int((perf_counter() - pipeline_start) * 1000)
+            if episode_id:
+                run.episode_id = episode_id
+
+        response = PetResponse(
             reply=action.reply,
             mood=action.mood,
             face_type=action.face_type,
@@ -258,6 +319,12 @@ class RuntimeDispatcher:
             audio_job_id=audio_job_id,
             state_affect=action.state_affect.dict(),
         )
+        if run:
+            response.runtime["run_id"] = run.run_id
+            if decision:
+                response.runtime["context_profile"] = decision.context_profile
+                response.runtime["route_decision"] = decision.reason
+        return response
 
     def _collect_memory_candidates(self, event, action, episode_id: str) -> None:
         """Route memory_update to candidate store. Also detect explicit commands."""

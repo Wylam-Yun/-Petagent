@@ -31,8 +31,41 @@ class ContextManager:
         memory_manager: Any = None,
         episode_summary_store: Any = None,
         daily_summary_store: Any = None,
+        context_profile: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
+        # Profile-specific budget overrides
+        profile = context_profile or "default"
+        effective_recent_turns = self.recent_exact_turns
+        effective_memory_items = self.relevant_memory_items
+        effective_episode_summaries = self.recent_episode_summaries
+        include_daily_digest = True
+        include_episode_summaries = True
+        include_important_quotes = True
+
+        if profile == "fast_companion":
+            effective_recent_turns = min(self.recent_exact_turns, 4)
+            effective_memory_items = min(self.relevant_memory_items, 2)
+            include_daily_digest = False
+            include_episode_summaries = False
+            include_important_quotes = False
+        elif profile == "recall":
+            effective_recent_turns = min(self.recent_exact_turns, 4)
+            include_daily_digest = False
+        elif profile == "tool":
+            effective_recent_turns = min(self.recent_exact_turns, 4)
+            effective_memory_items = min(self.relevant_memory_items, 2)
+            include_daily_digest = False
+            include_episode_summaries = False
+        elif profile == "long_task":
+            pass  # use all defaults
+        elif profile == "proactive":
+            effective_recent_turns = min(self.recent_exact_turns, 2)
+            effective_memory_items = min(self.relevant_memory_items, 1)
+            include_daily_digest = False
+            include_episode_summaries = False
+            include_important_quotes = False
+
         now_utc = datetime.utcnow()
         tz_offset = self._get_tz_offset()
         now_local = now_utc + tz_offset
@@ -57,7 +90,7 @@ class ContextManager:
         if episode and event_log_store:
             raw_events = event_log_store.recent_events(
                 episode_id=episode.get("episode_id"),
-                limit=self.recent_exact_turns,
+                limit=effective_recent_turns,
             )
             for evt in raw_events:
                 entry: Dict[str, Any] = {
@@ -105,7 +138,7 @@ class ContextManager:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")
             try:
                 relevant_memories = memory_manager.scored_memories(
-                    limit=self.relevant_memory_items,
+                    limit=effective_memory_items,
                     user_text=user_text,
                 )
             except Exception:
@@ -113,17 +146,17 @@ class ContextManager:
 
         # Episode summaries
         episode_summaries: List[Dict[str, Any]] = []
-        if episode_summary_store is not None:
+        if include_episode_summaries and episode_summary_store is not None:
             try:
                 episode_summaries = episode_summary_store.recent(
-                    limit=self.recent_episode_summaries
+                    limit=effective_episode_summaries
                 )
             except Exception:
                 episode_summaries = []
 
         # Important quotes from memory table
         important_quotes: List[Dict[str, Any]] = []
-        if memory_manager is not None:
+        if include_important_quotes and memory_manager is not None:
             try:
                 important_quotes = memory_manager.important_quotes(limit=4)
             except Exception:
@@ -131,7 +164,7 @@ class ContextManager:
 
         # Daily digest (Stage 3.7)
         daily_digest = None
-        if daily_summary_store is not None:
+        if include_daily_digest and daily_summary_store is not None:
             try:
                 recent_daily = daily_summary_store.recent(limit=1)
                 if recent_daily:
@@ -141,6 +174,7 @@ class ContextManager:
 
         # Build context and trim to budget
         context = {
+            "context_profile": profile,
             "current_time": current_time,
             "current_episode": current_episode,
             "recent_exact_events": recent_exact_events,
