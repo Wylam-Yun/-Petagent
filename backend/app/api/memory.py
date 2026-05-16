@@ -86,6 +86,17 @@ def memory_debug(request: Request) -> Dict[str, Any]:
             for d in daily
         ]
 
+    # Memory cards
+    memory_card_manager = getattr(request.app.state, "memory_card_manager", None)
+    if memory_card_manager is not None:
+        try:
+            result["memory_cards"] = {
+                "user_preferences": memory_card_manager.read_card("user_preferences"),
+                "momo_memories": memory_card_manager.read_card("momo_memories"),
+            }
+        except Exception:
+            pass
+
     return result
 
 
@@ -98,6 +109,16 @@ def memory_curate(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Curator not available")
 
     result = curator.curate_batch(candidate_store)
+
+    # Rebuild cards if any memories were saved
+    if result.get("saved", 0) > 0:
+        memory_card_manager = getattr(request.app.state, "memory_card_manager", None)
+        if memory_card_manager:
+            try:
+                memory_card_manager.rebuild("curator_saved")
+            except Exception:
+                pass
+
     return {"ok": True, **result}
 
 
@@ -171,6 +192,15 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
         daily_summary_store.clear_all()
     if maintenance_state:
         maintenance_state.clear_all()
+
+    # Clear memory cards
+    memory_card_manager = getattr(request.app.state, "memory_card_manager", None)
+    if memory_card_manager:
+        try:
+            memory_card_manager.clear()
+        except Exception:
+            pass
+
     if event_log_store:
         with event_log_store.connection.locked():
             event_log_store.connection.execute("DELETE FROM raw_event_log")

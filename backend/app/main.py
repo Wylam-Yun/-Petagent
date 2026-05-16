@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +39,7 @@ from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.agent_run import AgentRunRegistry
 from app.runtime.device import DeviceStateStore
 from app.runtime.maintenance import MaintenanceService
+from app.runtime.memory_cards import MemoryCardManager
 from app.runtime.memory_curator import MemoryCurator
 from app.runtime.memory_store import (
     DailySummaryStore,
@@ -131,6 +133,29 @@ def create_app(testing: bool = False) -> FastAPI:
     daily_summary_store = DailySummaryStore(state_store.connection)
     maintenance_state = MaintenanceStateStore(state_store.connection)
 
+    memory_cards_config = settings.app_config.get("memory_cards", {})
+    memory_card_manager = None
+    if memory_cards_config.get("enabled", True):
+        # Resolve relative card paths against project_root (P1 fix)
+        resolved_cards_config = dict(memory_cards_config)
+        for key in ("user_preferences_path", "momo_memories_path"):
+            raw = resolved_cards_config.get(key)
+            if raw and not Path(raw).is_absolute():
+                resolved_cards_config[key] = str(settings.project_root / raw)
+        memory_card_manager = MemoryCardManager(
+            memory_manager=memory_manager,
+            config=resolved_cards_config,
+        )
+        # P4: On startup, rebuild cards if empty but memories exist
+        if not testing:
+            try:
+                up_items = memory_card_manager.read_card("user_preferences")
+                mm_items = memory_card_manager.read_card("momo_memories")
+                if not up_items and not mm_items and memory_manager.count() > 0:
+                    memory_card_manager.rebuild("runtime_reset")
+            except Exception:
+                pass
+
     slow_llm_provider = _select_llm_provider(
         settings,
         testing,
@@ -173,6 +198,7 @@ def create_app(testing: bool = False) -> FastAPI:
         event_log_store=event_log_store,
         episode_store=episode_manager,
         config=memory_config,
+        memory_card_manager=memory_card_manager,
     )
 
     audio_provider = _select_audio_provider(settings, testing)
@@ -212,6 +238,7 @@ def create_app(testing: bool = False) -> FastAPI:
         daily_summary_store=daily_summary_store,
         audio_job_manager=audio_job_manager,
         agent_run_registry=agent_run_registry,
+        memory_card_manager=memory_card_manager,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -272,6 +299,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.maintenance_service = maintenance_service
     app.state.audio_job_manager = audio_job_manager
     app.state.agent_run_registry = agent_run_registry
+    app.state.memory_card_manager = memory_card_manager
 
     @app.get("/api/health")
     def health():

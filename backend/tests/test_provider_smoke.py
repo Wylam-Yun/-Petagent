@@ -10,6 +10,9 @@ from app.providers.tts_mimo import MiMoTTSProvider
 
 pytestmark = pytest.mark.smoke
 
+if not os.environ.get("RUN_SMOKE"):
+    pytest.skip("smoke tests disabled (set RUN_SMOKE=1 to enable)", allow_module_level=True)
+
 
 def test_mimo_llm_smoke_returns_guarded_pet_action():
     settings = load_settings()

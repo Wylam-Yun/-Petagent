@@ -238,8 +238,8 @@ function App() {
       }
       const job = await getAudioJob(jobId);
       if (job.status === "ready") return job;
-      if (job.status === "failed" || job.status === "expired") {
-        throw new Error(job.error ?? "audio job failed");
+      if (job.status === "failed" || job.status === "expired" || job.status === "superseded") {
+        throw new Error(job.error ?? "audio job " + job.status);
       }
       await sleep(500);
     }

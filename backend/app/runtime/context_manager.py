@@ -32,6 +32,7 @@ class ContextManager:
         episode_summary_store: Any = None,
         daily_summary_store: Any = None,
         context_profile: Optional[str] = None,
+        memory_card_manager: Any = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
         # Profile-specific budget overrides
@@ -132,9 +133,20 @@ class ContextManager:
                     entry["mood"] = evt["mood_after"]
                 temporal_recall_events.append(entry)
 
-        # Scored memories from MemoryManager
+        # Scored memories OR memory cards
         relevant_memories: List[Dict[str, Any]] = []
-        if memory_manager is not None:
+        memory_cards: Optional[Dict[str, List[str]]] = None
+        use_cards = profile in ("fast_companion", "proactive") and memory_card_manager is not None
+
+        if use_cards:
+            try:
+                memory_cards = {
+                    "user_preferences": memory_card_manager.read_card("user_preferences"),
+                    "momo_memories": memory_card_manager.read_card("momo_memories"),
+                }
+            except Exception:
+                memory_cards = {"user_preferences": [], "momo_memories": []}
+        elif memory_manager is not None:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")
             try:
                 relevant_memories = memory_manager.scored_memories(
@@ -182,6 +194,7 @@ class ContextManager:
             "episode_summaries": episode_summaries,
             "daily_digest": daily_digest,
             "relevant_memories": relevant_memories,
+            "memory_cards": memory_cards,
             "important_quotes": important_quotes,
             "context_budget": {
                 "max_chars": self.max_context_chars,
@@ -202,14 +215,7 @@ class ContextManager:
 
         if used <= self.max_context_chars:
             context["context_budget"]["used_chars"] = used
-            context["context_budget"]["items_selected"] = (
-                len(context.get("recent_exact_events", []))
-                + len(context.get("temporal_recall_events", []))
-                + len(context.get("relevant_memories", []))
-                + len(context.get("episode_summaries", []))
-                + len(context.get("important_quotes", []))
-                + (1 if context.get("daily_digest") else 0)
-            )
+            context["context_budget"]["items_selected"] = self._count_items(context)
             return context
 
         # Trim: daily_digest first, then episode summaries, then important quotes, then events
@@ -247,10 +253,26 @@ class ContextManager:
                 notes.append("trimmed oldest temporal recall event")
             context["temporal_recall_events"] = recall_events
 
+        # Last resort: trim memory_cards (already bounded by max_card_cjk_chars)
+        serialized = json.dumps(context, ensure_ascii=False)
+        if len(serialized) > self.max_context_chars:
+            cards = context.get("memory_cards")
+            if cards:
+                for key in ("momo_memories", "user_preferences"):
+                    items = cards.get(key, [])
+                    while items and len(json.dumps(context, ensure_ascii=False)) > self.max_context_chars:
+                        items.pop()
+                        notes.append("trimmed memory_cards.%s" % key)
+                    cards[key] = items
+
         context["selection_notes"] = notes
         final = json.dumps(context, ensure_ascii=False)
         context["context_budget"]["used_chars"] = len(final)
-        context["context_budget"]["items_selected"] = (
+        context["context_budget"]["items_selected"] = self._count_items(context)
+        return context
+
+    def _count_items(self, context: Dict[str, Any]) -> int:
+        count = (
             len(context.get("recent_exact_events", []))
             + len(context.get("temporal_recall_events", []))
             + len(context.get("relevant_memories", []))
@@ -258,7 +280,11 @@ class ContextManager:
             + len(context.get("important_quotes", []))
             + (1 if context.get("daily_digest") else 0)
         )
-        return context
+        cards = context.get("memory_cards")
+        if cards:
+            count += len(cards.get("user_preferences", []))
+            count += len(cards.get("momo_memories", []))
+        return count
 
     def _minutes_since_last(self, pet_state: Dict[str, Any], now_utc: datetime) -> int:
         last = pet_state.get("last_interaction_at")

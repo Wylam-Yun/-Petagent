@@ -210,15 +210,27 @@ class AudioJobManager:
         return datetime.utcnow() - created > timedelta(seconds=self.ttl_seconds)
 
     def _evict_if_needed(self) -> None:
-        """Remove oldest terminal-status jobs when over max_jobs."""
+        """Remove oldest jobs when over max_jobs.
+
+        Evicts terminal jobs first. If the oldest is non-terminal (stuck pending),
+        force-expire it to prevent unbounded growth.
+        """
         while len(self._order) > self.max_jobs:
             old_id = self._order[0]
             old_job = self._jobs.get(old_id)
-            if old_job and old_job.status in AUDIO_JOB_TERMINAL:
+            if old_job is None:
+                self._order.pop(0)
+                continue
+            if old_job.status in AUDIO_JOB_TERMINAL:
                 self._order.pop(0)
                 self._jobs.pop(old_id, None)
             else:
-                break
+                # Force-expire stuck non-terminal job
+                old_job.status = "expired"
+                old_job.error = "expired: queue full"
+                old_job.updated_at = datetime.utcnow().isoformat()
+                self._order.pop(0)
+                self._jobs.pop(old_id, None)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False)

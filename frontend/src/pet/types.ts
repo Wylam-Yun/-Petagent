@@ -92,7 +92,7 @@ export type PetResponse = {
 
 export type AudioJob = {
   job_id: string;
-  status: "pending" | "ready" | "failed" | "expired";
+  status: "pending" | "ready" | "failed" | "expired" | "superseded";
   voice_url: string | null;
   error: string | null;
   created_at: string;

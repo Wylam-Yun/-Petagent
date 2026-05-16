@@ -90,5 +90,14 @@ memory:
   decay_half_life_stable_days: 90
   decay_half_life_volatile_days: 14
 
+memory_cards:
+  enabled: true
+  max_card_cjk_chars: 200
+  max_item_cjk_chars: 20
+  max_items_per_card: 10
+  min_importance: 2
+  user_preferences_path: backend/data/memory_cards/user_preferences/card.md
+  momo_memories_path: backend/data/memory_cards/momo_memories/card.md
+
 text_chat:
   max_text_chars: 2000

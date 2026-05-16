@@ -248,6 +248,37 @@ class MemoryManager:
         half_life = self._TYPE_HALF_LIFE_DAYS.get(memory_type, 30)
         return 0.5 ** (age_days / half_life)
 
+    def memories_for_cards(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Fetch non-expired memories ordered by type priority + importance DESC + id DESC.
+
+        Used by MemoryCardManager to build card projections.
+        """
+        now = datetime.utcnow().isoformat()
+        with self.connection.locked():
+            rows = self.connection.execute(
+                """
+                SELECT id, type, content, importance, created_at, expires_at
+                FROM memory
+                WHERE expires_at IS NULL OR expires_at > ?
+                ORDER BY
+                    CASE type
+                        WHEN 'user_preference' THEN 10
+                        WHEN 'relationship' THEN 10
+                        WHEN 'stable_memory' THEN 9
+                        WHEN 'important_quote' THEN 8
+                        WHEN 'habit' THEN 6
+                        WHEN 'recent_mood' THEN 5
+                        WHEN 'important_event' THEN 4
+                        ELSE 1
+                    END DESC,
+                    importance DESC,
+                    id DESC
+                LIMIT ?
+                """,
+                (now, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def important_quotes(self, limit: int = 4) -> List[Dict[str, Any]]:
         """Fetch recent important_quote memories."""
         now = datetime.utcnow().isoformat()

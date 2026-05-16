@@ -56,6 +56,7 @@ class RuntimeDispatcher:
         daily_summary_store=None,
         audio_job_manager=None,
         agent_run_registry=None,
+        memory_card_manager=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -75,6 +76,7 @@ class RuntimeDispatcher:
         self.daily_summary_store = daily_summary_store
         self.audio_job_manager = audio_job_manager
         self.agent_run_registry = agent_run_registry
+        self.memory_card_manager = memory_card_manager
         self._event_lock = threading.RLock()
 
     def handle_event(
@@ -156,6 +158,7 @@ class RuntimeDispatcher:
                 episode_summary_store=self.episode_summary_store,
                 daily_summary_store=self.daily_summary_store,
                 context_profile=decision.context_profile if decision else None,
+                memory_card_manager=self.memory_card_manager,
             )
             if run:
                 run.record("context_built", {
@@ -190,6 +193,7 @@ class RuntimeDispatcher:
                 episode_summary_store=self.episode_summary_store,
                 daily_summary_store=self.daily_summary_store,
                 context_profile=decision.context_profile if decision else None,
+                memory_card_manager=self.memory_card_manager,
             )
         if run and skill_results:
             run.record("skill_finished", {"count": len(skill_results)})

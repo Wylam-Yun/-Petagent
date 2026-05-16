@@ -46,6 +46,7 @@ class MaintenanceService:
         event_log_store: Any = None,
         episode_store: Any = None,
         config: Optional[Dict[str, Any]] = None,
+        memory_card_manager: Any = None,
     ) -> None:
         cfg = config or {}
         self.curator = curator
@@ -58,6 +59,7 @@ class MaintenanceService:
         self.maintenance_state = maintenance_state
         self.event_log_store = event_log_store
         self.episode_store = episode_store
+        self.memory_card_manager = memory_card_manager
         self.min_interval_seconds = cfg.get("maintenance_min_interval_seconds", 300)
         self.max_items_per_tick = cfg.get("maintenance_max_items_per_tick", 8)
         self.daily_summary_trigger_hour = cfg.get("daily_summary_trigger_hour", 6)
@@ -90,6 +92,12 @@ class MaintenanceService:
             if self.candidate_store.count_pending() > 0:
                 curator_result = self.curator.curate_batch(self.candidate_store)
                 result.update(curator_result)
+                if curator_result.get("saved", 0) > 0 and self.memory_card_manager:
+                    try:
+                        card_result = self.memory_card_manager.rebuild("curator_saved")
+                        result["cards_rebuilt"] = card_result.get("items_written", 0)
+                    except Exception:
+                        logger.warning("Card rebuild after curator save failed", exc_info=True)
                 return result
         except Exception:
             logger.warning("Curator batch failed", exc_info=True)
@@ -142,6 +150,11 @@ class MaintenanceService:
             deleted = self.memory_manager.cleanup_expired()
             if deleted > 0:
                 result["memory_expired"] = deleted
+                if self.memory_card_manager:
+                    try:
+                        self.memory_card_manager.rebuild("memory_expired")
+                    except Exception:
+                        logger.warning("Card rebuild after expiration failed", exc_info=True)
                 return result
         except Exception:
             logger.warning("Memory cleanup failed", exc_info=True)
@@ -164,6 +177,11 @@ class MaintenanceService:
                     self.maintenance_state.set(
                         "last_consolidation_date", self._current_local_date()
                     )
+                    if consolidated.get("merged", 0) > 0 and self.memory_card_manager:
+                        try:
+                            self.memory_card_manager.rebuild("memory_merged")
+                        except Exception:
+                            logger.warning("Card rebuild after merge failed", exc_info=True)
                     return result
         except Exception:
             logger.warning("Memory consolidation failed", exc_info=True)
@@ -274,3 +292,9 @@ class MaintenanceService:
         except Exception as exc:
             logger.warning("Episode summary failed for %s", episode_id, exc_info=True)
             self.summary_job_store.mark_failed(job_id, error_message=str(exc))
+
+    def rebuild_memory_cards(self, reason: str) -> Dict[str, int]:
+        """Public facade for explicit card rebuilds (e.g., manual debug)."""
+        if not self.memory_card_manager:
+            return {"error": "no_card_manager"}
+        return self.memory_card_manager.rebuild(reason)
