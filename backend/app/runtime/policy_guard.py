@@ -45,7 +45,7 @@ class PolicyGuard:
     def validate_skill_payload(
         self, skill_id: str, payload: dict, registry
     ) -> dict:
-        """Validate payload size and required fields from manifest input_schema.
+        """Validate payload size and explicitly required fields.
 
         Returns cleaned payload. Raises ValueError if invalid.
         """
@@ -54,11 +54,15 @@ class PolicyGuard:
             raise ValueError(
                 f"payload too large: {len(serialized.encode('utf-8'))} bytes"
             )
-        # Check required fields from input_schema
+        # Check only explicitly required fields. A flat input_schema such as
+        # {"location": "string"} documents accepted fields, but does not make
+        # them mandatory; weather.current can default to the configured/current
+        # location when the LLM omits location.
         skill = registry._skills.get(skill_id)
         if skill is not None:
             schema = skill.manifest.input_schema or {}
-            for field_name in schema:
+            required = schema.get("required", []) if isinstance(schema, dict) else []
+            for field_name in required:
                 if field_name not in payload:
                     raise ValueError(
                         f"missing required field '{field_name}' for skill {skill_id}"

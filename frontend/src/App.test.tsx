@@ -17,6 +17,17 @@ class MockAudio {
 
 vi.stubGlobal("Audio", MockAudio);
 
+const interactionCatalogResponse = [
+  {
+    event_id: "pet_head",
+    label: "摸摸头",
+    group: "pet_care",
+    default_mood: "shy",
+    default_animation: "wiggle",
+    state_semantics: {}
+  }
+];
+
 test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
   let resolveEvent: (value: unknown) => void = () => undefined;
   const eventPromise = new Promise((resolve) => {
@@ -40,6 +51,7 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
         updated_at: "now"
       })
     })
+    .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
     .mockReturnValueOnce(eventPromise)
     .mockResolvedValueOnce({
       ok: true,
@@ -126,6 +138,7 @@ describe("text chat", () => {
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse })
       .mockResolvedValueOnce({
         ok: true,
@@ -149,7 +162,7 @@ describe("text chat", () => {
 
     await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
 
-    const [, textInit] = fetchMock.mock.calls[1];
+    const [, textInit] = fetchMock.mock.calls[2];
     expect(textInit.method).toBe("POST");
     expect(JSON.parse(textInit.body as string)).toMatchObject({
       text: "帮我写两数之和",

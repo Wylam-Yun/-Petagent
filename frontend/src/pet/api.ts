@@ -2,6 +2,7 @@ import type {
   ActivationResponse,
   AudioJob,
   DeviceStatePayload,
+  InteractionDefinition,
   PetEventType,
   ProactiveResponse,
   PetResponse,
@@ -36,6 +37,10 @@ export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceSt
 
 export function getProactiveEvent(): Promise<ProactiveResponse> {
   return requestJson<ProactiveResponse>("/api/pet/proactive");
+}
+
+export function getInteractions(): Promise<InteractionDefinition[]> {
+  return requestJson<InteractionDefinition[]>("/api/interactions");
 }
 
 export function postPetEvent(event: PetEventType): Promise<PetResponse> {

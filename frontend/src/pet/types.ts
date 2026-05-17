@@ -41,6 +41,15 @@ export type PetEventType =
   | "debug_sleepy"
   | "debug_angry";
 
+export type InteractionDefinition = {
+  event_id: PetEventType;
+  label: string;
+  group: "pet_care" | "emotional_companion" | "debug" | string;
+  default_mood: Mood;
+  default_animation: AnimationName;
+  state_semantics: Record<string, string>;
+};
+
 export type StateAffect = {
   interaction_tone: string;
   pet_effort: string;

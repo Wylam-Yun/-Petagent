@@ -10,6 +10,7 @@ import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import {
   exitMomo,
   getAudioJob,
+  getInteractions,
   getPetState,
   getProactiveEvent,
   postPetEvent,
@@ -25,6 +26,7 @@ import { shouldApplyProactive } from "./pet/proactive";
 import type {
   ActivationResponse,
   AnimationName,
+  InteractionDefinition,
   Mood,
   PetEventType,
   PetResponse,
@@ -47,26 +49,6 @@ const fallbackState: PetState = {
   mode: "idle"
 };
 
-const optimistic: Record<PetEventType, { mood: Mood; animation: AnimationName; text: string }> = {
-  pet_head: { mood: "shy", animation: "wiggle", text: "嘿嘿…" },
-  poke_face: { mood: "angry", animation: "shake", text: "唔？" },
-  hug: { mood: "happy", animation: "bounce", text: "Momo 贴过来啦。" },
-  pet_pat: { mood: "happy", animation: "bounce", text: "拍拍~" },
-  praise_momo: { mood: "shy", animation: "wiggle", text: "被夸了好开心！" },
-  feed_momo: { mood: "happy", animation: "bounce", text: "好吃！" },
-  stay_with_me: { mood: "happy", animation: "breathing", text: "Momo 在这儿陪你。" },
-  comfort_me: { mood: "concerned", animation: "droop", text: "抱抱你…" },
-  encourage_me: { mood: "excited", animation: "jump", text: "你可以的！" },
-  listen_to_me: { mood: "thinking", animation: "tilt", text: "嗯嗯，说吧。" },
-  tuck_in: { mood: "sleepy", animation: "slowBlink", text: "晚安…" },
-  clean_face: { mood: "happy", animation: "wiggle", text: "擦干净啦。" },
-  quiet_company: { mood: "idle", animation: "breathing", text: "安静陪着你。" },
-  take_a_break: { mood: "sleepy", animation: "slowBlink", text: "休息一下。" },
-  debug_happy: { mood: "happy", animation: "bounce", text: "开心模式。" },
-  debug_sleepy: { mood: "sleepy", animation: "slowBlink", text: "有点困困的。" },
-  debug_angry: { mood: "angry", animation: "shake", text: "小小生气一下。" }
-};
-
 function App() {
   const [petState, setPetState] = useState<PetState>(fallbackState);
   const [faceType, setFaceType] = useState<Mood>("idle");
@@ -76,6 +58,7 @@ function App() {
   const [phase, setPhase] = useState<PetUIPhase>("idle");
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [thinkingMode, setThinkingMode] = useState(false);
+  const [interactions, setInteractions] = useState<InteractionDefinition[]>([]);
   const audioRunRef = useRef(0);
 
   useEffect(() => {
@@ -90,6 +73,20 @@ function App() {
       .catch(() => {
         if (!alive) return;
         setBubbleText("Momo 先用本地状态陪你。");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getInteractions()
+      .then((items) => {
+        if (alive) setInteractions(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {
+        if (alive) setBubbleText("Momo 的互动按钮还在加载。");
       });
     return () => {
       alive = false;
@@ -144,9 +141,24 @@ function App() {
   }, [phase, busy]);
 
   const titleMood = useMemo(() => petState.mood, [petState.mood]);
+  const interactionPreview = useMemo(() => {
+    const result: Partial<Record<PetEventType, { mood: Mood; animation: AnimationName; text: string }>> = {};
+    for (const item of interactions) {
+      result[item.event_id] = {
+        mood: item.default_mood,
+        animation: item.default_animation,
+        text: item.label + "…"
+      };
+    }
+    return result;
+  }, [interactions]);
 
   async function handlePetEvent(event: PetEventType) {
-    const preview = optimistic[event];
+    const preview = interactionPreview[event] ?? {
+      mood: "thinking" as Mood,
+      animation: "blink" as AnimationName,
+      text: "Momo 收到啦。"
+    };
     setFaceType(preview.mood);
     setAnimation(preview.animation);
     setBubbleText(preview.text);
@@ -391,7 +403,11 @@ function App() {
           onPhaseChange={handleVoicePhase}
           onVoiceResponse={handleVoiceResponse}
         />
-        <TouchArea disabled={busy || phase === "thinking"} onPetEvent={handlePetEvent} />
+        <TouchArea
+          disabled={busy || phase === "thinking" || interactions.length === 0}
+          interactions={interactions}
+          onPetEvent={handlePetEvent}
+        />
       </div>
       <div className="secondary-actions">
         <button

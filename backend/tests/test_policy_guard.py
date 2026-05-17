@@ -51,11 +51,10 @@ def test_validate_skill_payload_rejects_oversized():
         guard.validate_skill_payload("weather.current", big_payload, registry)
 
 
-def test_validate_skill_payload_rejects_missing_required():
+def test_validate_skill_payload_allows_optional_weather_location():
     guard = PolicyGuard()
     registry = _registry()
-    with pytest.raises(ValueError, match="missing required field"):
-        guard.validate_skill_payload("weather.current", {}, registry)
+    assert guard.validate_skill_payload("weather.current", {}, registry) == {}
 
 
 def test_validate_skill_payload_accepts_valid():

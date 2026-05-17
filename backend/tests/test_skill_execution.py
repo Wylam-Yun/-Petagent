@@ -22,9 +22,9 @@ def test_llm_planned_weather_skill_executes():
 
     def plan_with_weather(messages):
         result = original(messages)
-        # Inject a weather skill request into the action response
+        # LLMs may omit optional location; weather.current should default to current.
         result["skill_requests"] = [
-            {"skill_id": "weather.current", "payload": {"location": "current"}}
+            {"skill_id": "weather.current", "payload": {}}
         ]
         return result
 
