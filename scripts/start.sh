@@ -8,6 +8,21 @@ PID_FILE="$PROJECT_DIR/backend/data/runtime.pid"
 LOG_FILE="$PROJECT_DIR/backend/data/logs/runtime.log"
 HEALTH_URL="http://127.0.0.1:$PORT/api/health"
 
+repair_android_context() {
+  if [ "${PETAGENT_RESTORECON:-1}" = "0" ]; then
+    return 0
+  fi
+  command -v su >/dev/null 2>&1 || return 0
+  su -c "restorecon -R '$PROJECT_DIR/backend/data' '$PROJECT_DIR/backend/static' '$PROJECT_DIR/frontend/dist' 2>/dev/null" >/dev/null 2>&1 || true
+}
+
+remove_pid_file() {
+  rm -f "$PID_FILE" 2>/dev/null && return 0
+  repair_android_context
+  rm -f "$PID_FILE" 2>/dev/null || true
+}
+
+repair_android_context
 mkdir -p "$PROJECT_DIR/backend/data/logs" "$PROJECT_DIR/backend/static/audio"
 
 if [ -x "$PROJECT_DIR/scripts/clean_cache.sh" ]; then
@@ -37,7 +52,7 @@ if [ -f "$PID_FILE" ]; then
     sleep 2
     kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true
   fi
-  rm -f "$PID_FILE"
+  remove_pid_file
 fi
 
 PYTHON_BIN="${PYTHON:-python}"
@@ -47,7 +62,10 @@ fi
 
 cd "$PROJECT_DIR/backend"
 PYTHONPATH="$PROJECT_DIR/backend" nohup "$PYTHON_BIN" -m uvicorn app.main:app --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
-echo "$!" > "$PID_FILE"
+echo "$!" > "$PID_FILE" 2>/dev/null || {
+  repair_android_context
+  echo "$!" > "$PID_FILE"
+}
 echo "PetAgent runtime starting on $HOST:$PORT ..."
 
 ATTEMPTS=0

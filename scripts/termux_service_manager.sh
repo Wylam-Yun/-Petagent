@@ -29,6 +29,12 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
+repair_android_context() {
+    [ "${PETAGENT_RESTORECON:-1}" = "0" ] && return 0
+    command -v su >/dev/null 2>&1 || return 0
+    su -c "restorecon -R '$PETAGENT_DIR' '$LOCK_DIR' 2>/dev/null" >/dev/null 2>&1 || true
+}
+
 rotate_log() {
     if [ -f "$LOG_FILE" ]; then
         size="$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)"
@@ -41,7 +47,10 @@ rotate_log() {
 }
 
 cleanup_lock() {
-    rm -rf "$LOCK_DIR"
+    rm -rf "$LOCK_DIR" 2>/dev/null || {
+        repair_android_context
+        rm -rf "$LOCK_DIR" 2>/dev/null || true
+    }
 }
 
 cleanup_and_exit() {
@@ -62,7 +71,10 @@ take_lock() {
         exit 0
     fi
 
-    rm -rf "$LOCK_DIR"
+    rm -rf "$LOCK_DIR" 2>/dev/null || {
+        repair_android_context
+        rm -rf "$LOCK_DIR" 2>/dev/null || true
+    }
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo "$$" > "$LOCK_DIR/pid"
         trap cleanup_lock EXIT
@@ -193,7 +205,10 @@ stop_unhealthy_petagent() {
         sleep 2
         kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
     fi
-    rm -f "$PETAGENT_DIR/backend/data/runtime.pid"
+    rm -f "$PETAGENT_DIR/backend/data/runtime.pid" 2>/dev/null || {
+        repair_android_context
+        rm -f "$PETAGENT_DIR/backend/data/runtime.pid" 2>/dev/null || true
+    }
     return 0
 }
 
@@ -235,6 +250,7 @@ ensure_petagent() {
 }
 
 main() {
+    repair_android_context
     take_lock
     log "Service manager started with PID $$"
     acquire_wake_lock
