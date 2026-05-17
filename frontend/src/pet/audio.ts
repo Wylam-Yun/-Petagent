@@ -9,9 +9,14 @@ export class RecordingTooShortError extends Error {
 }
 
 export class MicrophonePermissionError extends Error {
-  constructor() {
+  reason: "insecure_context" | "missing_api" | "permission_denied";
+
+  constructor(
+    reason: "insecure_context" | "missing_api" | "permission_denied" = "permission_denied"
+  ) {
     super("microphone_unavailable");
     this.name = "MicrophonePermissionError";
+    this.reason = reason;
   }
 }
 
@@ -58,6 +63,10 @@ async function createWavRecordingSession(
 ): Promise<VoiceRecordingSession> {
   const mediaDevices = options.mediaDevices ?? navigator.mediaDevices;
   const AudioContextCtor = options.audioContextCtor ?? getAudioContextCtor();
+  const unavailableReason = microphoneUnavailableReason(mediaDevices);
+  if (unavailableReason) {
+    throw new MicrophonePermissionError(unavailableReason);
+  }
   if (!mediaDevices?.getUserMedia || !AudioContextCtor) {
     throw new UnsupportedWavRecorderError();
   }
@@ -66,7 +75,7 @@ async function createWavRecordingSession(
   try {
     stream = await mediaDevices.getUserMedia({ audio: true });
   } catch {
-    throw new MicrophonePermissionError();
+    throw new MicrophonePermissionError("permission_denied");
   }
 
   let audioContext: AudioContext;
@@ -143,15 +152,19 @@ async function createMediaRecorderSession(
 ): Promise<VoiceRecordingSession> {
   const mediaDevices = options.mediaDevices ?? navigator.mediaDevices;
   const MediaRecorderCtor = options.mediaRecorderCtor ?? window.MediaRecorder;
+  const unavailableReason = microphoneUnavailableReason(mediaDevices);
+  if (unavailableReason) {
+    throw new MicrophonePermissionError(unavailableReason);
+  }
   if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
-    throw new MicrophonePermissionError();
+    throw new MicrophonePermissionError("missing_api");
   }
 
   let stream: MediaStream;
   try {
     stream = await mediaDevices.getUserMedia({ audio: true });
   } catch {
-    throw new MicrophonePermissionError();
+    throw new MicrophonePermissionError("permission_denied");
   }
 
   const chunks: Blob[] = [];
@@ -219,6 +232,23 @@ function selectMimeType(MediaRecorderCtor: typeof MediaRecorder): string {
 function getAudioContextCtor(): typeof AudioContext | undefined {
   return window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext })
     .webkitAudioContext;
+}
+
+function microphoneUnavailableReason(
+  mediaDevices?: Pick<MediaDevices, "getUserMedia">
+): "insecure_context" | "missing_api" | null {
+  if (!isLocalhost() && window.isSecureContext === false) {
+    return "insecure_context";
+  }
+  if (!mediaDevices?.getUserMedia) {
+    return "missing_api";
+  }
+  return null;
+}
+
+function isLocalhost(): boolean {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 function stopStream(stream: MediaStream) {

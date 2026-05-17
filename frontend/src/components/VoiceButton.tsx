@@ -2,6 +2,7 @@ import { Mic, MicOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  MicrophonePermissionError,
   RecordingTooShortError,
   createVoiceRecordingSession,
   type VoiceRecordingSession
@@ -14,6 +15,7 @@ type VoiceButtonProps = {
   disabled: boolean;
   phase: PetUIPhase;
   thinkingMode?: boolean;
+  pressToRecordDelayMs?: number;
   recorderFactory?: () => Promise<VoiceRecordingSession>;
   uploadVoice?: (blob: Blob, options?: UploadVoiceOptions) => Promise<VoiceChatResponse>;
   onPhaseChange: (phase: PetUIPhase) => void;
@@ -21,10 +23,13 @@ type VoiceButtonProps = {
   onError: (message: string) => void;
 };
 
+const DEFAULT_PRESS_TO_RECORD_DELAY_MS = 240;
+
 export function VoiceButton({
   disabled,
   phase,
   thinkingMode = false,
+  pressToRecordDelayMs = DEFAULT_PRESS_TO_RECORD_DELAY_MS,
   recorderFactory = createVoiceRecordingSession,
   uploadVoice = defaultUploadVoice,
   onPhaseChange,
@@ -34,6 +39,7 @@ export function VoiceButton({
   const [busy, setBusy] = useState(false);
   const [localPhase, setLocalPhase] = useState<PetUIPhase>(phase);
   const sessionRef = useRef<VoiceRecordingSession | null>(null);
+  const armTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!busy) {
@@ -43,7 +49,26 @@ export function VoiceButton({
 
   const effectivePhase = localPhase;
   const label = labelForPhase(effectivePhase);
-  const isBlocked = disabled || busy;
+  const isBlocked = disabled || busy || armTimerRef.current !== null;
+
+  useEffect(() => {
+    return () => {
+      clearArmTimer();
+      sessionRef.current?.cancel();
+    };
+  }, []);
+
+  function armRecording() {
+    if (isBlocked || sessionRef.current) return;
+    if (pressToRecordDelayMs <= 0) {
+      void startRecording();
+      return;
+    }
+    armTimerRef.current = window.setTimeout(() => {
+      armTimerRef.current = null;
+      void startRecording();
+    }, pressToRecordDelayMs);
+  }
 
   async function startRecording() {
     if (isBlocked || sessionRef.current) return;
@@ -51,15 +76,19 @@ export function VoiceButton({
     try {
       sessionRef.current = await recorderFactory();
       changePhase("listening");
-    } catch {
+    } catch (error) {
       sessionRef.current = null;
       setBusy(false);
       changePhase("error");
-      onError("呜，麦克风好像没醒。");
+      onError(messageForMicrophoneError(error));
     }
   }
 
   async function stopRecordingAndUpload() {
+    if (clearArmTimer()) {
+      onError("按住久一点，Momo 才听得到。");
+      return;
+    }
     const session = sessionRef.current;
     if (!session) return;
     sessionRef.current = null;
@@ -82,6 +111,7 @@ export function VoiceButton({
   }
 
   function cancelRecording() {
+    clearArmTimer();
     sessionRef.current?.cancel();
     sessionRef.current = null;
     setBusy(false);
@@ -93,20 +123,27 @@ export function VoiceButton({
     onPhaseChange(nextPhase);
   }
 
+  function clearArmTimer(): boolean {
+    if (armTimerRef.current === null) return false;
+    window.clearTimeout(armTimerRef.current);
+    armTimerRef.current = null;
+    return true;
+  }
+
   return (
     <button
       aria-label={label}
       className={`voice-button voice-${effectivePhase}`}
       disabled={disabled}
       type="button"
-      onMouseDown={startRecording}
+      onMouseDown={armRecording}
       onMouseLeave={stopRecordingAndUpload}
       onMouseUp={stopRecordingAndUpload}
       onTouchCancel={cancelRecording}
       onTouchEnd={stopRecordingAndUpload}
       onTouchStart={(event) => {
         event.preventDefault();
-        void startRecording();
+        armRecording();
       }}
     >
       {effectivePhase === "error" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
@@ -130,6 +167,18 @@ function labelForPhase(phase: PetUIPhase): string {
     case "error":
       return "再试一次";
     default:
-      return "按住说话";
+      return "长按说话";
   }
+}
+
+function messageForMicrophoneError(error: unknown): string {
+  if (error instanceof MicrophonePermissionError) {
+    if (error.reason === "insecure_context") {
+      return "麦克风需要用 127.0.0.1 或 HTTPS 打开。";
+    }
+    if (error.reason === "missing_api") {
+      return "这个浏览器叫不到麦克风，换 Chrome 或 127.0.0.1 试试。";
+    }
+  }
+  return "呜，麦克风好像没醒。";
 }

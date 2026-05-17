@@ -1,3 +1,4 @@
+import { act } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
@@ -51,6 +52,7 @@ describe("VoiceButton", () => {
       <VoiceButton
         disabled={false}
         phase="idle"
+        pressToRecordDelayMs={0}
         recorderFactory={recorderFactory()}
         thinkingMode={false}
         uploadVoice={uploadVoice}
@@ -60,7 +62,7 @@ describe("VoiceButton", () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "按住说话" }));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "长按说话" }));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("listening"));
 
     fireEvent.mouseUp(screen.getByRole("button", { name: "松开回应" }));
@@ -84,6 +86,7 @@ describe("VoiceButton", () => {
       <VoiceButton
         disabled={false}
         phase="idle"
+        pressToRecordDelayMs={0}
         recorderFactory={createRecorder}
         thinkingMode={true}
         uploadVoice={uploadVoice}
@@ -93,12 +96,45 @@ describe("VoiceButton", () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "按住说话" }));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "长按说话" }));
     await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
     fireEvent.mouseUp(screen.getByRole("button", { name: "松开回应" }));
     fireEvent.mouseDown(screen.getByRole("button", { name: "让我想想" }));
 
     expect(createRecorder).toHaveBeenCalledTimes(1);
     resolveUpload(voiceResponse);
+  });
+
+  test("ignores accidental short taps before opening the microphone", async () => {
+    vi.useFakeTimers();
+    const createRecorder = recorderFactory();
+    const uploadVoice = vi.fn();
+    const onError = vi.fn();
+
+    render(
+      <VoiceButton
+        disabled={false}
+        phase="idle"
+        pressToRecordDelayMs={250}
+        recorderFactory={createRecorder}
+        thinkingMode={false}
+        uploadVoice={uploadVoice}
+        onError={onError}
+        onPhaseChange={vi.fn()}
+        onVoiceResponse={vi.fn()}
+      />
+    );
+
+    fireEvent.touchStart(screen.getByRole("button", { name: "长按说话" }));
+    fireEvent.touchEnd(screen.getByRole("button", { name: "长按说话" }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(createRecorder).not.toHaveBeenCalled();
+    expect(uploadVoice).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith("按住久一点，Momo 才听得到。");
+    vi.useRealTimers();
   });
 });
