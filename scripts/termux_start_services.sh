@@ -111,11 +111,15 @@ start_manager_if_needed() {
     if [ -x "$MANAGER_SCRIPT" ]; then
         nohup "$MANAGER_SCRIPT" >/dev/null 2>&1 &
         log "start_services: launched service manager from repo"
-        sleep 1
-        if manager_is_running; then
-            log "start_services: service manager confirmed running"
-            return 0
-        fi
+        waited=0
+        while [ "$waited" -lt 15 ]; do
+            if manager_is_running; then
+                log "start_services: service manager confirmed running"
+                return 0
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
         log "start_services: WARNING service manager not confirmed after launch"
         return 1
     fi

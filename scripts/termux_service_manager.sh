@@ -196,6 +196,19 @@ petagent_port_listening() {
     check_port_listen "$PETAGENT_PORT"
 }
 
+petagent_within_startup_grace() {
+    petagent_process_alive || return 1
+    age="$(petagent_pid_age)"
+    [ "$age" -lt "$PETAGENT_START_GRACE_SECONDS" ]
+}
+
+petagent_start_in_progress() {
+    start_lock="$PETAGENT_DIR/backend/data/start.lock"
+    [ -d "$start_lock" ] || return 1
+    start_pid="$(cat "$start_lock/pid" 2>/dev/null || true)"
+    [ -n "$start_pid" ] && kill -0 "$start_pid" 2>/dev/null
+}
+
 petagent_health() {
     command -v curl >/dev/null 2>&1 || return 1
     curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
@@ -257,6 +270,17 @@ start_petagent() {
         return 0
     fi
 
+    if petagent_start_in_progress; then
+        log "PetAgent runtime start is already in progress"
+        return 0
+    fi
+
+    if petagent_within_startup_grace; then
+        age="$(petagent_pid_age)"
+        log "PetAgent runtime is still starting (${age}s); waiting"
+        return 0
+    fi
+
     log "ERROR: PetAgent health check failed after start"
     return 1
 }
@@ -281,8 +305,8 @@ restart_petagent() {
 }
 
 main() {
-    repair_android_context
     take_lock
+    repair_android_context
     log "Service manager started with PID $$"
     acquire_wake_lock
     start_proxy_once
@@ -315,7 +339,14 @@ main() {
             petagent_fail_count=0
         else
             # Process dead = immediate restart; HTTP fail = wait for consecutive failures
-            if ! petagent_process_alive; then
+            if petagent_start_in_progress; then
+                log "PetAgent start is already in progress; waiting"
+                petagent_fail_count=0
+            elif petagent_within_startup_grace; then
+                age="$(petagent_pid_age)"
+                log "PetAgent is still within startup grace (${age}s); waiting"
+                petagent_fail_count=0
+            elif ! petagent_process_alive; then
                 log "PetAgent process not running; restarting immediately"
                 if restart_petagent; then
                     petagent_fail_count=0
