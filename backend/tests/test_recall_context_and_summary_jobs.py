@@ -55,6 +55,7 @@ def test_recall_question_selects_recent_raw_events_from_previous_day():
         pet_state=state_store.get_state(),
         episode=new_episode,
         event_log_store=event_log,
+        context_profile="recall",
     )
 
     recalled = context.get("temporal_recall_events") or []

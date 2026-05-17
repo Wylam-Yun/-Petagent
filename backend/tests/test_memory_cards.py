@@ -440,3 +440,87 @@ def test_old_path_fallback():
     # read_card should fall back to old path
     items = mcm.read_card("user_preferences")
     assert "喜欢短回复" in items
+
+
+def test_fast_companion_no_temporal_recall():
+    """fast_companion with recall keyword should NOT load temporal recall events."""
+    from app.runtime.events import normalize_event
+
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+    episodes = EpisodeStore(state_store.connection)
+    event_log = EventLogStore(state_store.connection)
+
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
+    })
+
+    ep, _ = episodes.get_or_create_current()
+    # Record an event so there's something to recall
+    event_log.record("evt-1", ep.get("episode_id", ""), "text_message", "text",
+                     user_text="昨天聊了天气", pet_reply="晴天哦", state_before={}, state_after={},
+                     mood_after="happy", state_affect={})
+
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "昨天聊了什么"},
+    })
+
+    cm = ContextManager({})
+    context = cm.build(
+        event=event,
+        pet_state=state_store.get_state(),
+        episode=ep,
+        event_log_store=event_log,
+        memory_manager=mm,
+        context_profile="fast_companion",
+        memory_card_manager=mcm,
+    )
+
+    assert context["temporal_recall_events"] == []
+    assert context["relevant_memories"] == []
+    assert context["memory_cards"] is not None
+
+
+def test_tool_profile_no_deep_memory():
+    """tool profile should not include scored memories or important quotes."""
+    from app.runtime.events import normalize_event
+
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+    episodes = EpisodeStore(state_store.connection)
+    event_log = EventLogStore(state_store.connection)
+
+    mm.save_curated("user_preference", "喜欢短回复", importance=4)
+    mm.save_curated("important_quote", "用户说很开心", importance=5)
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
+    })
+    mcm.rebuild("manual_debug")
+
+    ep, _ = episodes.get_or_create_current()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "今天天气怎么样"},
+    })
+
+    cm = ContextManager({})
+    context = cm.build(
+        event=event,
+        pet_state=state_store.get_state(),
+        episode=ep,
+        event_log_store=event_log,
+        memory_manager=mm,
+        context_profile="tool",
+        memory_card_manager=mcm,
+    )
+
+    assert context["relevant_memories"] == []
+    assert context["important_quotes"] == []
+    assert context["memory_cards"] is not None
+    assert context["episode_summaries"] == []
+    assert context["daily_digest"] is None

@@ -141,7 +141,7 @@ def test_recall_question_profile():
     response = client.post("/api/text/chat", json={"text": "昨天我们聊了啥"})
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["context_profile"] == "recall"
+    assert body["runtime"]["context_profile"] == "fast_companion"
 
 
 def test_weather_question_profile():

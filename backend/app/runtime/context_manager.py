@@ -46,7 +46,7 @@ class ContextManager:
 
         if profile == "fast_companion":
             effective_recent_turns = min(self.recent_exact_turns, 4)
-            effective_memory_items = min(self.relevant_memory_items, 2)
+            effective_memory_items = 0  # cards replace scored memories
             include_daily_digest = False
             include_episode_summaries = False
             include_important_quotes = False
@@ -55,9 +55,10 @@ class ContextManager:
             include_daily_digest = False
         elif profile == "tool":
             effective_recent_turns = min(self.recent_exact_turns, 4)
-            effective_memory_items = min(self.relevant_memory_items, 2)
+            effective_memory_items = 0  # use cards, not scored memories
             include_daily_digest = False
             include_episode_summaries = False
+            include_important_quotes = False
         elif profile == "long_task":
             pass  # use all defaults
         elif profile == "proactive":
@@ -108,7 +109,8 @@ class ContextManager:
             recent_exact_events.reverse()
 
         temporal_recall_events: List[Dict[str, Any]] = []
-        if event_log_store and self._wants_temporal_recall(event):
+        # Only recall/long_task profiles load temporal recall (thinking-mode only)
+        if profile in ("recall", "long_task") and event_log_store and self._wants_temporal_recall(event):
             cutoff = (now_utc - timedelta(hours=self.recall_lookback_hours)).isoformat()
             current_episode_id = episode.get("episode_id") if episode else None
             try:
@@ -136,7 +138,7 @@ class ContextManager:
         # Scored memories OR memory cards
         relevant_memories: List[Dict[str, Any]] = []
         memory_cards: Optional[Dict[str, List[str]]] = None
-        use_cards = profile in ("fast_companion", "proactive") and memory_card_manager is not None
+        use_cards = profile in ("fast_companion", "proactive", "tool") and memory_card_manager is not None
 
         if use_cards:
             try:

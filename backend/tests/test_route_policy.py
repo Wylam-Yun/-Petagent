@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.runtime.route_policy import RouteDecision, decide_route
+from app.runtime.route_policy import RECALL_KEYWORDS, RouteDecision, decide_route
 
 
 def test_button_event_fast_companion():
@@ -11,11 +11,27 @@ def test_button_event_fast_companion():
     assert d.allow_tools is False
 
 
-def test_recall_keyword():
+def test_recall_keyword_non_thinking_stays_fast():
+    """Recall keywords in non-thinking mode should stay on fast path."""
     d = decide_route("text_message", "text_fast", "昨天我说了什么")
+    assert d.route == "fast"
+    assert d.context_profile == "fast_companion"
+    assert d.provider_profile == "fast_llm"
+
+
+def test_recall_keyword_thinking_mode_goes_slow():
+    """Recall keywords with thinking_mode should route to long_task."""
+    d = decide_route("text_message", "text_fast", "昨天说了什么", thinking_mode=True)
     assert d.route == "slow"
-    assert d.context_profile == "recall"
-    assert d.provider_profile == "slow_llm"
+    assert d.context_profile == "long_task"
+
+
+def test_all_recall_keywords_non_thinking():
+    """All RECALL_KEYWORDS should stay fast when thinking_mode=False."""
+    for kw in RECALL_KEYWORDS:
+        d = decide_route("text_message", "text_fast", f"我们{kw}什么")
+        assert d.route == "fast", f"keyword '{kw}' unexpectedly routed to slow"
+        assert d.context_profile == "fast_companion"
 
 
 def test_weather_keyword():

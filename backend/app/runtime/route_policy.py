@@ -70,12 +70,12 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in RECALL_KEYWORDS):
         return RouteDecision(
-            route="slow",
-            context_profile="recall",
-            provider_profile="slow_llm",
+            route="fast",
+            context_profile="fast_companion",
+            provider_profile="fast_llm",
             allow_tools=False,
             max_tool_calls=0,
-            reason="temporal recall detected",
+            reason="recall keyword in fast mode, using memory cards",
         )
 
     if user_text and any(kw in user_text for kw in TOOL_KEYWORDS):
