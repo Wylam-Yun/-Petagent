@@ -121,12 +121,29 @@ def _guard_state_affect(raw: Any) -> StateAffect:
     )
 
 
+_PROMPT_LEAK_PATTERNS = re.compile(
+    r"(?:state_delta|memory_update|cognition_context|output_schema|"
+    r"scene_context|系统提示|上下文字段|skill_requests|provider_profile)",
+    re.IGNORECASE,
+)
+
+
 def _strip_reasoning(reply: str) -> str:
     """Remove model thinking traces that accidentally landed in reply."""
     cleaned = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I).strip()
     cleaned = re.sub(r"(?is)^思考过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
     cleaned = re.sub(r"(?is)^推理过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
+    cleaned = re.sub(r"(?is)^(?:let me think|here'?s? (?:my )?reasoning|step[- ]by[- ]step)[:\s].*?(?=\n\n|\Z)", "", cleaned).strip()
+    cleaned = re.sub(r"(?i)\*\*(?:thinking|reasoning|step[- ]by[- ]step)\*\*[:\s].*?(?=\n\n|\Z)", "", cleaned, flags=re.S).strip()
     return cleaned or FALLBACK_ACTION["reply"]
+
+
+def _sanitize_prompt_leak(reply: str) -> str:
+    """Remove lines containing internal field names that should never appear in user replies."""
+    lines = reply.split("\n")
+    clean = [line for line in lines if not _PROMPT_LEAK_PATTERNS.search(line)]
+    result = "\n".join(clean).strip()
+    return result or FALLBACK_ACTION["reply"]
 
 
 def guard_action(
@@ -157,10 +174,11 @@ def guard_action(
     if vibration not in ALLOWED_VIBRATIONS:
         vibration = "none"
 
-    reply = _trim_reply(
-        _strip_reasoning(str(data.get("reply", FALLBACK_ACTION["reply"])).strip()),
-        max_reply_chars,
-    )
+    reply = _strip_reasoning(str(data.get("reply", "")).strip())
+    reply = _sanitize_prompt_leak(reply)
+    if not reply:
+        reply = FALLBACK_ACTION["reply"]
+    reply = _trim_reply(reply, max_reply_chars)
 
     return PetAction(
         reply=reply,
