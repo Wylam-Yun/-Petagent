@@ -107,9 +107,10 @@ start_manager_if_needed() {
         remove_lock_dir
     fi
 
-    if [ -x "$HOME_DIR/.service_manager.sh" ]; then
-        nohup "$HOME_DIR/.service_manager.sh" >/dev/null 2>&1 &
-        log "start_services: launched service manager"
+    MANAGER_SCRIPT="$HOME_DIR/Petagent/scripts/termux_service_manager.sh"
+    if [ -x "$MANAGER_SCRIPT" ]; then
+        nohup "$MANAGER_SCRIPT" >/dev/null 2>&1 &
+        log "start_services: launched service manager from repo"
         sleep 1
         if manager_is_running; then
             log "start_services: service manager confirmed running"
@@ -119,7 +120,7 @@ start_manager_if_needed() {
         return 1
     fi
 
-    log "start_services: ERROR missing executable $HOME_DIR/.service_manager.sh"
+    log "start_services: ERROR missing executable $MANAGER_SCRIPT"
     return 1
 }
 

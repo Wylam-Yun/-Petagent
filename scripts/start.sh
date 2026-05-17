@@ -31,7 +31,21 @@ if [ -d "$START_LOCK" ]; then
   fi
   rm -rf "$START_LOCK" 2>/dev/null || true
 fi
-mkdir -p "$START_LOCK" 2>/dev/null || true
+# Atomic lock: mkdir without -p fails if dir already exists
+if ! mkdir "$START_LOCK" 2>/dev/null; then
+  # Another process抢到了锁，再检查一次
+  lock_pid="$(cat "$START_LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    echo "PetAgent start already in progress (pid $lock_pid)"
+    exit 0
+  fi
+  # Stale lock，清理后重试
+  rm -rf "$START_LOCK" 2>/dev/null || true
+  if ! mkdir "$START_LOCK" 2>/dev/null; then
+    echo "Could not acquire start lock"
+    exit 1
+  fi
+fi
 echo "$$" > "$START_LOCK/pid" 2>/dev/null || true
 trap 'rm -rf "$START_LOCK" 2>/dev/null || true' EXIT
 
