@@ -524,3 +524,108 @@ def test_tool_profile_no_deep_memory():
     assert context["memory_cards"] is not None
     assert context["episode_summaries"] == []
     assert context["daily_digest"] is None
+
+
+def test_seed_realistic_content():
+    """Seed memories matching original plan's example content and verify cards."""
+    mcm, mm = _make_mcm()
+
+    # user.md content
+    mm.save_curated("user_preference", "用户叫 William", importance=5)
+    mm.save_curated("user_preference", "喜欢中文交流", importance=4)
+    mm.save_curated("user_preference", "喜欢自然简短", importance=4)
+    mm.save_curated("relationship", "不喜欢客服腔", importance=4)
+    mm.save_curated("user_preference", "默认听声音回复", importance=3)
+
+    # memory.md content
+    mm.save_curated("important_event", "昨天聊过记忆方案", importance=4)
+    mm.save_curated("important_event", "快路径只读小抄", importance=3)
+    mm.save_curated("recent_mood", "语音偶尔会卡住", importance=3)
+
+    result = mcm.rebuild("manual_debug")
+    assert result["items_written"] >= 5
+
+    user_items = mcm.read_card("user_preferences")
+    assert any("William" in item for item in user_items)
+    assert any("中文" in item for item in user_items)
+
+    mem_items = mcm.read_card("momo_memories")
+    assert any("记忆方案" in item for item in mem_items)
+
+
+def test_thinking_mode_includes_deep_context():
+    """Thinking mode (long_task) should include scored memories and episode summaries."""
+    from app.runtime.memory_store import EpisodeSummaryStore
+    from app.runtime.events import normalize_event
+
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+    episodes = EpisodeStore(state_store.connection)
+    event_log = EventLogStore(state_store.connection)
+    ess = EpisodeSummaryStore(state_store.connection)
+
+    mm.save_curated("user_preference", "喜欢短回复", importance=4)
+    mm.save_curated("important_quote", "用户说很开心", importance=5)
+    ess.save("ep-old", "讨论了记忆方案", ["事件"], "思考", [],
+             "2026-05-16T00:00:00", "2026-05-16T01:00:00")
+
+    ep, _ = episodes.get_or_create_current()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "昨天聊了什么"},
+    })
+
+    cm = ContextManager({})
+    context = cm.build(
+        event=event,
+        pet_state=state_store.get_state(),
+        episode=ep,
+        event_log_store=event_log,
+        memory_manager=mm,
+        episode_summary_store=ess,
+        context_profile="long_task",
+    )
+
+    # long_task should include deep context
+    assert len(context["relevant_memories"]) > 0 or len(context["important_quotes"]) > 0
+    assert len(context["episode_summaries"]) > 0
+
+
+def test_fast_companion_context_budget_small():
+    """Fast companion context should be well under max budget."""
+    from app.runtime.events import normalize_event
+
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+    episodes = EpisodeStore(state_store.connection)
+    event_log = EventLogStore(state_store.connection)
+
+    # Seed lots of memories
+    for i in range(10):
+        mm.save_curated("user_preference", "偏好内容%d号" % i, importance=4)
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
+    })
+    mcm.rebuild("manual_debug")
+
+    ep, _ = episodes.get_or_create_current()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "你好"},
+    })
+
+    cm = ContextManager({"max_context_chars": 4500})
+    context = cm.build(
+        event=event,
+        pet_state=state_store.get_state(),
+        episode=ep,
+        event_log_store=event_log,
+        memory_manager=mm,
+        context_profile="fast_companion",
+        memory_card_manager=mcm,
+    )
+
+    used = context["context_budget"]["used_chars"]
+    assert used < 2000, f"fast_companion context too large: {used} chars"

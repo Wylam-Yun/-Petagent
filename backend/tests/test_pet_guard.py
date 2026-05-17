@@ -85,3 +85,28 @@ def test_guard_default_limits_match_expected_ranges():
     assert DEFAULT_STATE_DELTA_LIMITS["energy"] == (-8, 8)
     assert DEFAULT_STATE_DELTA_LIMITS["sleepiness"] == (-8, 10)
     assert DEFAULT_STATE_DELTA_LIMITS["loneliness"] == (-10, 4)
+
+
+def test_sanitize_prompt_leak_removes_internal_fields():
+    from app.pet.guard import _sanitize_prompt_leak
+    reply = "你好呀\nstate_delta: {energy: 5}\n今天天气不错"
+    result = _sanitize_prompt_leak(reply)
+    assert "state_delta" not in result
+    assert "你好呀" in result
+    assert "天气不错" in result
+
+
+def test_sanitize_prompt_leak_all_leaked_returns_fallback():
+    from app.pet.guard import _sanitize_prompt_leak, FALLBACK_ACTION
+    reply = "state_delta: {energy: 5}\nmemory_update: {should_save: true}"
+    result = _sanitize_prompt_leak(reply)
+    assert result == FALLBACK_ACTION["reply"]
+
+
+def test_guard_action_strips_prompt_leak():
+    action = guard_action({
+        "reply": "你好呀\nstate_delta: {energy: 5}\ncognition_context: {profile: fast}",
+        "mood": "happy",
+    })
+    assert "state_delta" not in action.reply
+    assert "cognition_context" not in action.reply
