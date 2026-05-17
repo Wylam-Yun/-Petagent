@@ -16,7 +16,8 @@ import {
 
 import type { InteractionDefinition, PetEventType } from "../pet/types";
 
-const primaryEventIds: PetEventType[] = ["pet_head", "hug", "stay_with_me"];
+const petCareIds: PetEventType[] = ["feed_momo", "pet_pat", "clean_face", "tuck_in"];
+const companionIds: PetEventType[] = ["praise_momo", "comfort_me", "stay_with_me", "encourage_me", "take_a_break"];
 
 const iconMap: Partial<Record<PetEventType, React.ElementType>> = {
   pet_head: HandHeart,
@@ -41,47 +42,82 @@ type TouchAreaProps = {
 };
 
 export function TouchArea({ disabled, interactions, onPetEvent }: TouchAreaProps) {
-  const primaryActions = interactions.filter((item) => primaryEventIds.includes(item.event_id));
-  const moreActions = interactions.filter((item) => !primaryEventIds.includes(item.event_id));
+  const petCareActions = interactions.filter((item) => petCareIds.includes(item.event_id));
+  const companionActions = interactions.filter((item) => companionIds.includes(item.event_id));
+  const otherActions = interactions.filter(
+    (item) => !petCareIds.includes(item.event_id) && !companionIds.includes(item.event_id)
+  );
 
   return (
     <div className="touch-area">
-      <div className="touch-primary">
-        {primaryActions.map((item) => {
-          const Icon = iconMap[item.event_id] ?? Sparkles;
-          return (
-          <button
-            key={item.event_id}
-            aria-label={item.label}
-            className="touch-button primary"
-            disabled={disabled}
-            type="button"
-            onClick={() => onPetEvent(item.event_id)}
-          >
-            <Icon aria-hidden="true" />
-            <span>{item.label}</span>
-          </button>
-          );
-        })}
-      </div>
-      <div className="touch-more">
-        {moreActions.map((item) => {
-          const Icon = iconMap[item.event_id] ?? Sparkles;
-          return (
-          <button
-            key={item.event_id}
-            aria-label={item.label}
-            className="touch-button compact"
-            disabled={disabled}
-            type="button"
-            onClick={() => onPetEvent(item.event_id)}
-          >
-            <Icon aria-hidden="true" />
-            <span>{item.label}</span>
-          </button>
-          );
-        })}
-      </div>
+      {petCareActions.length > 0 && (
+        <div className="touch-group">
+          <span className="touch-group-label">养宠</span>
+          <div className="touch-group-buttons">
+            {petCareActions.map((item) => {
+              const Icon = iconMap[item.event_id] ?? Sparkles;
+              return (
+                <button
+                  key={item.event_id}
+                  aria-label={item.label}
+                  className="touch-button"
+                  disabled={disabled}
+                  type="button"
+                  onClick={() => onPetEvent(item.event_id)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {companionActions.length > 0 && (
+        <div className="touch-group">
+          <span className="touch-group-label">陪伴</span>
+          <div className="touch-group-buttons">
+            {companionActions.map((item) => {
+              const Icon = iconMap[item.event_id] ?? Sparkles;
+              return (
+                <button
+                  key={item.event_id}
+                  aria-label={item.label}
+                  className="touch-button"
+                  disabled={disabled}
+                  type="button"
+                  onClick={() => onPetEvent(item.event_id)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {otherActions.length > 0 && (
+        <div className="touch-group">
+          <div className="touch-group-buttons">
+            {otherActions.map((item) => {
+              const Icon = iconMap[item.event_id] ?? Sparkles;
+              return (
+                <button
+                  key={item.event_id}
+                  aria-label={item.label}
+                  className="touch-button compact"
+                  disabled={disabled}
+                  type="button"
+                  onClick={() => onPetEvent(item.event_id)}
+                >
+                  <Icon aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
