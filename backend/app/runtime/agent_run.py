@@ -58,6 +58,7 @@ class AgentRun:
             "provider": self.provider,
             "requested_tools": self.requested_tools,
             "tool_observations": self.tool_observations,
+            "final_action": self.final_action,
             "audio_job_id": self.audio_job_id,
             "timings_ms": dict(self.timings_ms),
             "status": self.status,

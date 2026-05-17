@@ -73,11 +73,11 @@ class MaintenanceService:
 
         Single-flight: if a tick is already running, returns skipped immediately.
         """
-        if not force and not self._should_run():
-            return {"skipped": True}
         if not self._running_lock.acquire(blocking=False):
             return {"skipped": True, "reason": "already_running"}
         try:
+            if not force and not self._should_run():
+                return {"skipped": True}
             return self._tick_inner(force=force)
         finally:
             self._running_lock.release()

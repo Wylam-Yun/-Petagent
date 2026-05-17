@@ -196,6 +196,16 @@ class RuntimeDispatcher:
                     "content": str(sr.get("content", ""))[:200],
                     "error": sr.get("error"),
                 })
+            run.requested_tools = [sr.get("skill_id", "") for sr in skill_results]
+            run.tool_observations = [
+                {
+                    "skill_id": sr.get("skill_id", ""),
+                    "ok": sr.get("ok", False),
+                    "content": str(sr.get("content", ""))[:200],
+                    "error": sr.get("error"),
+                }
+                for sr in skill_results
+            ]
 
         # 8. Rebuild context with skill results
         if self.context_manager is not None and cognition_context is not None:
@@ -240,6 +250,14 @@ class RuntimeDispatcher:
             max_reply_chars=self._max_reply_chars(active_brain),
             event_type=event.type,
         )
+        if run:
+            run.final_action = {
+                "reply": action.reply[:200],
+                "mood": action.mood,
+                "face_type": action.face_type,
+                "animation": action.animation,
+                "voice_style": action.voice_style,
+            }
 
         # 10. Apply state delta and save
         final_state = apply_state_delta(ruled_state, action.state_delta)
@@ -463,16 +481,18 @@ class RuntimeDispatcher:
             plan = brain.generate_skill_plan(event, context, skill_catalog=skill_catalog)
         except Exception:
             plan = {}
-        requests: List[tuple] = []
-        for item in plan.get("skill_requests") or []:
-            if not isinstance(item, dict):
-                continue
-            skill_id = str(item.get("skill_id") or "")
-            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-            if skill_id:
-                requests.append((skill_id, payload))
+        raw_items = plan.get("skill_requests") or []
         if self.policy_guard is not None:
-            requests = self.policy_guard.validate_skill_plan(requests, self.registry)
+            requests = self.policy_guard.validate_skill_plan(raw_items, self.registry)
+        else:
+            requests = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                skill_id = str(item.get("skill_id") or "")
+                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+                if skill_id:
+                    requests.append((skill_id, payload))
         return requests or self._infer_skill_requests(event)
 
     def _infer_skill_requests(self, event) -> List[tuple]:
