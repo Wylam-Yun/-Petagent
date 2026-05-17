@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.runtime.interaction_catalog import button_event_ids
+
 
 @dataclass(frozen=True)
 class RouteDecision:
@@ -27,11 +29,7 @@ PROACTIVE_EVENT_TYPES = {
     "morning", "night", "long_idle", "battery_low",
     "charging_started", "charging_stopped", "sleepy_time", "user_return",
 }
-BUTTON_EVENT_TYPES = {
-    "pet_head", "poke_face", "hug", "pet_pat", "praise_momo", "feed_momo",
-    "stay_with_me", "comfort_me", "encourage_me", "listen_to_me",
-    "tuck_in", "clean_face", "quiet_company", "take_a_break",
-}
+BUTTON_EVENT_TYPES = set(button_event_ids())
 
 
 def decide_route(

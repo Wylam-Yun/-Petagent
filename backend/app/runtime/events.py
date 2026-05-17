@@ -6,25 +6,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.runtime.interaction_catalog import all_event_ids
 
-ALLOWED_EVENTS = {
-    "pet_head",
-    "poke_face",
-    "hug",
-    "pet_pat",
-    "praise_momo",
-    "feed_momo",
-    "stay_with_me",
-    "comfort_me",
-    "encourage_me",
-    "listen_to_me",
-    "tuck_in",
-    "clean_face",
-    "quiet_company",
-    "take_a_break",
-    "debug_happy",
-    "debug_sleepy",
-    "debug_angry",
+
+_INTERACTION_EVENTS = set(all_event_ids())
+_SYSTEM_EVENTS = {
     "voice_message",
     "text_message",
     "wake_phrase",
@@ -39,6 +25,7 @@ ALLOWED_EVENTS = {
     "sleepy_time",
     "user_return",
 }
+ALLOWED_EVENTS = _INTERACTION_EVENTS | _SYSTEM_EVENTS
 
 
 class PetEvent(BaseModel):

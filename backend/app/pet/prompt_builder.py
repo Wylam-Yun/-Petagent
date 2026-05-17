@@ -6,14 +6,10 @@ from typing import Any, Dict, List, Optional
 from app.config import Settings
 from app.runtime.context import RuntimeContext
 from app.runtime.events import PetEvent
+from app.runtime.interaction_catalog import button_event_ids, get_interaction
 
 
-BUTTON_EVENTS = {
-    "pet_head", "poke_face", "hug",
-    "pet_pat", "praise_momo", "feed_momo",
-    "stay_with_me", "comfort_me", "encourage_me", "listen_to_me",
-    "tuck_in", "clean_face", "quiet_company", "take_a_break",
-}
+BUTTON_EVENTS = set(button_event_ids())
 
 
 OUTPUT_SCHEMA_HINT = {
@@ -100,8 +96,20 @@ def build_pet_messages(
             "\n\n按钮互动规则：\n"
             "1. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
             "2. 如果用户连续点同一按钮，要表现出自然变化。\n"
-            "3. 投喂 feed_momo 是用户主动投喂，不等于手机充电。\n"
+            "3. 投喂 feed_momo 是用户主动投喂，不等于手机充电。"
         )
+        interaction = get_interaction(event.type)
+        if interaction:
+            semantics = ", ".join(
+                f"{k}({v})" for k, v in interaction.state_semantics.items()
+            ) or "无"
+            system_prompt += (
+                f"\n\n当前按钮语义：\n"
+                f"- 互动名称：{interaction.label}\n"
+                f"- 分组：{interaction.group}\n"
+                f"- 状态含义：{semantics}\n"
+                f"- LLM 描述：{interaction.description}\n"
+            )
     if event.source == "proactive":
         system_prompt += (
             "\n\n主动陪伴规则：\n"

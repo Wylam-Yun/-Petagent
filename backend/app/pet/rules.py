@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict
 
 from app.runtime.actions import STATE_KEYS
+from app.runtime.interaction_catalog import INTERACTION_CATALOG
 
 
 EVENT_DELTAS = {
@@ -61,6 +62,12 @@ EVENT_DELTAS = {
     "take_a_break": {"mood": "sleepy", "sleepiness": 2, "energy": 1},
     "text_message": {"intimacy": 1, "loneliness": -3},
 }
+
+
+# Validate that all catalog button events have delta entries
+_CATALOG_BUTTON_IDS = {k for k, v in INTERACTION_CATALOG.items() if v.group != "debug"}
+_MISSING_DELTAS = _CATALOG_BUTTON_IDS - set(EVENT_DELTAS.keys())
+assert not _MISSING_DELTAS, f"Catalog button events missing from EVENT_DELTAS: {_MISSING_DELTAS}"
 
 
 def clamp_value(value: Any) -> int:
