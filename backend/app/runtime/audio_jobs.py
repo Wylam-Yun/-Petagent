@@ -154,6 +154,12 @@ class AudioJobManager:
         if job is None or job.status != "pending":
             return
 
+        try:
+            queued = datetime.fromisoformat(job.created_at)
+            queue_ms = int((datetime.utcnow() - queued).total_seconds() * 1000)
+        except (ValueError, TypeError):
+            queue_ms = 0
+
         tts_start = datetime.utcnow()
         try:
             voice_url = self.tts_provider.synthesize(job.text, job.voice_style)
@@ -171,6 +177,7 @@ class AudioJobManager:
                 current.voice_url = None
                 current.error = sanitized
                 current.timings_ms["tts"] = tts_ms
+                current.timings_ms["audio_queue"] = queue_ms
                 current.updated_at = datetime.utcnow().isoformat()
 
             if self.on_complete:
@@ -186,6 +193,7 @@ class AudioJobManager:
                 return
             current.updated_at = datetime.utcnow().isoformat()
             current.timings_ms["tts"] = tts_ms
+            current.timings_ms["audio_queue"] = queue_ms
             if voice_url:
                 current.status = "ready"
                 current.voice_url = voice_url

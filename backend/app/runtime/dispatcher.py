@@ -176,9 +176,14 @@ class RuntimeDispatcher:
 
         # 7. Run skills (gated by route policy)
         if decision is None or decision.allow_tools:
+            tool_start = perf_counter()
             skill_results = self._run_requested_skills(event, active_brain, planning_context)
+            if run:
+                run.timings_ms["tool"] = int((perf_counter() - tool_start) * 1000)
         else:
             skill_results = []
+            if run:
+                run.timings_ms["tool"] = 0
 
         # 8. Rebuild context with skill results
         if self.context_manager is not None and cognition_context is not None:
@@ -206,10 +211,13 @@ class RuntimeDispatcher:
         )
 
         # 9. Generate action
+        llm_start = perf_counter()
         try:
             raw_action = active_brain.generate_action(event, context)
         except Exception:
             raw_action = None
+        if run:
+            run.timings_ms["llm"] = int((perf_counter() - llm_start) * 1000)
         if run and raw_action is None:
             run.set_status("failed")
             run.error = "LLM provider exception"
@@ -343,6 +351,10 @@ class RuntimeDispatcher:
             if decision:
                 response.runtime["context_profile"] = decision.context_profile
                 response.runtime["route_decision"] = decision.reason
+            response.runtime["route"] = run.route
+            response.runtime["provider"] = run.provider
+            response.runtime["status"] = run.status
+            response.runtime["timings_ms"] = dict(run.timings_ms)
         return response
 
     def _collect_memory_candidates(self, event, action, episode_id: str) -> None:
