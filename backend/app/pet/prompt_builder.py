@@ -143,7 +143,11 @@ def build_pet_messages(
     # Context profile awareness
     profile = (context.cognition_context or {}).get("context_profile", "")
     if profile == "fast_companion":
-        system_prompt += "\n\n快速陪伴模式：回复 1-2 句，自然、轻松，不要长篇大论。"
+        system_prompt += (
+            "\n\n快速陪伴模式：回复 1-2 句，自然、轻松，不要长篇大论。"
+            "\n如果用户问回忆类问题且记忆卡片中没有足够信息，"
+            "自然地说「这个我得认真翻一下记忆，打开思考模式我再帮你回忆」，不要编造。"
+        )
     elif profile == "proactive":
         system_prompt += "\n\n主动陪伴模式：回复 1 句，轻声问候，不要催促。"
     elif profile == "recall":
