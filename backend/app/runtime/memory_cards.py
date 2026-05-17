@@ -118,8 +118,12 @@ class MemoryCardManager:
         self.min_importance = int(cfg.get("min_importance", 2))
         base = Path(cfg.get("card_base_dir", "backend/data/memory_cards"))
         self._paths = {
-            "user_preferences": Path(cfg.get("user_preferences_path", base / "user_preferences" / "card.md")),
-            "momo_memories": Path(cfg.get("momo_memories_path", base / "momo_memories" / "card.md")),
+            "user_preferences": Path(cfg.get("user_preferences_path", base / "user.md")),
+            "momo_memories": Path(cfg.get("momo_memories_path", base / "memory.md")),
+        }
+        self._old_paths = {
+            "user_preferences": base / "user_preferences" / "card.md",
+            "momo_memories": base / "momo_memories" / "card.md",
         }
 
     def rebuild(self, reason: str) -> Dict[str, int]:
@@ -161,8 +165,15 @@ class MemoryCardManager:
     def read_card_with_provenance(self, card_name: str) -> List[Dict[str, str]]:
         """Read card file and return list of {content, source_id, type, updated, ttl}."""
         path = self._paths.get(card_name)
-        if path is None or not path.exists():
+        if path is None:
             return []
+        # Migration fallback: try old subdirectory path if new path doesn't exist
+        if not path.exists():
+            old_path = self._old_paths.get(card_name)
+            if old_path and old_path.exists():
+                path = old_path
+            else:
+                return []
         result = []
         try:
             for line in path.read_text(encoding="utf-8").splitlines():

@@ -15,8 +15,8 @@ def _make_mcm(tmp_dir: str = None, **cfg):
     tmp = Path(tmp_dir or mkdtemp())
     state_store = PetStateStore(None)
     mm = MemoryManager(state_store.connection)
-    cfg.setdefault("user_preferences_path", str(tmp / "user_prefs" / "card.md"))
-    cfg.setdefault("momo_memories_path", str(tmp / "momo_mem" / "card.md"))
+    cfg.setdefault("user_preferences_path", str(tmp / "user.md"))
+    cfg.setdefault("momo_memories_path", str(tmp / "memory.md"))
     mcm = MemoryCardManager(mm, cfg)
     return mcm, mm
 
@@ -144,8 +144,8 @@ def test_fast_path_uses_cards():
 
     mm.save_curated("user_preference", "喜欢短回复", importance=4)
     mcm = MemoryCardManager(mm, {
-        "user_preferences_path": str(tmp / "up" / "card.md"),
-        "momo_memories_path": str(tmp / "mm" / "card.md"),
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
     })
     mcm.rebuild("manual_debug")
 
@@ -209,8 +209,8 @@ def test_slow_path_no_cards():
 
     mm.save_curated("user_preference", "喜欢短回复", importance=4)
     mcm = MemoryCardManager(mm, {
-        "user_preferences_path": str(tmp / "up" / "card.md"),
-        "momo_memories_path": str(tmp / "mm" / "card.md"),
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
     })
 
     ep, _ = episodes.get_or_create_current()
@@ -296,8 +296,8 @@ def _make_maintenance_with_cards(tmp_dir: str = None):
     ms = MaintenanceStateStore(conn)
 
     mcm = MemoryCardManager(mm, {
-        "user_preferences_path": str(tmp / "up" / "card.md"),
-        "momo_memories_path": str(tmp / "mm" / "card.md"),
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
     })
 
     class MockLLM:
@@ -414,3 +414,29 @@ def test_full_app_fast_path_uses_cards():
     # the app didn't error — cards were available for fast path
     body = response.json()
     assert body["user_text"] == "你好"
+
+
+def test_old_path_fallback():
+    """read_card should fall back to old subdirectory path when new path doesn't exist."""
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+
+    # Write to old-style subdirectory paths
+    old_up_dir = tmp / "user_preferences"
+    old_up_dir.mkdir(parents=True)
+    (old_up_dir / "card.md").write_text(
+        "<!-- memory_cards: user_preferences -->\n"
+        "- 喜欢短回复 <!-- source:memory:1 type:user_preference updated:2026-05-17 ttl:stable -->\n",
+        encoding="utf-8",
+    )
+
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),  # new path, doesn't exist
+        "momo_memories_path": str(tmp / "memory.md"),
+        "card_base_dir": str(tmp),
+    })
+
+    # read_card should fall back to old path
+    items = mcm.read_card("user_preferences")
+    assert "喜欢短回复" in items

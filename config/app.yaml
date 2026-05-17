@@ -96,8 +96,8 @@ memory_cards:
   max_item_cjk_chars: 20
   max_items_per_card: 10
   min_importance: 2
-  user_preferences_path: backend/data/memory_cards/user_preferences/card.md
-  momo_memories_path: backend/data/memory_cards/momo_memories/card.md
+  user_preferences_path: backend/data/memory_cards/user.md
+  momo_memories_path: backend/data/memory_cards/memory.md
 
 text_chat:
   max_text_chars: 2000
