@@ -27,7 +27,17 @@ def _proactive_mode(request: Request, requested: str = "") -> str:
 
 
 @router.get("/proactive")
-def get_pet_proactive(request: Request, mode: str = ""):
+def get_pet_proactive(request: Request):
+    """Read-only check for pending proactive event. No side effects."""
+    event = request.app.state.proactive_service.check_candidate()
+    if event is None:
+        return {"active": False}
+    return {"active": True, "candidate": event.type}
+
+
+@router.post("/proactive/trigger")
+def trigger_pet_proactive(request: Request, mode: str = ""):
+    """Trigger a proactive event (records + dispatches)."""
     request.app.state.tick_service.apply_if_due()
     event = request.app.state.proactive_service.next_event()
     if event is None:

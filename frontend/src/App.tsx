@@ -12,12 +12,13 @@ import {
   getAudioJob,
   getInteractions,
   getPetState,
-  getProactiveEvent,
+  getProactiveCheck,
   postPetEvent,
   refreshContext,
   reportDeviceState,
   resetRuntime,
   sendTextChat,
+  triggerProactiveEvent,
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
@@ -130,10 +131,13 @@ function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!shouldApplyProactive({ phase, busy })) return;
-      void getProactiveEvent()
+      void getProactiveCheck()
+        .then((check) => {
+          if (!check.active || !shouldApplyProactive({ phase, busy })) return;
+          return triggerProactiveEvent();
+        })
         .then((response) => {
-          if (!response.active || !shouldApplyProactive({ phase, busy })) return;
-          applyPetResponse(response);
+          if (response && response.active) applyPetResponse(response);
         })
         .catch(() => undefined);
     }, 30_000);

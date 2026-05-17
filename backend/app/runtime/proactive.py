@@ -30,19 +30,27 @@ class ProactiveService:
             )
             self.connection.commit()
 
-    def next_event(self, now: Optional[datetime] = None) -> Optional[PetEvent]:
+    def check_candidate(self, now: Optional[datetime] = None) -> Optional[PetEvent]:
+        """Read-only check for pending proactive event. No side effects."""
         current = now or datetime.utcnow()
         if self._triggered_recently(None, current, minutes=30):
             return None
         event_type = self._candidate(current)
         if not event_type:
             return None
-        self.record(event_type, current)
         return PetEvent(
             type=event_type,
             source="proactive",
             payload={"description": "Momo 主动陪伴事件", "time": current.isoformat()},
         )
+
+    def next_event(self, now: Optional[datetime] = None) -> Optional[PetEvent]:
+        """Check and record a proactive event (has side effects)."""
+        event = self.check_candidate(now)
+        if event is None:
+            return None
+        self.record(event.type, now)
+        return event
 
     def record(self, event_type: str, when: Optional[datetime] = None) -> None:
         with self.connection.locked():

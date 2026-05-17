@@ -35,8 +35,15 @@ export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceSt
   });
 }
 
-export function getProactiveEvent(): Promise<ProactiveResponse> {
-  return requestJson<ProactiveResponse>("/api/pet/proactive");
+export function getProactiveCheck(): Promise<{ active: boolean; candidate?: string }> {
+  return requestJson("/api/pet/proactive");
+}
+
+export function triggerProactiveEvent(): Promise<ProactiveResponse> {
+  return requestJson<ProactiveResponse>("/api/pet/proactive/trigger", {
+    method: "POST",
+    headers: { "content-type": "application/json" }
+  });
 }
 
 export function getInteractions(): Promise<InteractionDefinition[]> {

@@ -56,7 +56,7 @@ def test_audio_job_reports_failed_tts_without_blocking_response():
 def test_proactive_low_cost_does_not_create_audio_job():
     client = TestClient(create_app(testing=True))
 
-    response = client.get("/api/pet/proactive")
+    response = client.post("/api/pet/proactive/trigger")
     body = response.json()
 
     if body.get("active"):

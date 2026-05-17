@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { getAudioJob, getProactiveEvent, reportDeviceState, sendTextChat, uploadVoice } from "./api";
+import { getAudioJob, getProactiveCheck, reportDeviceState, sendTextChat, uploadVoice } from "./api";
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -53,14 +53,14 @@ describe("stage 3 API helpers", () => {
     });
   });
 
-  test("fetches proactive event endpoint", async () => {
+  test("fetches proactive check endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ active: false })
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await getProactiveEvent();
+    const response = await getProactiveCheck();
 
     expect(fetchMock).toHaveBeenCalledWith("/api/pet/proactive", undefined);
     expect(response).toEqual({ active: false });

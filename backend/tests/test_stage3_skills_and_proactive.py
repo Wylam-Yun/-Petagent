@@ -129,7 +129,7 @@ def test_proactive_api_uses_low_cost_response_without_tts_for_active_event():
     app.state.state_store.save_state(state)
     client = TestClient(app)
 
-    response = client.get("/api/pet/proactive")
+    response = client.post("/api/pet/proactive/trigger")
 
     assert response.status_code == 200
     body = response.json()
@@ -147,7 +147,7 @@ def test_proactive_api_can_use_llm_mode_for_active_event():
     app.state.state_store.save_state(state)
     client = TestClient(app)
 
-    response = client.get("/api/pet/proactive?mode=llm")
+    response = client.post("/api/pet/proactive/trigger?mode=llm")
 
     assert response.status_code == 200
     body = response.json()
