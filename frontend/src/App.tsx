@@ -392,7 +392,7 @@ function App() {
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
-        <TextInputBar disabled={busy || phase === "thinking"} onSubmit={handleTextSubmit} />
+        <TextInputBar disabled={busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice"} onSubmit={handleTextSubmit} />
         <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
           disabled={busy}

@@ -102,7 +102,7 @@ class VoicePipeline:
 
         text = transcript.text.strip()
         if transcript.error_code:
-            fallback_reason = "asr_provider_error"
+            fallback_reason = "asr_timeout" if transcript.error_code == "asr_timeout" else "asr_provider_error"
         elif not text:
             fallback_reason = fallback_reason or "asr_empty"
         elif transcript.confidence < self.asr_min_confidence:

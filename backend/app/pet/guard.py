@@ -123,7 +123,7 @@ def _guard_state_affect(raw: Any) -> StateAffect:
 
 _PROMPT_LEAK_PATTERNS = re.compile(
     r"(?:state_delta|memory_update|cognition_context|output_schema|"
-    r"scene_context|系统提示|上下文字段|skill_requests|provider_profile)",
+    r"scene_context|系统提示|上下文字段|skill_requests|provider_profile|JSON|规则)",
     re.IGNORECASE,
 )
 

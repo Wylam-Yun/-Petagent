@@ -100,6 +100,8 @@ export function VoiceButton({
       const fallbackReason = response.voice_route?.fallback_reason;
       if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
         onError("Momo 没太听清，再说一次？");
+      } else if (fallbackReason === "asr_timeout") {
+        onError("语音识别有点慢，再说一次？");
       } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
         onError("语音识别暂时不太灵，但 Momo 还在听。");
       }
