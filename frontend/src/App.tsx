@@ -181,7 +181,9 @@ function App() {
     setPetState(response.pet_state);
     setFaceType(response.face_type);
     setAnimation(response.animation);
-    setBubbleText(response.audio_job_id || response.voice_url ? "Momo 准备开口…" : "Momo 刚刚没发出声。");
+    const hasAudio = !!(response.audio_job_id || response.voice_url);
+    setBubbleText(hasAudio ? "Momo 准备开口…" : "Momo 刚刚没发出声。");
+    if (hasAudio) setBusy(true);
     playResponseAudio(response);
     vibrate(response.vibration);
   }
@@ -190,9 +192,9 @@ function App() {
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
 
-    if (response.audio_job_id) {
-      setPhase("waiting_voice");
-      try {
+    try {
+      if (response.audio_job_id) {
+        setPhase("waiting_voice");
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
@@ -206,40 +208,33 @@ function App() {
           return;
         }
         throw new Error(job.error ?? "audio job failed");
-      } catch {
-        if (audioRunRef.current !== runId) return;
-        setPhase("audio_error");
-        setBubbleText("声音刚刚没出来。");
-        await sleep(1600);
+      }
+
+      if (response.voice_url) {
+        setPhase("speaking");
+        setBubbleText("Momo 在说…");
+        await playVoice(response.voice_url);
         if (audioRunRef.current === runId) {
           setPhase("idle");
+          setBubbleText("Momo 说完啦。");
         }
+        return;
       }
-      return;
-    }
 
-    if (response.voice_url) {
-      setPhase("speaking");
-      setBubbleText("Momo 在说…");
-      let played = false;
-      try {
-        await playVoice(response.voice_url);
-        played = true;
-      } catch {
-        setPhase("audio_error");
-        setBubbleText("声音刚刚没出来。");
-        await sleep(1600);
-      }
-      if (audioRunRef.current === runId && played) {
-        setPhase("idle");
-        setBubbleText("Momo 说完啦。");
-      } else if (audioRunRef.current === runId) {
+      setPhase("idle");
+    } catch {
+      if (audioRunRef.current !== runId) return;
+      setPhase("audio_error");
+      setBubbleText("声音刚刚没出来。");
+      await sleep(1600);
+      if (audioRunRef.current === runId) {
         setPhase("idle");
       }
-      return;
+    } finally {
+      if (audioRunRef.current === runId) {
+        setBusy(false);
+      }
     }
-
-    setPhase("idle");
   }
 
   async function waitForReadyAudio(jobId: string, runId: number) {
@@ -404,7 +399,7 @@ function App() {
           onVoiceResponse={handleVoiceResponse}
         />
         <TouchArea
-          disabled={busy || phase === "thinking" || interactions.length === 0}
+          disabled={busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice" || interactions.length === 0}
           interactions={interactions}
           onPetEvent={handlePetEvent}
         />
