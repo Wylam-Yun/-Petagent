@@ -16,10 +16,13 @@ const state: PetState = {
 };
 
 describe("StatusBar", () => {
-  test("keeps sleepiness internal instead of showing it as a duplicate main stat", () => {
+  test("shows only intimacy, energy, mood — no internal stats", () => {
     render(<StatusBar state={state} />);
 
+    expect(screen.getByText("亲密")).toBeInTheDocument();
     expect(screen.getByText("活力")).toBeInTheDocument();
+    expect(screen.getByText("心情")).toBeInTheDocument();
+    expect(screen.queryByText("想陪")).not.toBeInTheDocument();
     expect(screen.queryByText("困意")).not.toBeInTheDocument();
   });
 });
