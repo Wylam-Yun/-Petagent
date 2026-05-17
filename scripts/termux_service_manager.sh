@@ -187,9 +187,32 @@ petagent_pid_age() {
     echo $((now - modified))
 }
 
+petagent_process_alive() {
+    pid="$(petagent_pid)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+petagent_port_listening() {
+    check_port_listen "$PETAGENT_PORT"
+}
+
 petagent_health() {
     command -v curl >/dev/null 2>&1 || return 1
     curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
+}
+
+petagent_layered_check() {
+    # Returns 0 if healthy, 1 if process dead, 2 if port down, 3 if HTTP fail
+    if ! petagent_process_alive; then
+        return 1
+    fi
+    if ! petagent_port_listening; then
+        return 2
+    fi
+    if ! petagent_health; then
+        return 3
+    fi
+    return 0
 }
 
 stop_unhealthy_petagent() {
@@ -239,10 +262,18 @@ start_petagent() {
 }
 
 ensure_petagent() {
-    if petagent_health; then
-        return 0
-    fi
+    check_result=$(petagent_layered_check 2>&1) || true
+    rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        1) log "PetAgent check: process not running" ;;
+        2) log "PetAgent check: port $PETAGENT_PORT not listening" ;;
+        3) log "PetAgent check: HTTP health failed" ;;
+    esac
+    return 1
+}
 
+restart_petagent() {
     if ! stop_unhealthy_petagent; then
         return 1
     fi
@@ -283,11 +314,28 @@ main() {
         if ensure_petagent; then
             petagent_fail_count=0
         else
-            petagent_fail_count=$((petagent_fail_count + 1))
-            if [ "$petagent_fail_count" -ge "$MAX_FAILS" ]; then
-                log "CRITICAL: PetAgent failed $MAX_FAILS times; backing off ${BACKOFF_SECONDS}s"
-                petagent_fail_count=0
-                sleep "$BACKOFF_SECONDS"
+            # Process dead = immediate restart; HTTP fail = wait for consecutive failures
+            if ! petagent_process_alive; then
+                log "PetAgent process not running; restarting immediately"
+                if restart_petagent; then
+                    petagent_fail_count=0
+                else
+                    log "CRITICAL: PetAgent restart failed; backing off ${BACKOFF_SECONDS}s"
+                    sleep "$BACKOFF_SECONDS"
+                fi
+            else
+                petagent_fail_count=$((petagent_fail_count + 1))
+                log "PetAgent consecutive health fail: $petagent_fail_count/$MAX_FAILS"
+                if [ "$petagent_fail_count" -ge "$MAX_FAILS" ]; then
+                    log "PetAgent health failed $MAX_FAILS times; restarting"
+                    if restart_petagent; then
+                        petagent_fail_count=0
+                    else
+                        log "CRITICAL: PetAgent restart failed; backing off ${BACKOFF_SECONDS}s"
+                        petagent_fail_count=0
+                        sleep "$BACKOFF_SECONDS"
+                    fi
+                fi
             fi
         fi
 

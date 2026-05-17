@@ -22,6 +22,19 @@ remove_pid_file() {
   rm -f "$PID_FILE" 2>/dev/null || true
 }
 
+START_LOCK="$PROJECT_DIR/backend/data/start.lock"
+if [ -d "$START_LOCK" ]; then
+  lock_pid="$(cat "$START_LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    echo "PetAgent start already in progress (pid $lock_pid)"
+    exit 0
+  fi
+  rm -rf "$START_LOCK" 2>/dev/null || true
+fi
+mkdir -p "$START_LOCK" 2>/dev/null || true
+echo "$$" > "$START_LOCK/pid" 2>/dev/null || true
+trap 'rm -rf "$START_LOCK" 2>/dev/null || true' EXIT
+
 repair_android_context
 mkdir -p "$PROJECT_DIR/backend/data/logs" "$PROJECT_DIR/backend/static/audio"
 
