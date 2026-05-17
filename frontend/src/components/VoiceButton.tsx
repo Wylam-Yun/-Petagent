@@ -97,14 +97,22 @@ export function VoiceButton({
       const blob = await session.stop();
       const response = await uploadVoice(blob, { thinkingMode });
       onVoiceResponse(response);
+      const fallbackReason = response.voice_route?.fallback_reason;
+      if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
+        onError("Momo 没太听清，再说一次？");
+      } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
+        onError("语音识别暂时不太灵，但 Momo 还在听。");
+      }
       changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
       changePhase("error");
-      onError(
-        error instanceof RecordingTooShortError
-          ? "Momo 刚刚只听到一点点。"
-          : "呜，刚刚没接住。"
-      );
+      if (error instanceof RecordingTooShortError) {
+        onError("Momo 刚刚只听到一点点。");
+      } else if (error instanceof TypeError || (error instanceof Error && error.message.includes("fetch"))) {
+        onError("网络好像有点慢，再试一次？");
+      } else {
+        onError("呜，刚刚没接住。");
+      }
     } finally {
       setBusy(false);
     }
