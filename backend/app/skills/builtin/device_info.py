@@ -13,6 +13,7 @@ class DeviceInfoSkill:
         description="读取最近一次设备状态。",
         permissions=["device"],
         timeout_ms=1000,
+        input_schema={},
     )
 
     def run(self, payload: Dict[str, Any], context: SkillContext) -> SkillResult:

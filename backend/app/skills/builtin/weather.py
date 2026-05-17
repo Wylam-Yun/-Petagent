@@ -14,6 +14,7 @@ class CurrentWeatherSkill:
         description="获取当前位置或指定城市的当前天气。",
         permissions=["network"],
         timeout_ms=8000,
+        input_schema={"location": "string"},
     )
 
     def run(self, payload: Dict[str, Any], context: SkillContext) -> SkillResult:

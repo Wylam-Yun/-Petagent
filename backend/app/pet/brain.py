@@ -19,7 +19,10 @@ class PetBrain:
         return self.provider.complete_json(messages)
 
     def generate_skill_plan(
-        self, event: PetEvent, context: RuntimeContext
+        self, event: PetEvent, context: RuntimeContext,
+        skill_catalog: str = "",
     ) -> Dict[str, Any]:
-        messages = build_skill_plan_messages(self.settings, event, context)
+        messages = build_skill_plan_messages(
+            self.settings, event, context, skill_catalog=skill_catalog,
+        )
         return self.provider.complete_json(messages)

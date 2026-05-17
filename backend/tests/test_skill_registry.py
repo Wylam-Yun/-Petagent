@@ -65,3 +65,39 @@ def test_skill_registry_respects_enabled_config_and_timeout():
     assert [skill["id"] for skill in listed] == ["weather.current"]
     assert listed[0]["permissions"] == ["network"]
     assert listed[0]["timeout_ms"] == 3000
+
+
+def test_effective_permissions_rejects_unknown_permission():
+    class ShellSkill:
+        manifest = SkillManifest(
+            id="shell.run",
+            name="Shell",
+            version="0.1.0",
+            description="shell",
+            permissions=["device", "shell", "admin"],
+        )
+
+        def run(self, payload, context):
+            pass
+
+    registry = SkillRegistry()
+    registry._skills["shell.run"] = ShellSkill()
+
+    skills = registry.list_skills()
+    shell = [s for s in skills if s["id"] == "shell.run"][0]
+    assert "device" in shell["permissions"]
+    assert "shell" not in shell["permissions"]
+    assert "admin" not in shell["permissions"]
+
+
+def test_list_skills_includes_input_schema():
+    registry = SkillRegistry()
+    skills = registry.list_skills()
+
+    weather = [s for s in skills if s["id"] == "weather.current"][0]
+    assert "input_schema" in weather
+    assert "location" in weather["input_schema"]
+
+    device = [s for s in skills if s["id"] == "device.info"][0]
+    assert "input_schema" in device
+    assert device["input_schema"] == {}

@@ -12,6 +12,7 @@ class SkillManifest:
     description: str
     permissions: list
     timeout_ms: int = 3000
+    input_schema: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

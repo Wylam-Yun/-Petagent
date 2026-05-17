@@ -38,6 +38,7 @@ from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.agent_run import AgentRunRegistry
+from app.runtime.policy_guard import PolicyGuard
 from app.runtime.device import DeviceStateStore
 from app.runtime.maintenance import MaintenanceService
 from app.runtime.memory_cards import MemoryCardManager
@@ -220,6 +221,8 @@ def create_app(testing: bool = False) -> FastAPI:
         provider_name=str(getattr(tts_provider, "name", "tts")),
         on_complete=_on_audio_complete,
     )
+    policy_guard = PolicyGuard()
+
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
         brain=brain,
@@ -240,6 +243,7 @@ def create_app(testing: bool = False) -> FastAPI:
         audio_job_manager=audio_job_manager,
         agent_run_registry=agent_run_registry,
         memory_card_manager=memory_card_manager,
+        policy_guard=policy_guard,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -301,6 +305,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.audio_job_manager = audio_job_manager
     app.state.agent_run_registry = agent_run_registry
     app.state.memory_card_manager = memory_card_manager
+    app.state.policy_guard = policy_guard
 
     @app.get("/api/health")
     def health():

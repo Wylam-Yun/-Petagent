@@ -36,9 +36,16 @@ class SkillRegistry:
                 "description": skill.manifest.description,
                 "permissions": self._effective_permissions(skill.manifest.id),
                 "timeout_ms": self._effective_timeout_ms(skill.manifest.id),
+                "input_schema": dict(skill.manifest.input_schema or {}),
             }
             for skill in self._skills.values()
         ]
+
+    def max_calls_per_event(self) -> int:
+        if not self.settings:
+            return 2
+        limits = self.settings.skills_config.get("limits") or {}
+        return int(limits.get("max_skill_calls_per_event", 2))
 
     def has_skill(self, skill_id: str) -> bool:
         return skill_id in self._skills
@@ -115,11 +122,13 @@ class SkillRegistry:
             return False
         return bool(item.get("enabled", True))
 
+    ALLOWED_PERMISSIONS = {"device", "network"}
+
     def _effective_permissions(self, skill_id: str) -> List[str]:
         skill = self._skills.get(skill_id)
         if skill is None:
             return []
-        manifest_permissions = set(skill.manifest.permissions)
+        manifest_permissions = set(skill.manifest.permissions) & self.ALLOWED_PERMISSIONS
         configured = self._skill_configs.get(skill_id, {}).get("permissions")
         if configured is None:
             return sorted(manifest_permissions)

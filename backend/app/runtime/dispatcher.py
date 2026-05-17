@@ -57,6 +57,7 @@ class RuntimeDispatcher:
         audio_job_manager=None,
         agent_run_registry=None,
         memory_card_manager=None,
+        policy_guard=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -77,6 +78,7 @@ class RuntimeDispatcher:
         self.audio_job_manager = audio_job_manager
         self.agent_run_registry = agent_run_registry
         self.memory_card_manager = memory_card_manager
+        self.policy_guard = policy_guard
         self._event_lock = threading.RLock()
 
     def handle_event(
@@ -184,6 +186,16 @@ class RuntimeDispatcher:
             skill_results = []
             if run:
                 run.timings_ms["tool"] = 0
+
+        # Record tool observations
+        if run:
+            for sr in skill_results:
+                run.record("tool_observation", {
+                    "skill_id": sr.get("skill_id", ""),
+                    "ok": sr.get("ok", False),
+                    "content": str(sr.get("content", ""))[:200],
+                    "error": sr.get("error"),
+                })
 
         # 8. Rebuild context with skill results
         if self.context_manager is not None and cognition_context is not None:
@@ -364,23 +376,31 @@ class RuntimeDispatcher:
         # LLM suggestion — only via candidate store (no fallback)
         if self.memory_candidate_store is not None:
             if action.memory_update.should_save and action.memory_update.content:
-                self.memory_candidate_store.add(
-                    source_event_id=event.id,
-                    episode_id=episode_id,
-                    candidate_text=action.memory_update.content.strip(),
-                    trigger_reason="llm_suggestion",
-                )
+                text = action.memory_update.content.strip()
+                if self.policy_guard is not None:
+                    text = self.policy_guard.filter_memory_candidate(text)
+                if text:
+                    self.memory_candidate_store.add(
+                        source_event_id=event.id,
+                        episode_id=episode_id,
+                        candidate_text=text,
+                        trigger_reason="llm_suggestion",
+                    )
 
         # Explicit command detection
         if self.memory_candidate_store is not None and user_text:
             for keyword in _EXPLICIT_MEMORY_KEYWORDS:
                 if keyword in user_text:
-                    self.memory_candidate_store.add(
-                        source_event_id=event.id,
-                        episode_id=episode_id,
-                        candidate_text=user_text,
-                        trigger_reason="explicit_command",
-                    )
+                    text = user_text
+                    if self.policy_guard is not None:
+                        text = self.policy_guard.filter_memory_candidate(text)
+                    if text:
+                        self.memory_candidate_store.add(
+                            source_event_id=event.id,
+                            episode_id=episode_id,
+                            candidate_text=text,
+                            trigger_reason="explicit_command",
+                        )
                     break
 
     def _max_reply_chars(self, brain: PetBrain) -> int:
@@ -413,11 +433,21 @@ class RuntimeDispatcher:
         self, event, brain: PetBrain, context
     ) -> List[Dict[str, Any]]:
         requests = self._planned_skill_requests(event, brain, context)
+        max_calls = self.registry.max_calls_per_event()
         results: List[Dict[str, Any]] = []
-        for skill_id, payload in requests[:2]:
+        for skill_id, payload in requests[:max_calls]:
             if not self.registry.has_skill(skill_id):
                 continue
+            if self.policy_guard is not None:
+                try:
+                    payload = self.policy_guard.validate_skill_payload(
+                        skill_id, payload, self.registry,
+                    )
+                except ValueError:
+                    continue
             result = self.registry.run_skill(skill_id, payload)
+            if self.policy_guard is not None:
+                result = self.policy_guard.sanitize_skill_result(result)
             results.append(asdict(result))
         return results
 
@@ -426,8 +456,11 @@ class RuntimeDispatcher:
             return []
         if not self._looks_like_external_request(event):
             return []
+        skill_catalog = ""
+        if self.policy_guard is not None:
+            skill_catalog = self.policy_guard.build_skill_catalog(self.registry)
         try:
-            plan = brain.generate_skill_plan(event, context)
+            plan = brain.generate_skill_plan(event, context, skill_catalog=skill_catalog)
         except Exception:
             plan = {}
         requests: List[tuple] = []
@@ -438,6 +471,8 @@ class RuntimeDispatcher:
             payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
             if skill_id:
                 requests.append((skill_id, payload))
+        if self.policy_guard is not None:
+            requests = self.policy_guard.validate_skill_plan(requests, self.registry)
         return requests or self._infer_skill_requests(event)
 
     def _infer_skill_requests(self, event) -> List[tuple]:

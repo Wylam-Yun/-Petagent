@@ -175,15 +175,17 @@ def build_pet_messages(
 
 
 def build_skill_plan_messages(
-    settings: Settings, event: PetEvent, context: RuntimeContext
+    settings: Settings, event: PetEvent, context: RuntimeContext,
+    skill_catalog: str = "",
 ) -> List[Dict[str, str]]:
+    catalog = skill_catalog or "weather.current, device.info"
     system_prompt = (
         settings.persona_config.get("system_prompt", "")
         + "\n\n你现在只决定是否需要调用 runtime skill。"
         "不要生成最终回复，不要安慰用户。"
         "只有用户需要天气、设备状态或外部事实时才请求 skill。"
         "最多请求 2 个 skill。"
-        "可用 skill: weather.current, device.info。"
+        f"可用 skill: {catalog}。"
         "必须只输出 JSON。"
     )
 
