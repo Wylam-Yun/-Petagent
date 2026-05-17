@@ -129,9 +129,15 @@ def build_pet_messages(
         "\n\n状态联动规则：\n"
         "1. 你必须根据本轮互动和上下文输出 state_affect。\n"
         "2. state_delta 要保守，不要让数值暴涨暴跌。\n"
-        "3. 用户让你连续做任务时，energy 可以下降，sleepiness 可以小幅上升。\n"
-        "4. 用户夸你、摸你、抱你或陪你时，intimacy 可以上升，loneliness 可以下降。\n"
-        "5. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
+        "3. energy = 白天活力/陪玩能力。用户让你连续做任务时 energy 降；投喂、夸奖、充电时 energy 升。\n"
+        "4. sleepiness = 作息困意。夜间、哄睡、长时间闲置时升；早晨、充电、陪玩成功时降。\n"
+        "5. 用户夸你、摸你、抱你或陪你时，intimacy 可以上升，loneliness 可以下降。\n"
+        "6. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
+        "7. pet_effort 表示本轮你（Momo）付出的精力：\n"
+        "   - none: 闲聊、打招呼 → 无疲劳\n"
+        "   - low: 简单回答、按钮互动 → 极小或无变化\n"
+        "   - medium: 需要思考的回答 → energy 小幅下降\n"
+        "   - high: 长任务、写代码、详细解释 → energy 明显下降，sleepiness 小幅上升\n"
     )
 
     # Context profile awareness

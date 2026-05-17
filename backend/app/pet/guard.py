@@ -19,18 +19,20 @@ from app.runtime.actions import (
 
 
 DEFAULT_STATE_DELTA_LIMITS = {
-    "energy": (-5, 5),
-    "intimacy": (-1, 2),
-    "hunger": (-3, 3),
-    "cleanliness": (-2, 2),
-    "loneliness": (-6, 3),
-    "sleepiness": (-3, 5),
+    "energy": (-8, 8),
+    "intimacy": (-3, 3),
+    "hunger": (-10, 8),
+    "cleanliness": (-8, 10),
+    "loneliness": (-10, 4),
+    "sleepiness": (-8, 10),
 }
 
 EVENT_STATE_DELTA_LIMITS = {
-    "feed_momo": {"hunger": (-8, 2), "energy": (-3, 5)},
+    "feed_momo": {"hunger": (-12, 2), "energy": (-3, 8)},
     "charging_started": {"hunger": (-5, 2), "energy": (-3, 8)},
-    "clean_face": {"cleanliness": (-2, 8)},
+    "clean_face": {"cleanliness": (-2, 12)},
+    "tuck_in": {"sleepiness": (-2, 12), "energy": (-5, 3)},
+    "hug": {"intimacy": (-3, 5), "loneliness": (-12, 4)},
 }
 
 DEFAULT_MAX_REPLY_CHARS = 500

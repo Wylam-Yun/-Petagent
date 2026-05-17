@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import activation as activation_api
 from app.api import audio as audio_api
 from app.api import context as context_api
+from app.api import interactions as interactions_api
 from app.api import device as device_api
 from app.api import memory as memory_api
 from app.api import pet as pet_api
@@ -315,6 +316,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(context_api.router)
     app.include_router(memory_api.router)
     app.include_router(text_api.router)
+    app.include_router(interactions_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)

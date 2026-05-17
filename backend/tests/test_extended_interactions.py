@@ -33,7 +33,7 @@ def test_guard_uses_feed_limit_for_hunger():
         event_type="feed_momo",
     )
 
-    assert action.state_delta["hunger"] == -8
+    assert action.state_delta["hunger"] == -12
 
 
 def test_guard_uses_clean_face_limit_for_cleanliness():
@@ -46,7 +46,7 @@ def test_guard_uses_clean_face_limit_for_cleanliness():
         event_type="clean_face",
     )
 
-    assert action.state_delta["cleanliness"] == 8
+    assert action.state_delta["cleanliness"] == 12
 
 
 def test_extended_button_event_returns_contextual_response():

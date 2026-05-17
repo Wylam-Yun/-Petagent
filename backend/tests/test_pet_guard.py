@@ -1,4 +1,4 @@
-from app.pet.guard import guard_action
+from app.pet.guard import DEFAULT_STATE_DELTA_LIMITS, guard_action
 
 
 def test_guard_replaces_invalid_mood_and_limits_delta():
@@ -17,8 +17,8 @@ def test_guard_replaces_invalid_mood_and_limits_delta():
     assert action.mood == "idle"
     assert action.face_type == "idle"
     assert action.animation == "breathing"
-    assert action.state_delta["intimacy"] == 2
-    assert action.state_delta["loneliness"] == -6
+    assert action.state_delta["intimacy"] == 3
+    assert action.state_delta["loneliness"] == -10
 
 
 def test_guard_uses_fallback_for_invalid_json():
@@ -57,3 +57,31 @@ def test_guard_strips_reasoning_from_reply():
     assert "<think>" not in action.reply
     assert "先分析" not in action.reply
     assert action.reply == "昨天我们主要聊了记忆测试。"
+
+
+def test_guard_allows_large_feed_momo_hunger_delta():
+    action = guard_action(
+        {"reply": "吃饱啦~", "mood": "happy", "state_delta": {"hunger": -10}},
+        event_type="feed_momo",
+    )
+    assert action.state_delta["hunger"] == -10
+
+
+def test_guard_allows_large_sleepiness_delta():
+    action = guard_action(
+        {"reply": "困了", "mood": "sleepy", "state_delta": {"sleepiness": 10}},
+    )
+    assert action.state_delta["sleepiness"] == 10
+
+
+def test_guard_still_clamps_extreme_values():
+    action = guard_action(
+        {"reply": "嗯嗯", "mood": "happy", "state_delta": {"energy": 99}},
+    )
+    assert action.state_delta["energy"] == 8
+
+
+def test_guard_default_limits_match_expected_ranges():
+    assert DEFAULT_STATE_DELTA_LIMITS["energy"] == (-8, 8)
+    assert DEFAULT_STATE_DELTA_LIMITS["sleepiness"] == (-8, 10)
+    assert DEFAULT_STATE_DELTA_LIMITS["loneliness"] == (-10, 4)

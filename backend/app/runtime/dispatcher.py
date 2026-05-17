@@ -11,7 +11,7 @@ from time import perf_counter
 
 from app.pet.brain import PetBrain
 from app.pet.guard import guard_action
-from app.pet.rules import apply_event_rules, apply_state_delta
+from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
 from app.runtime.actions import PetResponse
@@ -223,6 +223,21 @@ class RuntimeDispatcher:
 
         # 10. Apply state delta and save
         final_state = apply_state_delta(ruled_state, action.state_delta)
+        # Apply pet_effort fatigue — guarantees net decrease regardless of LLM delta
+        pre_llm_energy = int(ruled_state.get("energy", 0))
+        effort = action.state_affect.pet_effort
+        if effort == "medium":
+            final_state["energy"] = min(
+                int(final_state.get("energy", 0)) - 2,
+                pre_llm_energy - 2,
+            )
+        elif effort == "high":
+            final_state["energy"] = min(
+                int(final_state.get("energy", 0)) - 5,
+                pre_llm_energy - 4,
+            )
+            final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
+        final_state = clamp_state(final_state)
         final_state["mood"] = action.mood
         final_state["mode"] = "idle"
         final_state["last_interaction_at"] = datetime.utcnow().isoformat()

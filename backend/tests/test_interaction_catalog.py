@@ -165,3 +165,46 @@ def test_post_pet_event_simplified_payload():
         event = normalize_event({"event": eid, "payload": {}})
         assert event.type == eid
         assert event.source == "runtime"
+
+
+def test_state_semantics_match_event_deltas():
+    """Catalog state_semantics direction must agree with EVENT_DELTAS sign."""
+    from app.pet.rules import EVENT_DELTAS
+
+    for defn in INTERACTION_CATALOG.values():
+        if defn.group == "debug":
+            continue
+        delta = EVENT_DELTAS.get(defn.event_id, {})
+        for key, direction in defn.state_semantics.items():
+            delta_val = delta.get(key, 0)
+            if direction == "up":
+                assert delta_val >= 0, (
+                    f"{defn.event_id} semantics say {key}=up but delta is {delta_val}"
+                )
+            elif direction == "down":
+                assert delta_val <= 0, (
+                    f"{defn.event_id} semantics say {key}=down but delta is {delta_val}"
+                )
+
+
+def test_api_interactions_endpoint():
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    client = TestClient(create_app(testing=True))
+    response = client.get("/api/interactions")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 14  # 14 button events, no debug
+    event_ids = {item["event_id"] for item in data}
+    assert "feed_momo" in event_ids
+    assert "debug_happy" not in event_ids
+    # Each item has required fields
+    for item in data:
+        assert "label" in item
+        assert "group" in item
+        assert "default_mood" in item
+        assert "default_animation" in item
+        assert "state_semantics" in item

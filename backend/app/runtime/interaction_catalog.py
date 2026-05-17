@@ -115,7 +115,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         default_mood="excited",
         default_animation="jump",
         description="用户希望你鼓励自己",
-        state_semantics={"energy": "up", "intimacy": "up"},
+        state_semantics={"energy": "down", "intimacy": "up"},
     ),
     "listen_to_me": InteractionDef(
         event_id="listen_to_me",

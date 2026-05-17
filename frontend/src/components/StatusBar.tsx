@@ -1,4 +1,4 @@
-import { Battery, Heart, Moon, Sparkles } from "lucide-react";
+import { Battery, Heart, Moon, Sparkles, Users } from "lucide-react";
 
 import type { PetState } from "../pet/types";
 
@@ -10,7 +10,8 @@ export function StatusBar({ state }: StatusBarProps) {
   return (
     <section className="status-bar" aria-label="Momo 状态">
       <StatusItem icon={<Heart />} label="亲密" value={state.intimacy} />
-      <StatusItem icon={<Battery />} label="精力" value={state.energy} />
+      <StatusItem icon={<Battery />} label="活力" value={state.energy} />
+      <StatusItem icon={<Users />} label="想陪" value={state.loneliness} />
       <StatusItem icon={<Sparkles />} label="心情" value={state.mood} />
       <StatusItem icon={<Moon />} label="困意" value={state.sleepiness} />
     </section>
