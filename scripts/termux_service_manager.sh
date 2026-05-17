@@ -262,8 +262,8 @@ start_petagent() {
 }
 
 ensure_petagent() {
-    check_result=$(petagent_layered_check 2>&1) || true
-    rc=$?
+    rc=0
+    petagent_layered_check || rc=$?
     case "$rc" in
         0) return 0 ;;
         1) log "PetAgent check: process not running" ;;

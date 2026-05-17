@@ -67,6 +67,22 @@ health_ok() {
   curl -s --connect-timeout 2 --max-time 5 "$HEALTH_URL" 2>/dev/null | grep -q '"ok":true'
 }
 
+pid_file_age_seconds() {
+  f="$1"
+  [ -f "$f" ] || { echo 999999; return 0; }
+  now="$(date +%s 2>/dev/null || echo 0)"
+  modified="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"
+  echo $((now - modified))
+}
+
+port_listening() {
+  command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -E "[:.]$PORT[[:space:]]" | grep -q LISTEN && return 0
+  command -v netstat >/dev/null 2>&1 && netstat -ltn 2>/dev/null | grep -E "[:.]$PORT[[:space:]]" | grep -q LISTEN && return 0
+  return 1
+}
+
+STARTUP_GRACE=120
+
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -74,7 +90,16 @@ if [ -f "$PID_FILE" ]; then
       echo "PetAgent runtime already healthy: $OLD_PID"
       exit 0
     fi
-    echo "PetAgent runtime pid $OLD_PID is alive but unhealthy; restarting"
+    age="$(pid_file_age_seconds "$PID_FILE")"
+    if [ "$age" -lt "$STARTUP_GRACE" ]; then
+      if port_listening; then
+        echo "PetAgent runtime pid $OLD_PID starting (${age}s, port up); waiting"
+        exit 0
+      fi
+      echo "PetAgent runtime pid $OLD_PID starting (${age}s); waiting for grace"
+      exit 0
+    fi
+    echo "PetAgent runtime pid $OLD_PID alive but unhealthy after ${age}s; restarting"
     kill "$OLD_PID" 2>/dev/null || true
     sleep 2
     kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true
