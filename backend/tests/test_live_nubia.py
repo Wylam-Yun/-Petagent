@@ -4,9 +4,9 @@ These tests hit real APIs: LLM (MiMo), weather (wttr.in), device state, etc.
 They verify each functional requirement end-to-end through the HTTP API.
 
 Run with:
-    PETAGENT_DATA_DIR=~/petagent-data .venv/bin/pytest tests/test_live_nubia.py -v
+    PETAGENT_TEST_URL=http://192.168.x.x:8000 .venv/bin/pytest tests/test_live_nubia.py -v
 
-Requires: the server must be started separately (e.g., via run_live_tests.sh).
+Requires: the server must be started separately and PETAGENT_TEST_URL must be set.
 """
 
 from __future__ import annotations
@@ -17,8 +17,14 @@ import sys
 import time
 
 import httpx
+import pytest
 
-BASE = os.environ.get("PETAGENT_TEST_URL", "http://127.0.0.1:9821")
+BASE = os.environ.get("PETAGENT_TEST_URL", "")
+
+pytestmark = pytest.mark.skipif(
+    not BASE,
+    reason="PETAGENT_TEST_URL not set; skipping live integration tests",
+)
 
 
 def _url(path: str) -> str:
