@@ -144,6 +144,15 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         description="用户希望你休息会儿",
         state_semantics={"sleepiness": "up", "energy": "up"},
     ),
+    "play_with_momo": InteractionDef(
+        event_id="play_with_momo",
+        label="陪玩",
+        group="emotional_companion",
+        default_mood="excited",
+        default_animation="bounce",
+        description="用户想陪你玩",
+        state_semantics={"loneliness": "down", "energy": "down", "intimacy": "up"},
+    ),
     # -- debug --
     "debug_happy": InteractionDef(
         event_id="debug_happy",

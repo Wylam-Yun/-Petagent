@@ -244,7 +244,8 @@ class MemoryCardManager:
 
     @staticmethod
     def _parse_line(line: str) -> Optional[Dict[str, str]]:
-        m = _CARD_LINE_RE.match(line.strip())
+        stripped = line.strip()
+        m = _CARD_LINE_RE.match(stripped)
         if m:
             return {
                 "content": m.group(1),
@@ -253,4 +254,15 @@ class MemoryCardManager:
                 "updated": m.group(4),
                 "ttl": m.group(5),
             }
+        # Fallback: accept plain bullet lines without provenance
+        if stripped.startswith("- ") and len(stripped) > 2:
+            content = stripped[2:].strip()
+            if content:
+                return {
+                    "content": content,
+                    "source_id": "",
+                    "type": "",
+                    "updated": "",
+                    "ttl": "",
+                }
         return None

@@ -197,7 +197,7 @@ def test_api_interactions_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
-    assert len(data) == 14  # 14 button events, no debug
+    assert len(data) == 15  # 15 button events, no debug
     event_ids = {item["event_id"] for item in data}
     assert "feed_momo" in event_ids
     assert "debug_happy" not in event_ids

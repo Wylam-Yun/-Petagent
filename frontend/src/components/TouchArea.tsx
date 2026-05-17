@@ -17,7 +17,7 @@ import {
 import type { InteractionDefinition, PetEventType } from "../pet/types";
 
 const petCareIds: PetEventType[] = ["feed_momo", "pet_pat", "clean_face", "tuck_in"];
-const companionIds: PetEventType[] = ["praise_momo", "comfort_me", "stay_with_me", "encourage_me", "take_a_break"];
+const companionIds: PetEventType[] = ["praise_momo", "comfort_me", "stay_with_me", "encourage_me", "take_a_break", "play_with_momo"];
 
 const iconMap: Partial<Record<PetEventType, React.ElementType>> = {
   pet_head: HandHeart,
@@ -32,7 +32,8 @@ const iconMap: Partial<Record<PetEventType, React.ElementType>> = {
   tuck_in: Moon,
   clean_face: SprayCan,
   quiet_company: Coffee,
-  take_a_break: Pause
+  take_a_break: Pause,
+  play_with_momo: Sparkles
 };
 
 type TouchAreaProps = {

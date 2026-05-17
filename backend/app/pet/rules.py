@@ -60,6 +60,7 @@ EVENT_DELTAS = {
     "clean_face": {"mood": "shy", "cleanliness": 10, "intimacy": 1},
     "quiet_company": {"mood": "idle", "loneliness": -4},
     "take_a_break": {"mood": "sleepy", "sleepiness": 3, "energy": 1, "loneliness": -3},
+    "play_with_momo": {"mood": "excited", "energy": -3, "intimacy": 2, "loneliness": -3},
     "text_message": {"intimacy": 1, "loneliness": -3},
 }
 

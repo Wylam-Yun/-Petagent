@@ -37,6 +37,7 @@ export type PetEventType =
   | "clean_face"
   | "quiet_company"
   | "take_a_break"
+  | "play_with_momo"
   | "debug_happy"
   | "debug_sleepy"
   | "debug_angry";

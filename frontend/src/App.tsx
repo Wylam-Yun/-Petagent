@@ -395,7 +395,7 @@ function App() {
         <TextInputBar disabled={busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice"} onSubmit={handleTextSubmit} />
         <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
-          disabled={busy}
+          disabled={busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice"}
           phase={phase}
           thinkingMode={thinkingMode}
           onError={(message) => setBubbleText(message)}

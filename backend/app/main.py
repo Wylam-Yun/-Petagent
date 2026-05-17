@@ -148,13 +148,16 @@ def create_app(testing: bool = False) -> FastAPI:
             memory_manager=memory_manager,
             config=resolved_cards_config,
         )
-        # P4: On startup, rebuild cards if empty but memories exist
+        # P4: On startup, ensure card files exist (rebuild if memories available, clear otherwise)
         if not testing:
             try:
                 up_items = memory_card_manager.read_card("user_preferences")
                 mm_items = memory_card_manager.read_card("momo_memories")
-                if not up_items and not mm_items and memory_manager.count() > 0:
-                    memory_card_manager.rebuild("runtime_reset")
+                if not up_items and not mm_items:
+                    if memory_manager.count() > 0:
+                        memory_card_manager.rebuild("runtime_reset")
+                    else:
+                        memory_card_manager.clear()
             except Exception:
                 pass
 
