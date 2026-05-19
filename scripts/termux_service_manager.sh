@@ -18,6 +18,7 @@ PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-180}"
 NETWORK_WAIT_SECONDS="${NETWORK_WAIT_SECONDS:-180}"
 PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
 PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
+MANAGER_VERSION="safe-no-kill-20260519"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -27,6 +28,11 @@ export LD_PRELOAD="$PREFIX_DIR/lib/libtermux-exec-ld-preload.so"
 
 log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+}
+
+process_exists() {
+    pid="$1"
+    [ -n "$pid" ] && [ -d "/proc/$pid" ]
 }
 
 repair_android_context() {
@@ -67,7 +73,7 @@ take_lock() {
     fi
 
     old_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
-    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    if process_exists "$old_pid"; then
         exit 0
     fi
 
@@ -189,7 +195,7 @@ petagent_pid_age() {
 
 petagent_process_alive() {
     pid="$(petagent_pid)"
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+    process_exists "$pid"
 }
 
 petagent_port_listening() {
@@ -206,7 +212,7 @@ petagent_start_in_progress() {
     start_lock="$PETAGENT_DIR/backend/data/start.lock"
     [ -d "$start_lock" ] || return 1
     start_pid="$(cat "$start_lock/pid" 2>/dev/null || true)"
-    [ -n "$start_pid" ] && kill -0 "$start_pid" 2>/dev/null
+    process_exists "$start_pid"
 }
 
 petagent_health() {
@@ -225,26 +231,6 @@ petagent_layered_check() {
     if ! petagent_health; then
         return 3
     fi
-    return 0
-}
-
-stop_unhealthy_petagent() {
-    pid="$(petagent_pid)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        age="$(petagent_pid_age)"
-        if [ "$age" -lt "$PETAGENT_START_GRACE_SECONDS" ]; then
-            log "PetAgent pid $pid is still within startup grace (${age}s); waiting"
-            return 1
-        fi
-        log "Stopping unhealthy PetAgent pid $pid"
-        kill "$pid" 2>/dev/null || true
-        sleep 2
-        kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
-    fi
-    rm -f "$PETAGENT_DIR/backend/data/runtime.pid" 2>/dev/null || {
-        repair_android_context
-        rm -f "$PETAGENT_DIR/backend/data/runtime.pid" 2>/dev/null || true
-    }
     return 0
 }
 
@@ -281,6 +267,11 @@ start_petagent() {
         return 0
     fi
 
+    if petagent_process_alive && petagent_port_listening; then
+        log "PetAgent HTTP health is not ready, but process and port are alive; leaving it running"
+        return 0
+    fi
+
     log "ERROR: PetAgent health check failed after start"
     return 1
 }
@@ -297,17 +288,10 @@ ensure_petagent() {
     return 1
 }
 
-restart_petagent() {
-    if ! stop_unhealthy_petagent; then
-        return 1
-    fi
-    start_petagent
-}
-
 main() {
     take_lock
     repair_android_context
-    log "Service manager started with PID $$"
+    log "Service manager started with PID $$ ($MANAGER_VERSION)"
     acquire_wake_lock
     start_proxy_once
 
@@ -335,40 +319,54 @@ main() {
             fi
         fi
 
-        if ensure_petagent; then
-            petagent_fail_count=0
-        else
-            # Process dead = immediate restart; HTTP fail = wait for consecutive failures
-            if petagent_start_in_progress; then
-                log "PetAgent start is already in progress; waiting"
+        petagent_rc=0
+        petagent_layered_check || petagent_rc=$?
+        case "$petagent_rc" in
+            0)
                 petagent_fail_count=0
-            elif petagent_within_startup_grace; then
-                age="$(petagent_pid_age)"
-                log "PetAgent is still within startup grace (${age}s); waiting"
-                petagent_fail_count=0
-            elif ! petagent_process_alive; then
-                log "PetAgent process not running; restarting immediately"
-                if restart_petagent; then
+                ;;
+            1)
+                if petagent_start_in_progress; then
+                    log "PetAgent start is already in progress; waiting"
+                    petagent_fail_count=0
+                elif petagent_port_listening; then
+                    log "PetAgent pid file is stale or missing, but port $PETAGENT_PORT is listening; leaving runtime untouched"
                     petagent_fail_count=0
                 else
-                    log "CRITICAL: PetAgent restart failed; backing off ${BACKOFF_SECONDS}s"
-                    sleep "$BACKOFF_SECONDS"
-                fi
-            else
-                petagent_fail_count=$((petagent_fail_count + 1))
-                log "PetAgent consecutive health fail: $petagent_fail_count/$MAX_FAILS"
-                if [ "$petagent_fail_count" -ge "$MAX_FAILS" ]; then
-                    log "PetAgent health failed $MAX_FAILS times; restarting"
-                    if restart_petagent; then
+                    log "PetAgent process not running; starting runtime"
+                    if start_petagent; then
                         petagent_fail_count=0
                     else
-                        log "CRITICAL: PetAgent restart failed; backing off ${BACKOFF_SECONDS}s"
-                        petagent_fail_count=0
+                        log "CRITICAL: PetAgent start failed; backing off ${BACKOFF_SECONDS}s"
                         sleep "$BACKOFF_SECONDS"
                     fi
                 fi
-            fi
-        fi
+                ;;
+            2)
+                if petagent_within_startup_grace; then
+                    age="$(petagent_pid_age)"
+                    log "PetAgent process is still within startup grace (${age}s); waiting for port"
+                elif petagent_process_alive; then
+                    log "PetAgent process is alive but port $PETAGENT_PORT is not listening; keeping process"
+                else
+                    log "PetAgent port $PETAGENT_PORT is down and process is missing; starting runtime"
+                    start_petagent || log "CRITICAL: PetAgent start failed while port was down"
+                fi
+                petagent_fail_count=0
+                ;;
+            3)
+                log "PetAgent HTTP health failed, but process and port are alive; keeping runtime"
+                petagent_fail_count=0
+                ;;
+            *)
+                petagent_fail_count=$((petagent_fail_count + 1))
+                log "PetAgent unknown health state $petagent_rc: $petagent_fail_count/$MAX_FAILS"
+                if [ "$petagent_fail_count" -ge "$MAX_FAILS" ]; then
+                    petagent_fail_count=0
+                    log "WARNING: PetAgent unknown health state persisted; leaving runtime untouched"
+                fi
+                ;;
+        esac
 
         now="$(date +%s 2>/dev/null || echo 0)"
         if [ $((now - last_su_check)) -ge "$SU_CHECK_INTERVAL" ]; then

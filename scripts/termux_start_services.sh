@@ -17,6 +17,11 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
+process_exists() {
+    pid="$1"
+    [ -n "$pid" ] && [ -d "/proc/$pid" ]
+}
+
 repair_android_context() {
     [ "${PETAGENT_RESTORECON:-1}" = "0" ] && return 0
     command -v su >/dev/null 2>&1 || return 0
@@ -95,7 +100,7 @@ start_sshd_if_needed() {
 
 manager_is_running() {
     pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+    process_exists "$pid"
 }
 
 start_manager_if_needed() {

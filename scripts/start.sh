@@ -22,10 +22,15 @@ remove_pid_file() {
   rm -f "$PID_FILE" 2>/dev/null || true
 }
 
+process_exists() {
+  pid="$1"
+  [ -n "$pid" ] && [ -d "/proc/$pid" ]
+}
+
 START_LOCK="$PROJECT_DIR/backend/data/start.lock"
 if [ -d "$START_LOCK" ]; then
   lock_pid="$(cat "$START_LOCK/pid" 2>/dev/null || true)"
-  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+  if process_exists "$lock_pid"; then
     echo "PetAgent start already in progress (pid $lock_pid)"
     exit 0
   fi
@@ -35,7 +40,7 @@ fi
 if ! mkdir "$START_LOCK" 2>/dev/null; then
   # Another process抢到了锁，再检查一次
   lock_pid="$(cat "$START_LOCK/pid" 2>/dev/null || true)"
-  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+  if process_exists "$lock_pid"; then
     echo "PetAgent start already in progress (pid $lock_pid)"
     exit 0
   fi
@@ -85,7 +90,7 @@ STARTUP_GRACE=120
 
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+  if process_exists "$OLD_PID"; then
     if health_ok; then
       echo "PetAgent runtime already healthy: $OLD_PID"
       exit 0
@@ -102,7 +107,7 @@ if [ -f "$PID_FILE" ]; then
     echo "PetAgent runtime pid $OLD_PID alive but unhealthy after ${age}s; restarting"
     kill "$OLD_PID" 2>/dev/null || true
     sleep 2
-    kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true
+    process_exists "$OLD_PID" && kill -9 "$OLD_PID" 2>/dev/null || true
   fi
   remove_pid_file
 fi
