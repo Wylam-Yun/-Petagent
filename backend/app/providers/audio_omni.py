@@ -133,26 +133,40 @@ class MockAudioUnderstandingProvider:
 class MiMoAudioUnderstandingProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.provider_config = settings.audio_understanding
+        self.api_key = self.provider_config.api_key or settings.api_key
+
+    def _headers(self, api_key: str) -> Dict[str, str]:
+        headers: Dict[str, str] = {"content-type": "application/json"}
+        scheme = str(self.provider_config.extra.get("auth_scheme") or "api-key").lower()
+        if scheme == "bearer":
+            headers["Authorization"] = "Bearer %s" % api_key
+            return headers
+        if scheme == "custom":
+            header = str(self.provider_config.extra.get("api_key_header") or "Authorization")
+            prefix = str(self.provider_config.extra.get("api_key_prefix") or "")
+            headers[header] = ("%s %s" % (prefix, api_key)).strip()
+            return headers
+        header = str(self.provider_config.extra.get("api_key_header") or "api-key")
+        headers[header] = api_key
+        return headers
 
     def understand(self, audio_path: Path, content_type: str) -> AudioUnderstanding:
         if not audio_path.exists():
             return FALLBACK_AUDIO_UNDERSTANDING
         if is_probably_empty_audio(audio_path, content_type):
             return FALLBACK_AUDIO_UNDERSTANDING
-        if not self.settings.api_key or not self.settings.audio_understanding.base_url:
+        if not self.api_key or not self.provider_config.base_url:
             return FALLBACK_AUDIO_UNDERSTANDING
 
         try:
             audio_data = base64.b64encode(audio_path.read_bytes()).decode("ascii")
             response = requests.post(
-                self.settings.audio_understanding.base_url.rstrip("/")
+                self.provider_config.base_url.rstrip("/")
                 + "/chat/completions",
-                headers={
-                    "api-key": self.settings.api_key,
-                    "content-type": "application/json",
-                },
+                headers=self._headers(self.api_key),
                 json={
-                    "model": self.settings.audio_understanding.model,
+                    "model": self.provider_config.model,
                     "messages": [
                         {
                             "role": "user",
@@ -172,7 +186,7 @@ class MiMoAudioUnderstandingProvider:
                     ],
                     "temperature": 0.2,
                 },
-                timeout=self.settings.audio_understanding.timeout_seconds,
+                timeout=self.provider_config.timeout_seconds,
             )
             response.raise_for_status()
             body = response.json()

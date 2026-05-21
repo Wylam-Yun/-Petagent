@@ -90,6 +90,20 @@ def test_all_decisions_have_required_fields():
     assert d.route
     assert d.context_profile
     assert d.provider_profile
+    assert d.brain in ("fast", "slow")
     assert isinstance(d.allow_tools, bool)
     assert isinstance(d.max_tool_calls, int)
     assert d.reason
+
+
+def test_brain_field_matches_route():
+    """brain field should be 'slow' when route is 'slow', 'fast' otherwise."""
+    cases = [
+        ("text_message", "text_fast", "你好", False, "fast"),
+        ("text_message", "text_fast", "你好", True, "slow"),
+        ("text_message", "text_fast", "帮我写一个排序算法", False, "slow"),
+        ("morning", "proactive", "", False, "fast"),
+    ]
+    for event_type, source, text, thinking, expected_brain in cases:
+        d = decide_route(event_type, source, text, thinking_mode=thinking)
+        assert d.brain == expected_brain, f"brain={d.brain} for {text!r}, expected {expected_brain}"

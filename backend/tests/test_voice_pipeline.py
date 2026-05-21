@@ -40,7 +40,7 @@ def test_voice_chat_uses_slow_route_when_thinking_mode_is_enabled():
     assert body["audio_understanding"]["tone_notes"]
 
 
-def test_thinking_mode_uses_asr_before_audio_fallback():
+def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
     app = create_app(testing=True)
     app.state.audio_provider.fail = True
     client = TestClient(app)
@@ -51,7 +51,8 @@ def test_thinking_mode_uses_asr_before_audio_fallback():
     body = response.json()
     assert body["voice_route"]["selected"] == "slow"
     assert body["voice_route"]["asr_provider"] == "mock_asr"
-    assert body["voice_route"]["fallback_reason"] == ""
+    assert body["voice_route"]["fallback_reason"] == "audio_understanding_insufficient"
+    assert body["voice_route"]["emotion_source"] == "asr"
     assert body["user_text"] == "我回来啦"
 
 

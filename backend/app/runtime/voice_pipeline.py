@@ -54,14 +54,11 @@ class VoicePipeline:
     ) -> VoicePipelineResult:
         requested = requested_route if requested_route in {"auto", "fast", "slow"} else "auto"
         if thinking_mode or requested == "slow":
-            return self._run_asr_route(
+            return self._run_audio_understanding_route(
                 audio_path,
                 content_type,
                 requested=requested,
-                selected="slow",
                 thinking_mode=thinking_mode,
-                brain=self.slow_brain,
-                brain_provider_name=self.slow_brain_provider_name,
             )
         return self._run_asr_route(
             audio_path,
@@ -87,6 +84,7 @@ class VoicePipeline:
         timings: Dict[str, int] = {}
         started = perf_counter()
         fallback_reason = ""
+        emotion_source = "asr"
         try:
             transcript = self.asr_provider.transcribe(audio_path, content_type)
         except Exception:
@@ -184,9 +182,113 @@ class VoicePipeline:
                 asr_error_message=transcript.error_message,
                 brain_provider=brain_provider_name,
                 fallback_reason=fallback_reason,
+                emotion_source=emotion_source,
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
+            activation=activation_info,
+        )
+
+    def _run_audio_understanding_route(
+        self,
+        audio_path: Path,
+        content_type: str,
+        *,
+        requested: str,
+        thinking_mode: bool,
+    ) -> VoicePipelineResult:
+        timings: Dict[str, int] = {}
+        started = perf_counter()
+        emotion_source = "fallback"
+
+        # Step 1: Try audio understanding first
+        try:
+            understanding = self.audio_provider.understand(audio_path, content_type)
+        except Exception:
+            understanding = FALLBACK_AUDIO_UNDERSTANDING
+        timings["audio_understanding"] = _now_ms(started)
+
+        # Step 2: Check if audio understanding gave usable text
+        has_usable_text = bool(understanding.user_text.strip()) and understanding.confidence >= 0.3
+
+        transcript = None
+        if has_usable_text:
+            emotion_source = "audio_understanding"
+            # Optionally run ASR as transcript assist (non-blocking)
+            asr_start = perf_counter()
+            try:
+                transcript = self.asr_provider.transcribe(audio_path, content_type)
+            except Exception:
+                pass
+            timings["asr_assist"] = _now_ms(asr_start)
+        else:
+            # Audio understanding failed or returned empty — fall back to ASR
+            asr_start = perf_counter()
+            try:
+                transcript = self.asr_provider.transcribe(audio_path, content_type)
+            except Exception:
+                transcript = ASRTranscript(
+                    text="",
+                    confidence=0.0,
+                    provider=self._asr_name(),
+                    error_code="asr_provider_exception",
+                    error_message="ASR provider raised an exception",
+                )
+            timings["asr"] = _now_ms(asr_start)
+
+            if transcript.text.strip() and transcript.confidence >= self.asr_min_confidence:
+                # ASR succeeded — use it, but note emotion came from ASR
+                understanding = AudioUnderstanding(
+                    user_text=transcript.text.strip(),
+                    detected_emotion="uncertain",
+                    tone_notes="ASR fallback, no audio understanding",
+                    non_verbal="",
+                    confidence=transcript.confidence,
+                )
+                emotion_source = "asr"
+            else:
+                # Both failed — use fallback understanding
+                emotion_source = "fallback"
+
+        brain_started = perf_counter()
+
+        # Check for wake/exit phrase
+        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
+        activation_info = None
+        if activation_event is not None:
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
+            activation_info = self._build_activation_info(activation_event["type"])
+        else:
+            response = self.dispatcher.handle_event(
+                {
+                    "type": "voice_message",
+                    "source": "voice_slow",
+                    "payload": {
+                        "user_text": understanding.user_text,
+                        "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
+                    },
+                },
+                brain=self.slow_brain,
+            )
+        timings["brain_tts"] = _now_ms(brain_started)
+        timings["total"] = _now_ms(started)
+        return VoicePipelineResult(
+            user_text=understanding.user_text,
+            audio_understanding=understanding,
+            response=response,
+            route_info=VoiceRouteInfo(
+                requested=requested,
+                selected="slow",
+                thinking_mode=thinking_mode,
+                asr_provider=getattr(transcript, "provider", "") if transcript else "",
+                brain_provider=self.slow_brain_provider_name,
+                fallback_reason="" if has_usable_text else "audio_understanding_insufficient",
+                emotion_source=emotion_source,
+                timings_ms=timings,
+            ),
+            fallback_reason=None if has_usable_text else "audio_understanding_insufficient",
             activation=activation_info,
         )
 
@@ -243,6 +345,7 @@ class VoicePipeline:
                 asr_provider="",
                 brain_provider=self.slow_brain_provider_name,
                 fallback_reason=fallback_reason,
+                emotion_source="fallback",
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,

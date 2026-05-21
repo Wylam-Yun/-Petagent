@@ -35,10 +35,11 @@ class VoiceRouteInfo:
     asr_error_message: str = ""
     brain_provider: str = ""
     fallback_reason: str = ""
+    emotion_source: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
 
     def dict(self) -> Dict[str, Any]:
-        return {
+        body = {
             "requested": self.requested,
             "selected": self.selected,
             "thinking_mode": self.thinking_mode,
@@ -47,8 +48,10 @@ class VoiceRouteInfo:
             "asr_error_message": self.asr_error_message,
             "brain_provider": self.brain_provider,
             "fallback_reason": self.fallback_reason,
+            "emotion_source": self.emotion_source,
             "timings_ms": dict(self.timings_ms),
         }
+        return body
 
 
 @dataclass(frozen=True)

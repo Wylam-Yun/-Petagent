@@ -260,8 +260,12 @@ class RuntimeDispatcher:
             }
 
         # 10. Apply state delta and save
-        final_state = apply_state_delta(ruled_state, action.state_delta)
-        # Apply pet_effort fatigue — guarantees net decrease regardless of LLM delta
+        # Strip energy from LLM state_delta — pet_effort is the sole authority for energy
+        sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
+        if "energy" in action.state_delta:
+            logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
+        final_state = apply_state_delta(ruled_state, sanitized_delta)
+        # Apply pet_effort fatigue — deterministic energy deduction
         pre_llm_energy = int(ruled_state.get("energy", 0))
         effort = action.state_affect.pet_effort
         if effort == "medium":

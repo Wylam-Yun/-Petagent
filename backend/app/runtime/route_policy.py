@@ -10,6 +10,7 @@ class RouteDecision:
     route: str
     context_profile: str
     provider_profile: str
+    brain: str
     allow_tools: bool
     max_tool_calls: int
     reason: str
@@ -43,6 +44,7 @@ def decide_route(
             route="slow",
             context_profile="long_task",
             provider_profile="slow_llm",
+            brain="slow",
             allow_tools=True,
             max_tool_calls=2,
             reason="thinking_mode enabled",
@@ -53,6 +55,7 @@ def decide_route(
             route="fast",
             context_profile="proactive",
             provider_profile="fast_llm",
+            brain="fast",
             allow_tools=False,
             max_tool_calls=0,
             reason="proactive event",
@@ -63,6 +66,7 @@ def decide_route(
             route="fast",
             context_profile="fast_companion",
             provider_profile="fast_llm",
+            brain="fast",
             allow_tools=False,
             max_tool_calls=0,
             reason="button interaction",
@@ -73,6 +77,7 @@ def decide_route(
             route="fast",
             context_profile="fast_companion",
             provider_profile="fast_llm",
+            brain="fast",
             allow_tools=False,
             max_tool_calls=0,
             reason="recall keyword in fast mode, using memory cards",
@@ -83,6 +88,7 @@ def decide_route(
             route="fast",
             context_profile="tool",
             provider_profile="fast_llm",
+            brain="fast",
             allow_tools=True,
             max_tool_calls=2,
             reason="external fact request",
@@ -93,6 +99,7 @@ def decide_route(
             route="slow",
             context_profile="long_task",
             provider_profile="slow_llm",
+            brain="slow",
             allow_tools=True,
             max_tool_calls=2,
             reason="complex task detected",
@@ -102,6 +109,7 @@ def decide_route(
         route="fast",
         context_profile="fast_companion",
         provider_profile="fast_llm",
+        brain="fast",
         allow_tools=False,
         max_tool_calls=0,
         reason="default companionship",

@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from app.pet.brain import PetBrain
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.activation import classify_activation as _classify_activation
+from app.runtime.route_policy import decide_route
 
 
 def _now_ms(start: float) -> int:
@@ -18,6 +19,7 @@ class TextRouteInfo:
     selected: str
     thinking_mode: bool
     brain_provider: str
+    route_reason: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
 
     def dict(self) -> Dict[str, Any]:
@@ -25,6 +27,7 @@ class TextRouteInfo:
             "selected": self.selected,
             "thinking_mode": self.thinking_mode,
             "brain_provider": self.brain_provider,
+            "route_reason": self.route_reason,
             "timings_ms": dict(self.timings_ms),
         }
 
@@ -57,16 +60,22 @@ class TextPipeline:
 
     def handle(self, text: str, *, thinking_mode: bool = False) -> TextPipelineResult:
         user_text = text.strip()
-        brain = self.slow_brain if thinking_mode else self.fast_brain
-        selected = "slow" if thinking_mode else "fast"
-        provider_name = (
-            self.slow_brain_provider_name if thinking_mode else self.fast_brain_provider_name
-        )
         started = perf_counter()
+        decision = decide_route(
+            event_type="text_message",
+            event_source="text",
+            user_text=user_text,
+            thinking_mode=thinking_mode,
+        )
+        brain = self.slow_brain if decision.brain == "slow" else self.fast_brain
+        selected = decision.route
+        provider_name = (
+            self.slow_brain_provider_name if decision.brain == "slow" else self.fast_brain_provider_name
+        )
         activation_event = _classify_activation(user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:
-            source = "text_slow" if thinking_mode else "text_fast"
+            source = "text_slow" if selected == "slow" else "text_fast"
             activation_event["source"] = source
             activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
@@ -75,7 +84,7 @@ class TextPipeline:
             response = self.dispatcher.handle_event(
                 {
                     "type": "text_message",
-                    "source": "text_slow" if thinking_mode else "text_fast",
+                    "source": "text_slow" if selected == "slow" else "text_fast",
                     "payload": {"user_text": user_text, "thinking_mode": thinking_mode},
                 },
                 brain=brain,
@@ -87,6 +96,7 @@ class TextPipeline:
                 selected=selected,
                 thinking_mode=thinking_mode,
                 brain_provider=provider_name,
+                route_reason=decision.reason,
                 timings_ms={"total": _now_ms(started)},
             ),
             activation=activation_info,

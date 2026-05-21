@@ -18,6 +18,7 @@ from app.api import runtime as runtime_api
 from app.api import skills as skills_api
 from app.api import text as text_api
 from app.api import voice as voice_api
+from app.api.auth import get_internal_token
 from app.config import Settings, load_settings
 from app.db import create_state_store
 from app.pet.brain import PetBrain
@@ -271,15 +272,27 @@ def create_app(testing: bool = False) -> FastAPI:
         activation_manager=activation_manager,
     )
 
+    # CORS: explicit origin allowlist instead of wildcard
+    cors_config = settings.app_config.get("cors", {})
+    allowed_origins = list(cors_config.get("allowed_origins", []))
+    # Always allow loopback origins for local frontend
+    for origin in ("http://127.0.0.1:8000", "http://localhost:8000"):
+        if origin not in allowed_origins:
+            allowed_origins.append(origin)
+
     app = FastAPI(title="PetAgent Momo", version=settings.schema_version)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Internal debug/management token (CC-0)
+    internal_token = get_internal_token(settings)
     app.state.settings = settings
+    app.state.internal_token = internal_token
     app.state.state_store = state_store
     app.state.interaction_log = interaction_log
     app.state.device_store = device_store

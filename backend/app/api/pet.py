@@ -9,6 +9,11 @@ router = APIRouter(prefix="/api/pet")
 
 @router.get("/state")
 def get_pet_state(request: Request):
+    return request.app.state.state_store.get_state()
+
+
+@router.post("/session/resume")
+def post_session_resume(request: Request):
     request.app.state.tick_service.apply_if_due()
     return request.app.state.state_store.get_state()
 

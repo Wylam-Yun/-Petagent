@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -7,6 +8,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
+
+from app.providers.errors import ProviderError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice")
 
@@ -71,15 +76,30 @@ async def post_voice_chat(
     path = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
     request.app.state.tick_service.apply_if_due()
-    result = await run_in_threadpool(
-        request.app.state.voice_pipeline.handle,
-        path,
-        file.content_type or "",
-        requested_route=route,
-        thinking_mode=_as_bool(thinking_mode),
-    )
-    body: Dict[str, Any] = result.response.dict()
+    try:
+        result = await run_in_threadpool(
+            request.app.state.voice_pipeline.handle,
+            path,
+            file.content_type or "",
+            requested_route=route,
+            thinking_mode=_as_bool(thinking_mode),
+        )
+    except ProviderError as exc:
+        logger.warning("voice_chat provider error: %s", exc.to_dict())
+        body: Dict[str, Any] = {
+            "reply": "Momo 有点累了，稍后再试试吧~",
+            "mood": "tired",
+            "face_type": "tired",
+            "animation": "slowBlink",
+            "vibration": "none",
+            "pet_state": request.app.state.state_store.get_state(),
+            "runtime": {},
+            "error_class": exc.error_class,
+        }
+        return body
+    body = result.response.dict()
     body["user_text"] = result.user_text
+    body["error_class"] = None
     body["audio_understanding"] = result.audio_understanding.dict()
     route_info = result.route_info.dict()
     route_info["timings_ms"] = dict(route_info.get("timings_ms", {}))
