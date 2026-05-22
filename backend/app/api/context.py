@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request
 
+from app.api.auth import require_internal_token
 from app.runtime.context_store import desensitize_text
 
 router = APIRouter()
@@ -53,6 +54,7 @@ def context_refresh(request: Request) -> Dict[str, Any]:
 @router.get("/api/context/runs")
 def context_runs(request: Request, limit: int = 10) -> Dict[str, Any]:
     """Debug: recent agent runs with sanitized observations."""
+    require_internal_token(request)
     registry = getattr(request.app.state, "agent_run_registry", None)
     if registry is None:
         return {"ok": False, "reason": "agent_run_registry not configured"}
@@ -63,6 +65,7 @@ def context_runs(request: Request, limit: int = 10) -> Dict[str, Any]:
 @router.get("/api/context/debug")
 def context_debug(request: Request) -> Dict[str, Any]:
     """调试当前 episode、最近事件数、上下文预算."""
+    require_internal_token(request)
     episode_manager = request.app.state.episode_manager
     event_log_store = request.app.state.event_log_store
     settings = request.app.state.settings

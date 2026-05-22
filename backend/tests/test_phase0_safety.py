@@ -189,6 +189,32 @@ def test_require_internal_token_accepts_valid():
     require_internal_token(request)
 
 
+def test_v11_protected_endpoint_inventory_requires_token():
+    app = create_app(testing=True)
+    client = TestClient(app)
+    protected = [
+        ("GET", "/api/health/deep", None),
+        ("GET", "/api/debug/runs", None),
+        ("GET", "/api/debug/incidents", None),
+        ("POST", "/api/internal/incident", {"kind": "test"}),
+        ("GET", "/api/context/debug", None),
+        ("GET", "/api/context/runs", None),
+        ("GET", "/api/memory/debug", None),
+        ("POST", "/api/memory/curate", {}),
+        ("POST", "/api/memory/summarize", {"mode": "episode"}),
+        ("POST", "/api/runtime/reset", {"confirm": "wrong"}),
+        ("GET", "/api/runtime/skills", None),
+        ("POST", "/api/skills/device.info/run", {}),
+    ]
+
+    for method, path, payload in protected:
+        if method == "GET":
+            response = client.get(path)
+        else:
+            response = client.post(path, json=payload or {})
+        assert response.status_code == 403, path
+
+
 def test_cors_allows_loopback_origin():
     app = create_app(testing=True)
     client = TestClient(app)

@@ -3,6 +3,10 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 
+def _auth_headers(app):
+    return {"Authorization": f"Bearer {app.state.internal_token}"}
+
+
 def test_context_refresh_endpoint():
     app = create_app(testing=True)
     client = TestClient(app)
@@ -48,7 +52,8 @@ def test_context_debug_endpoint_requires_debug_enabled():
     app = create_app(testing=True)
     client = TestClient(app)
 
-    response = client.get("/api/context/debug")
+    assert client.get("/api/context/debug").status_code == 403
+    response = client.get("/api/context/debug", headers=_auth_headers(app))
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
@@ -63,7 +68,7 @@ def test_context_debug_endpoint_returns_detail_when_enabled():
     app.state.settings.app_config.setdefault("cognition_context", {})["debug_enabled"] = True
     client = TestClient(app)
 
-    response = client.get("/api/context/debug")
+    response = client.get("/api/context/debug", headers=_auth_headers(app))
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
@@ -104,7 +109,7 @@ def test_context_debug_desensitizes_user_text():
     )
 
     client = TestClient(app)
-    response = client.get("/api/context/debug")
+    response = client.get("/api/context/debug", headers=_auth_headers(app))
     body = response.json()
 
     if "recent_events" in body:

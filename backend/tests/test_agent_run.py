@@ -208,7 +208,10 @@ def test_debug_runs_endpoint():
     client = TestClient(app)
     # Create a run first
     client.post("/api/text/chat", json={"text": "你好"})
-    response = client.get("/api/context/runs")
+    response = client.get(
+        "/api/context/runs",
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True

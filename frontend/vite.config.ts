@@ -2,8 +2,27 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import legacy from "@vitejs/plugin-legacy";
 import { execSync } from "child_process";
-import { writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { resolve } from "path";
+
+function hashDirectory(path: string): string {
+  const hash = createHash("sha256");
+  const stack = [path];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    const stat = statSync(current);
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync(current).sort().reverse()) {
+        stack.push(resolve(current, entry));
+      }
+      continue;
+    }
+    hash.update(current.replace(__dirname, ""));
+    hash.update(readFileSync(current));
+  }
+  return hash.digest("hex");
+}
 
 function buildInfoPlugin() {
   return {
@@ -16,6 +35,7 @@ function buildInfoPlugin() {
       const info = {
         git_sha: gitSha,
         build_time: new Date().toISOString(),
+        source_hash: hashDirectory(resolve(__dirname, "src")),
       };
       writeFileSync(resolve(__dirname, "dist/build-info.json"), JSON.stringify(info, null, 2));
     },

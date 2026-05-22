@@ -343,12 +343,13 @@ def test_manual_curate_triggers_rebuild():
 
     app = create_app(testing=True)
     client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.internal_token}"}
 
     # Seed a candidate
     candidate_store = app.state.memory_candidate_store
     candidate_store.add("evt-1", "ep-1", "用户喜欢猫", "explicit_command")
 
-    response = client.post("/api/memory/curate")
+    response = client.post("/api/memory/curate", headers=headers)
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
@@ -369,6 +370,7 @@ def test_runtime_reset_clears_cards():
 
     app = create_app(testing=True)
     client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.internal_token}"}
 
     # Seed memory and rebuild cards
     mm = app.state.memory_manager
@@ -381,7 +383,11 @@ def test_runtime_reset_clears_cards():
     assert len(mcm.read_card("user_preferences")) > 0
 
     # Reset
-    response = client.post("/api/runtime/reset", json={"confirm": "重新认识"})
+    response = client.post(
+        "/api/runtime/reset",
+        json={"confirm": "重新认识"},
+        headers=headers,
+    )
     assert response.status_code == 200
     assert response.json()["ok"] is True
 

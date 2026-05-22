@@ -19,18 +19,29 @@ def test_skills_api_lists_builtin_whitelisted_skills():
 
 
 def test_unknown_skill_returns_404():
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+    client = TestClient(app)
 
-    response = client.post("/api/skills/unknown.run/run", json={})
+    assert client.post("/api/skills/unknown.run/run", json={}).status_code == 403
+    response = client.post(
+        "/api/skills/unknown.run/run",
+        json={},
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
 
     assert response.status_code == 404
 
 
 def test_device_info_skill_returns_structured_result():
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+    client = TestClient(app)
     client.post("/api/device/state", json={"battery": 64, "is_charging": True})
 
-    response = client.post("/api/skills/device.info/run", json={})
+    response = client.post(
+        "/api/skills/device.info/run",
+        json={},
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -47,7 +58,11 @@ def test_weather_skill_failure_is_structured_when_provider_unavailable():
     ] = "disabled"
     client = TestClient(app)
 
-    response = client.post("/api/skills/weather.current/run", json={"location": "current"})
+    response = client.post(
+        "/api/skills/weather.current/run",
+        json={"location": "current"},
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -89,7 +104,11 @@ def test_weather_skill_uses_configured_network_provider(monkeypatch):
     monkeypatch.setattr("app.runtime.registry.requests.Session", lambda: FakeSession())
     client = TestClient(app)
 
-    response = client.post("/api/skills/weather.current/run", json={"location": "current"})
+    response = client.post(
+        "/api/skills/weather.current/run",
+        json={"location": "current"},
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
 
     assert response.status_code == 200
     body = response.json()

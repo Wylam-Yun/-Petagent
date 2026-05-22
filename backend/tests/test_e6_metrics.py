@@ -61,9 +61,13 @@ def test_audio_job_includes_audio_queue():
 
 
 def test_run_endpoint_shows_timings():
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+    client = TestClient(app)
     client.post("/api/pet/event", json={"event": "hug", "payload": {}})
-    response = client.get("/api/context/runs?limit=1")
+    response = client.get(
+        "/api/context/runs?limit=1",
+        headers={"Authorization": f"Bearer {app.state.internal_token}"},
+    )
     assert response.status_code == 200
     data = response.json()
     assert len(data["runs"]) >= 1

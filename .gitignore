@@ -9,5 +9,6 @@ __pycache__/
 node_modules/
 frontend/dist/
 backend/data/
+backend/secrets/
 backend/static/audio/
 backend/app/static/audio/

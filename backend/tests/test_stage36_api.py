@@ -5,6 +5,10 @@ from app.main import create_app
 from app.runtime.memory_store import MemoryCandidateStore, MemoryManager
 
 
+def _auth_headers(app):
+    return {"Authorization": f"Bearer {app.state.internal_token}"}
+
+
 def test_memory_debug_returns_desensitized_data():
     app = create_app(testing=True)
     app.state.settings.app_config.setdefault("cognition_context", {})["debug_enabled"] = True
@@ -14,7 +18,8 @@ def test_memory_debug_returns_desensitized_data():
     mm.save_curated("user_preference", "用户 API key 是 sk-abc123def456", importance=3)
 
     client = TestClient(app)
-    response = client.get("/api/memory/debug")
+    assert client.get("/api/memory/debug").status_code == 403
+    response = client.get("/api/memory/debug", headers=_auth_headers(app))
     assert response.status_code == 200
     body = response.json()
 
@@ -31,7 +36,7 @@ def test_memory_debug_disabled_by_default():
     app = create_app(testing=True)
     client = TestClient(app)
 
-    response = client.get("/api/memory/debug")
+    response = client.get("/api/memory/debug", headers=_auth_headers(app))
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
@@ -44,7 +49,8 @@ def test_memory_curate_endpoint():
     cs.add("evt-1", "ep-1", "用户喜欢短回复", "explicit_command")
 
     client = TestClient(app)
-    response = client.post("/api/memory/curate")
+    assert client.post("/api/memory/curate").status_code == 403
+    response = client.post("/api/memory/curate", headers=_auth_headers(app))
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
@@ -56,7 +62,11 @@ def test_memory_summarize_episode_no_active():
     app = create_app(testing=True)
     client = TestClient(app)
 
-    response = client.post("/api/memory/summarize", json={"mode": "episode"})
+    response = client.post(
+        "/api/memory/summarize",
+        json={"mode": "episode"},
+        headers=_auth_headers(app),
+    )
     # Should fail if no active episode with events
     assert response.status_code in (200, 400)
 
@@ -65,7 +75,11 @@ def test_memory_summarize_invalid_mode():
     app = create_app(testing=True)
     client = TestClient(app)
 
-    response = client.post("/api/memory/summarize", json={"mode": "invalid"})
+    response = client.post(
+        "/api/memory/summarize",
+        json={"mode": "invalid"},
+        headers=_auth_headers(app),
+    )
     assert response.status_code == 400
 
 
@@ -78,11 +92,16 @@ def test_runtime_reset_requires_confirmation():
     client = TestClient(app)
 
     # Without confirm field → 400
-    response = client.post("/api/runtime/reset", json={})
+    assert client.post("/api/runtime/reset", json={}).status_code == 403
+    response = client.post("/api/runtime/reset", json={}, headers=_auth_headers(app))
     assert response.status_code == 400
 
     # With wrong confirm value → 400
-    response = client.post("/api/runtime/reset", json={"confirm": "wrong"})
+    response = client.post(
+        "/api/runtime/reset",
+        json={"confirm": "wrong"},
+        headers=_auth_headers(app),
+    )
     assert response.status_code == 400
 
     # Memory should still exist
@@ -102,7 +121,11 @@ def test_runtime_reset_clears_everything():
     client = TestClient(app)
 
     # Correct confirmation
-    response = client.post("/api/runtime/reset", json={"confirm": "重新认识"})
+    response = client.post(
+        "/api/runtime/reset",
+        json={"confirm": "重新认识"},
+        headers=_auth_headers(app),
+    )
     assert response.status_code == 200
     body = response.json()
 

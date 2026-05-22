@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.api.auth import require_internal_token
 from app.runtime.context_store import desensitize_text
 
 router = APIRouter()
@@ -14,6 +15,7 @@ _RESET_CONFIRM_TEXT = "\u91cd\u65b0\u8ba4\u8bc6"  # 重新认识
 @router.get("/api/memory/debug")
 def memory_debug(request: Request) -> Dict[str, Any]:
     """Return desensitized memory debug info. Only when debug_enabled."""
+    require_internal_token(request)
     settings = request.app.state.settings
     cc_config = settings.app_config.get("cognition_context", {})
     debug_enabled = cc_config.get("debug_enabled", False)
@@ -103,6 +105,7 @@ def memory_debug(request: Request) -> Dict[str, Any]:
 @router.post("/api/memory/curate")
 def memory_curate(request: Request) -> Dict[str, Any]:
     """Manually trigger curator batch processing."""
+    require_internal_token(request)
     curator = getattr(request.app.state, "memory_curator", None)
     candidate_store = getattr(request.app.state, "memory_candidate_store", None)
     if curator is None or candidate_store is None:
@@ -125,6 +128,7 @@ def memory_curate(request: Request) -> Dict[str, Any]:
 @router.post("/api/memory/summarize")
 def memory_summarize(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     """Manually trigger summary generation."""
+    require_internal_token(request)
     mode = body.get("mode", "episode")
     summary_manager = getattr(request.app.state, "summary_manager", None)
     if summary_manager is None:
@@ -158,6 +162,7 @@ def memory_summarize(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/api/runtime/reset")
 def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     """Reset all runtime data. Requires { "confirm": "重新认识" }."""
+    require_internal_token(request)
     confirm = body.get("confirm", "")
     if confirm != _RESET_CONFIRM_TEXT:
         raise HTTPException(

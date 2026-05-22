@@ -4,6 +4,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.api.auth import require_internal_token
+
 router = APIRouter(prefix="/api/skills")
 
 
@@ -14,6 +16,7 @@ def list_skills(request: Request):
 
 @router.post("/{skill_id}/run")
 def run_skill(skill_id: str, payload: Dict[str, Any], request: Request):
+    require_internal_token(request)
     registry = request.app.state.registry
     if not registry.has_skill(skill_id):
         raise HTTPException(status_code=404, detail="Unknown skill")

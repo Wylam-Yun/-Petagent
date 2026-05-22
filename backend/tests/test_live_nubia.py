@@ -1,25 +1,28 @@
-"""Live integration tests against a real Petagent server on nubia.
+"""V1.1 live integration tests against a real PetAgent server.
 
-These tests hit real APIs: LLM (MiMo), weather (wttr.in), device state, etc.
-They verify each functional requirement end-to-end through the HTTP API.
+Run from Mac:
+    PETAGENT_TEST_URL=http://192.168.10.239:8000 \
+    PETAGENT_INTERNAL_TOKEN_FILE=/path/to/token \
+    ../.venv/bin/python -m pytest tests/test_live_nubia.py -q
 
-Run with:
-    PETAGENT_TEST_URL=http://192.168.x.x:8000 .venv/bin/pytest tests/test_live_nubia.py -v
-
-Requires: the server must be started separately and PETAGENT_TEST_URL must be set.
+Run on Nubia:
+    cd ~/Petagent/backend
+    PETAGENT_TEST_URL=http://127.0.0.1:8000 \
+    PETAGENT_INTERNAL_TOKEN_FILE=../backend/secrets/internal_token \
+    ../.venv/bin/python -m pytest tests/test_live_nubia.py -q
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import time
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import httpx
 import pytest
 
-BASE = os.environ.get("PETAGENT_TEST_URL", "")
+BASE = os.environ.get("PETAGENT_TEST_URL", "").rstrip("/")
 
 pytestmark = pytest.mark.skipif(
     not BASE,
@@ -27,216 +30,167 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _token() -> str:
+    raw = os.environ.get("PETAGENT_INTERNAL_TOKEN", "").strip()
+    if raw:
+        return raw
+    token_file = os.environ.get("PETAGENT_INTERNAL_TOKEN_FILE", "").strip()
+    if token_file:
+        try:
+            return Path(token_file).read_text().strip()
+        except OSError:
+            return ""
+    return ""
+
+
+def _headers(require_token: bool = False) -> Dict[str, str]:
+    token = _token()
+    if require_token and not token:
+        pytest.skip("PETAGENT_INTERNAL_TOKEN or PETAGENT_INTERNAL_TOKEN_FILE is required")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _url(path: str) -> str:
     return BASE + path
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-def _get(path: str, **kwargs) -> dict:
-    r = httpx.get(_url(path), timeout=30, **kwargs)
-    r.raise_for_status()
-    return r.json()
+def _get(path: str, *, token: bool = False, timeout: float = 30) -> Dict[str, Any]:
+    response = httpx.get(_url(path), headers=_headers(token), timeout=timeout)
+    response.raise_for_status()
+    return response.json()
 
 
-def _post(path: str, json: dict = None, **kwargs) -> dict:
-    r = httpx.post(_url(path), json=json or {}, timeout=60, **kwargs)
-    r.raise_for_status()
-    return r.json()
+def _post(
+    path: str,
+    *,
+    json: Optional[Dict[str, Any]] = None,
+    token: bool = False,
+    timeout: float = 60,
+) -> Dict[str, Any]:
+    response = httpx.post(
+        _url(path),
+        json=json or {},
+        headers=_headers(token),
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
-# ── 1. Health check ──────────────────────────────────────────────────────────
-
-def test_01_health_check():
-    """GET /api/health — runtime is alive and reports pet name."""
-    data = _get("/api/health")
-    assert data.get("ok") is True
-    assert "name" in data
-
-
-# ── 2. Pet state persistence ─────────────────────────────────────────────────
-
-def test_02_pet_state_returns_valid_structure():
-    """GET /api/pet/state — returns mood, energy, intimacy etc."""
-    data = _get("/api/pet/state")
-    assert "mood" in data
-    assert "energy" in data
-    assert "intimacy" in data
-    assert isinstance(data["mood"], str)
-
-
-# ── 3. Skill registry lists skills with input_schema ─────────────────────────
-
-def test_03_skill_registry_lists_skills():
-    """GET /api/skills — lists weather.current and device.info with input_schema."""
-    data = _get("/api/skills")
-    skills = data.get("skills", [])
-    ids = [s["id"] for s in skills]
-    assert "weather.current" in ids
-    assert "device.info" in ids
-    weather = next(s for s in skills if s["id"] == "weather.current")
-    assert "input_schema" in weather
-
-
-# ── 4. Weather skill — real wttr.in API call ─────────────────────────────────
-
-def test_04_weather_skill_real_api():
-    """POST /api/skills/weather.current/run — hits wttr.in and returns weather data."""
-    data = _post("/api/skills/weather.current/run", json={"location": "Shanghai"})
-    assert data.get("ok") is True
-    content = data.get("content", "")
-    assert len(content) > 0, "weather content should not be empty"
-    # wttr.in returns weather info (may be in Chinese or English)
-    content_lower = content.lower()
-    assert any(kw in content_lower for kw in [
-        "°", "度", "temp", "weather", "shanghai", "wind", "humid", "cloudy", "晴", "阴", "雨",
-    ]), f"unexpected weather content: {content[:200]}"
-
-
-# ── 5. Device info skill ─────────────────────────────────────────────────────
-
-def test_05_device_info_skill():
-    """POST /api/skills/device.info/run — returns device state."""
-    data = _post("/api/skills/device.info/run", json={})
-    assert data.get("ok") is True
-    content = data.get("content", "")
-    assert len(content) > 0
-
-
-# ── 6. Interaction catalog — dynamic button list ─────────────────────────────
-
-def test_06_interaction_catalog():
-    """GET /api/interactions — returns interaction definitions with labels."""
-    items = _get("/api/interactions")
-    assert isinstance(items, list)
-    assert len(items) >= 5, f"expected >=5 interactions, got {len(items)}"
-    first = items[0]
-    assert "event_id" in first
-    assert "label" in first
-    assert "default_mood" in first
-    assert "default_animation" in first
-    event_ids = [it["event_id"] for it in items]
-    assert "pet_head" in event_ids
-    assert "hug" in event_ids
-
-
-# ── 7. Text chat — real LLM call ─────────────────────────────────────────────
-
-def test_07_text_chat_real_llm():
-    """POST /api/text/chat — real LLM generates reply with mood and animation."""
-    data = _post("/api/text/chat", json={"text": "你好呀 Momo"})
-    assert "reply" in data
-    assert len(data["reply"]) > 0, "LLM reply should not be empty"
-    assert "mood" in data
-    assert isinstance(data["mood"], str)
-    assert "face_type" in data
-    assert "animation" in data
-
-
-# ── 8. Pet event dispatch — full agent loop ──────────────────────────────────
-
-def test_08_pet_event_full_loop():
-    """POST /api/pet/event — dispatches pet_head event through full agent loop."""
-    data = _post("/api/pet/event", json={"event": "pet_head"})
-    assert "reply" in data
-    assert len(data.get("reply", "")) > 0
-    assert "mood" in data
-    assert "animation" in data
-    assert "pet_state" in data
-    assert "runtime" in data
-
-
-# ── 9. Proactive events ─────────────────────────────────────────────────────
-
-def test_09_proactive_events():
-    """GET /api/pet/proactive — proactive service responds (active or inactive)."""
-    data = _get("/api/pet/proactive")
-    assert isinstance(data, dict)
-    assert "active" in data
-
-
-# ── 10. Context debug — episode tracking ─────────────────────────────────────
-
-def test_10_context_debug():
-    """GET /api/context/debug — returns current episode info."""
-    data = _get("/api/context/debug")
-    assert data.get("ok") is True
-    assert "current_episode" in data
-    assert "total_events" in data
-
-
-# ── 11. Memory debug ─────────────────────────────────────────────────────────
-
-def test_11_memory_debug():
-    """GET /api/memory/debug — returns memory system state."""
-    data = _get("/api/memory/debug")
-    assert data.get("ok") is True
-    assert "debug_enabled" in data
-
-
-# ── 12. Agent run tracking ───────────────────────────────────────────────────
-
-def test_12_agent_run_tracking():
-    """GET /api/context/runs — returns recent agent runs with observability."""
-    data = _get("/api/context/runs")
-    assert data.get("ok") is True
-    runs = data.get("runs", [])
-    assert isinstance(runs, list)
-    if len(runs) > 0:
-        run = runs[0]
-        assert "run_id" in run
-        assert "status" in run
-
-
-# ── 13. Runtime skills endpoint ──────────────────────────────────────────────
-
-def test_13_runtime_skills():
-    """GET /api/runtime/skills — lists skills from runtime registry."""
-    data = _get("/api/runtime/skills")
-    skills = data.get("skills", [])
-    assert len(skills) >= 2
-    ids = [s["id"] for s in skills]
-    assert "weather.current" in ids
-    assert "device.info" in ids
-
-
-# ── server management ────────────────────────────────────────────────────────
-
-def _wait_for_server(url: str, timeout: int = 30) -> bool:
-    """Wait until server is responsive."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = httpx.get(url + "/api/health", timeout=3)
-            if r.status_code == 200:
-                return True
-        except (httpx.ConnectError, httpx.ReadTimeout):
-            pass
-        time.sleep(1)
-    return False
-
-
-if __name__ == "__main__":
-    import pytest
-
-    if len(sys.argv) > 1 and sys.argv[1] == "start":
-        env = os.environ.copy()
-        env.setdefault("PETAGENT_DATA_DIR", "/data/data/com.termux/files/home/petagent-data")
-        proc = subprocess.Popen(
-            [".venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9821"],
-            cwd=os.path.join(os.path.dirname(__file__), ".."),
-            env=env,
-        )
-        print(f"Server PID: {proc.pid}")
-        if _wait_for_server(BASE):
-            print("Server ready")
-        else:
-            print("Server failed to start")
-            proc.kill()
-            sys.exit(1)
-        proc.wait()
+def _status(method: str, path: str, *, json: Optional[Dict[str, Any]] = None) -> int:
+    if method == "GET":
+        response = httpx.get(_url(path), timeout=15)
     else:
-        if not _wait_for_server(BASE, timeout=5):
-            print(f"Server not reachable at {BASE}")
-            sys.exit(1)
-        sys.exit(pytest.main([__file__, "-v", "--tb=short"]))
+        response = httpx.post(_url(path), json=json, timeout=15)
+    return response.status_code
+
+
+def test_01_health_light():
+    data = _get("/api/health", timeout=5)
+    assert data["ok"] is True
+    assert data["name"] == "Momo"
+    assert "build_hash" in data
+
+
+def test_02_health_watchdog():
+    data = _get("/api/health/watchdog", timeout=5)
+    assert data["ok"] is True
+    assert "event_loop_tick_age_s" in data
+    assert "agent_inflight_age_s" in data
+    assert "provider_inflight_age_s" in data
+    assert "frontend_heartbeat_age_s" in data
+    assert "audio_queue_depth" in data
+
+
+def test_03_client_config_public_and_safe():
+    data = _get("/api/runtime/client-config", timeout=5)
+    assert data["audio_wait_ms"] >= 30000
+    assert isinstance(data["audio_progressive"], dict)
+    forbidden = {"api_key", "tts_api_key", "proxy_url", "db_path", "internal_token"}
+    assert forbidden.isdisjoint(data.keys())
+
+
+def test_04_frontend_heartbeat_updates_watchdog():
+    before = _get("/api/health/watchdog", timeout=5)["frontend_heartbeat_age_s"]
+    posted = _post(
+        "/api/frontend/heartbeat",
+        json={"user_agent": "live-v1.1-test"},
+        timeout=5,
+    )
+    assert posted["ok"] is True
+    after = _get("/api/health/watchdog", timeout=5)["frontend_heartbeat_age_s"]
+    assert after >= 0
+    if before >= 0:
+        assert after <= before + 1
+
+
+def test_05_pet_state_and_interactions_public():
+    state = _get("/api/pet/state", timeout=5)
+    assert {"mood", "energy", "intimacy"}.issubset(state.keys())
+    interactions = _get("/api/interactions", timeout=5)
+    assert isinstance(interactions, list)
+    assert any(item["event_id"] == "pet_head" for item in interactions)
+
+
+def test_06_text_chat_and_audio_job_surface():
+    data = _post("/api/text/chat", json={"text": "你好呀 Momo"}, timeout=90)
+    assert data.get("reply")
+    assert "runtime" in data
+    assert "text_route" in data
+    job_id = data.get("audio_job_id")
+    if not job_id:
+        return
+    deadline = time.time() + 90
+    job = None
+    while time.time() < deadline:
+        job = _get(f"/api/audio/jobs/{job_id}", timeout=10)
+        if job["status"] in {"ready", "failed", "expired", "superseded"}:
+            break
+        time.sleep(1)
+    assert job is not None
+    assert "timings_ms" in job
+
+
+def test_07_pet_event_dispatcher_response():
+    data = _post("/api/pet/event", json={"event": "pet_head"}, timeout=90)
+    assert data.get("reply")
+    assert "runtime" in data
+    assert "pet_state" in data
+
+
+def test_08_debug_runs_and_incidents_with_token():
+    runs = _get("/api/debug/runs?limit=5", token=True, timeout=10)
+    assert runs["ok"] is True
+    assert isinstance(runs["runs"], list)
+    incidents = _get("/api/debug/incidents?limit=5", token=True, timeout=10)
+    assert incidents["ok"] is True
+    assert isinstance(incidents["incidents"], list)
+
+
+def test_09_deep_health_with_token():
+    data = _get("/api/health/deep", token=True, timeout=15)
+    assert "db_quick_check" in data
+    assert "wal_bytes" in data
+    assert "provider_inflight_age_s" in data
+    assert "probes" in data
+
+
+@pytest.mark.parametrize(
+    "method,path,payload",
+    [
+        ("GET", "/api/health/deep", None),
+        ("GET", "/api/debug/runs", None),
+        ("GET", "/api/debug/incidents", None),
+        ("POST", "/api/internal/incident", {"kind": "live_no_token_check"}),
+        ("GET", "/api/context/debug", None),
+        ("GET", "/api/context/runs", None),
+        ("GET", "/api/memory/debug", None),
+        ("POST", "/api/memory/curate", {}),
+        ("POST", "/api/memory/summarize", {"mode": "episode"}),
+        ("POST", "/api/runtime/reset", {"confirm": "wrong"}),
+        ("GET", "/api/runtime/skills", None),
+        ("POST", "/api/skills/device.info/run", {}),
+    ],
+)
+def test_10_protected_endpoints_reject_missing_token(method: str, path: str, payload):
+    assert _status(method, path, json=payload) == 403
