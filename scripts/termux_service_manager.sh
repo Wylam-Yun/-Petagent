@@ -171,10 +171,28 @@ start_proxy_once() {
     [ -x "$PROXY_START_SCRIPT" ] || return 0
     check_port_listen 7897 && return 0
 
-    if su -c "$PROXY_START_SCRIPT" >> "$LOG_FILE" 2>&1; then
+    if timeout 30 su -c "$PROXY_START_SCRIPT" >> "$LOG_FILE" 2>&1; then
         log "Proxy start script executed"
     else
         log "WARNING: proxy start script failed"
+    fi
+}
+
+ensure_proxy() {
+    [ -f "$PROXY_DISABLE_FILE" ] && return 0
+    [ -x "$PROXY_START_SCRIPT" ] || return 0
+    check_port_listen 7897 && return 0
+
+    log "Proxy port 7897 is down; attempting restart"
+    if timeout 30 su -c "$PROXY_START_SCRIPT" >> "$LOG_FILE" 2>&1; then
+        sleep 2
+        if check_port_listen 7897; then
+            log "Proxy restarted successfully"
+        else
+            log "WARNING: proxy restart did not bring up port 7897"
+        fi
+    else
+        log "WARNING: proxy restart script failed"
     fi
 }
 
@@ -302,6 +320,7 @@ main() {
 
     while true; do
         rotate_log
+        ensure_proxy
 
         if check_sshd_listen; then
             ssh_fail_count=0

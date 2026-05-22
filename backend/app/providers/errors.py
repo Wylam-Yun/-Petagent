@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -130,7 +131,3 @@ def wrap_provider_error(
     return ProviderError(
         provider=provider, latency_ms=latency_ms, message=str(exc)[:200],
     )
-
-
-# Avoid circular import — json is needed for JSONDecodeError
-import json  # noqa: E402

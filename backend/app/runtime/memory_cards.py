@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -111,6 +112,7 @@ class MemoryCardManager:
         config: Optional[Dict[str, Any]] = None,
     ) -> None:
         cfg = config or {}
+        self._lock = threading.RLock()
         self.memory_manager = memory_manager
         self.max_card_cjk_chars = int(cfg.get("max_card_cjk_chars", 200))
         self.max_item_cjk_chars = int(cfg.get("max_item_cjk_chars", 20))
@@ -130,7 +132,10 @@ class MemoryCardManager:
         """Rebuild both card files from SQLite. Returns {items_written, items_rejected}."""
         if reason not in self.VALID_REASONS:
             return {"items_written": 0, "items_rejected": 0}
+        with self._lock:
+            return self._rebuild_locked(reason)
 
+    def _rebuild_locked(self, reason: str) -> Dict[str, int]:
         all_memories = self.memory_manager.memories_for_cards(limit=200)
 
         groups: Dict[str, List[Dict[str, Any]]] = {
@@ -155,8 +160,9 @@ class MemoryCardManager:
 
     def clear(self) -> None:
         """Write empty card files. Used during runtime reset."""
-        for card_name in ("user_preferences", "momo_memories"):
-            self._write_card(self._paths[card_name], [], card_name, "runtime_reset")
+        with self._lock:
+            for card_name in ("user_preferences", "momo_memories"):
+                self._write_card(self._paths[card_name], [], card_name, "runtime_reset")
 
     def read_card(self, card_name: str) -> List[str]:
         """Read card file and return list of content strings (no HTML comments)."""

@@ -75,7 +75,7 @@ def test_voice_chat_catches_provider_error():
     resp = client.post(
         "/api/voice/chat",
         data={},
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert resp.status_code == 200
     assert resp.json()["error_class"] == "provider_auth_failed"
@@ -87,7 +87,7 @@ def test_voice_chat_success_has_null_error_class():
     resp = client.post(
         "/api/voice/chat",
         data={},
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert resp.status_code == 200
     assert resp.json()["error_class"] is None

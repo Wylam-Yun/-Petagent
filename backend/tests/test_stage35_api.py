@@ -81,7 +81,7 @@ def test_voice_exit_phrase_pre_detection_updates_activation():
 
     response = client.post(
         "/api/voice/chat",
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert response.status_code == 200
 

@@ -18,15 +18,22 @@ def test_api_health_contract():
 
 
 def test_runtime_contracts():
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+    client = TestClient(app)
+    token = app.state.internal_token
 
     assert client.get("/api/runtime/health").json() == {
         "ok": True,
         "runtime": "PetAgent",
         "pet": "Momo",
     }
-    skills = client.get("/api/runtime/skills").json()["skills"]
+    resp = client.get("/api/runtime/skills", headers={"Authorization": f"Bearer {token}"})
+    skills = resp.json()["skills"]
     assert {skill["id"] for skill in skills} == {"device.info", "weather.current"}
+
+    # Without token should be rejected
+    resp_no_auth = client.get("/api/runtime/skills")
+    assert resp_no_auth.status_code == 403
 
 
 def test_pet_state_contract():

@@ -8,7 +8,7 @@ def post_voice(client: TestClient, *, data=None, content_type="audio/wav"):
     return client.post(
         "/api/voice/chat",
         data=data or {},
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", content_type)},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", content_type)},
     )
 
 

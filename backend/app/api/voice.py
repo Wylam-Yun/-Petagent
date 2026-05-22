@@ -43,6 +43,29 @@ def _as_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _validate_magic_bytes(path: Path, content_type: str) -> None:
+    """Validate magic bytes for known audio types. Raises HTTPException on mismatch."""
+    if content_type != "audio/wav":
+        return
+    try:
+        with path.open("rb") as f:
+            header = f.read(12)
+        if len(header) < 12:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "File too small to be a valid WAV", "error_class": "invalid_audio"},
+            )
+        if header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "Invalid WAV file header", "error_class": "invalid_audio"},
+            )
+    except HTTPException:
+        raise
+    except OSError:
+        pass  # If we can't read, let the provider handle it
+
+
 async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
     content_type = file.content_type or ""
     if content_type not in allowed_audio_types(settings):
@@ -71,6 +94,11 @@ async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
                 path.unlink(missing_ok=True)
                 raise HTTPException(status_code=413, detail="Audio file is too large")
             out.write(chunk)
+    try:
+        _validate_magic_bytes(path, content_type)
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
     return path
 
 

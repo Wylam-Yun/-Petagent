@@ -31,7 +31,7 @@ def test_shutdown_gate_voice_chat_returns_503():
     resp = client.post(
         "/api/voice/chat",
         data={},
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert resp.status_code == 503
     body = resp.json()
@@ -54,7 +54,7 @@ def test_voice_chat_works_when_not_shutting_down():
     resp = client.post(
         "/api/voice/chat",
         data={},
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert resp.status_code == 200
     assert resp.json()["error_class"] is None

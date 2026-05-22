@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from app.api.auth import require_internal_token
+
 router = APIRouter(prefix="/api/runtime")
 
 
@@ -13,4 +15,5 @@ def runtime_health(request: Request):
 
 @router.get("/skills")
 def runtime_skills(request: Request):
+    require_internal_token(request)
     return {"skills": request.app.state.registry.list_skills()}

@@ -45,7 +45,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
 
     response = client.post(
         "/api/voice/chat",
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
 
     assert response.status_code == 200
@@ -87,7 +87,7 @@ def test_voice_weather_question_uses_skill_plan_before_final_reply():
 
     response = client.post(
         "/api/voice/chat",
-        files={"file": ("voice.wav", b"RIFF mock wav bytes", "audio/wav")},
+        files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
 
     assert response.status_code == 200

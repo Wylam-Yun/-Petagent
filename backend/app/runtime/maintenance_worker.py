@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
+from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_LOG_BYTES = 512 * 1024  # 512 KB
 
 
 class MaintenanceWorker:
@@ -22,8 +26,15 @@ class MaintenanceWorker:
 
     TICK_INTERVAL_SECONDS = 300  # 5 minutes
 
-    def __init__(self, maintenance_service: Any) -> None:
+    def __init__(
+        self,
+        maintenance_service: Any,
+        log_path: Optional[Path] = None,
+        max_log_bytes: int = DEFAULT_MAX_LOG_BYTES,
+    ) -> None:
         self._service = maintenance_service
+        self._log_path = log_path
+        self._max_log_bytes = max_log_bytes
         self._queue: queue.Queue = queue.Queue(maxsize=1)
         self._shutdown = threading.Event()
         self._thread = threading.Thread(
@@ -62,6 +73,25 @@ class MaintenanceWorker:
         else:
             logger.info("Maintenance worker stopped")
 
+    def _rotate_log(self) -> None:
+        """Rotate runtime.log if it exceeds max size."""
+        if self._log_path is None:
+            return
+        try:
+            if not self._log_path.exists():
+                return
+            size = self._log_path.stat().st_size
+            if size <= self._max_log_bytes:
+                return
+            old_path = self._log_path.with_suffix(".log.old")
+            # Atomic-ish: write old, then truncate current
+            data = self._log_path.read_bytes()
+            old_path.write_bytes(data)
+            self._log_path.write_bytes(b"")
+            logger.info("Rotated runtime.log (%d bytes)", size)
+        except OSError:
+            pass  # Best-effort; don't crash maintenance over log rotation
+
     def _run(self) -> None:
         """Main worker loop."""
         logger.info("Maintenance worker loop started")
@@ -92,6 +122,12 @@ class MaintenanceWorker:
                 self._service.daily_backup_if_due()
             except Exception:
                 logger.warning("Daily backup failed", exc_info=True)
+
+            # Runtime log rotation
+            try:
+                self._rotate_log()
+            except Exception:
+                pass  # Best-effort
 
         # Shutdown: TRUNCATE WAL (idle, no active writers)
         try:
