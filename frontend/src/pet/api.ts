@@ -12,11 +12,30 @@ import type {
 } from "./types";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+  const maxRetries = 2;
+  const timeoutMs = 8_000;
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => window.setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      window.clearTimeout(timer);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      return response.json() as Promise<T>;
+    } catch (err) {
+      window.clearTimeout(timer);
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === maxRetries) throw lastError;
+    }
   }
-  return response.json() as Promise<T>;
+  throw lastError ?? new Error("request failed");
 }
 
 export function getPetState(): Promise<PetState> {

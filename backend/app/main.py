@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 logger = logging.getLogger(__name__)
 
 from app.api import activation as activation_api
+from app.api import client_config as client_config_api
 from app.api import debug as debug_api
 from app.api import audio as audio_api
 from app.api import context as context_api
@@ -41,6 +42,7 @@ from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLMProvider
 from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
+from app.providers.probes import ProviderProbeManager
 from app.runtime.activation import ActivationManager
 from app.runtime.audio_job_store import AudioJobStore
 from app.runtime.audio_jobs import AudioJobManager
@@ -256,8 +258,13 @@ def create_app(testing: bool = False) -> FastAPI:
     policy_guard = PolicyGuard()
     agent_work_executor = AgentWorkExecutor(max_workers=4, max_queue=8)
     proactive_scheduler = ProactiveScheduler()
-    maintenance_worker = MaintenanceWorker(maintenance_service)
+    runtime_log_path = settings.data_dir / "logs" / "runtime.log"
+    maintenance_worker = MaintenanceWorker(
+        maintenance_service,
+        log_path=runtime_log_path if runtime_log_path.parent.exists() else None,
+    )
     provider_gate = ProviderGate()
+    probe_manager = ProviderProbeManager()
 
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
@@ -316,6 +323,8 @@ def create_app(testing: bool = False) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        import asyncio as _asyncio
+
         # Startup — core stores are ready immediately
         app.state.shutdown_in_progress = False
         app.state.core_ready = True
@@ -330,6 +339,17 @@ def create_app(testing: bool = False) -> FastAPI:
             proactive_scheduler.catch_up_event()
         except Exception:
             logger.warning("Failed to generate catch_up event", exc_info=True)
+        # Run provider probes in background (non-blocking)
+        async def _run_probes() -> None:
+            try:
+                if not isinstance(slow_llm_provider, MockLLMProvider):
+                    await probe_manager.probe_llm(slow_llm_provider)
+                if not isinstance(tts_provider, MockTTSProvider):
+                    await probe_manager.probe_tts(tts_provider)
+            except Exception:
+                logger.warning("Provider probes failed", exc_info=True)
+
+        _asyncio.create_task(_run_probes())
         logger.info("PetAgent Momo starting up (core_ready=True)")
         yield
         # Shutdown
@@ -407,10 +427,23 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.proactive_scheduler = proactive_scheduler
     app.state.maintenance_worker = maintenance_worker
     app.state.provider_gate = provider_gate
+    app.state.probe_manager = probe_manager
+
+    # Read frontend build-info.json if present
+    build_info: Dict[str, str] = {}
+    build_info_path = settings.frontend_dist / "build-info.json"
+    if build_info_path.exists():
+        try:
+            import json as _json
+            build_info = _json.loads(build_info_path.read_text())
+        except Exception:
+            pass
+    app.state.build_info = build_info
 
     # Health router registered first (light/watchdog/deep)
     app.include_router(health_api.router)
     app.include_router(frontend_api.router)
+    app.include_router(client_config_api.router)
     app.include_router(runtime_api.router)
     app.include_router(pet_api.router)
     app.include_router(voice_api.router)

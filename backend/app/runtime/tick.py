@@ -71,14 +71,44 @@ class TickService:
         device = self.device_store.get_state()
         last_interaction = self._parse_datetime(state.get("last_interaction_at"))
 
-        state["energy"] = int(state.get("energy", 0)) - intervals
-        state["hunger"] = int(state.get("hunger", 0)) + intervals
-        state["loneliness"] = int(state.get("loneliness", 0)) + intervals
+        # Logistic/saturating decay: delta = base * (1 - current/100)
+        # Decay slows as state nears the edge (e.g. energy=10 → very slow further drop)
+        energy = int(state.get("energy", 50))
+        hunger = int(state.get("hunger", 50))
+        loneliness = int(state.get("loneliness", 50))
+
+        energy_delta = max(1, int(intervals * (1.0 - energy / 100.0) + 0.5))
+        hunger_delta = max(1, int(intervals * (1.0 - hunger / 100.0) + 0.5))
+        loneliness_delta = max(1, int(intervals * (1.0 - loneliness / 100.0) + 0.5))
+
+        state["energy"] = max(0, energy - energy_delta)
+        state["hunger"] = min(100, hunger + hunger_delta)
+        state["loneliness"] = min(100, loneliness + loneliness_delta)
+
+        # Night penalty
         if current.hour >= 23 or current.hour <= 6:
-            state["sleepiness"] = int(state.get("sleepiness", 0)) + 3 * intervals
-            state["energy"] = int(state.get("energy", 0)) - intervals
+            sleepiness = int(state.get("sleepiness", 0))
+            sleepiness_delta = max(1, int(3 * intervals * (1.0 - sleepiness / 100.0) + 0.5))
+            state["sleepiness"] = min(100, sleepiness + sleepiness_delta)
+            state["energy"] = max(0, int(state.get("energy", 0)) - energy_delta)
+
+        # Lonely bonus: extra loneliness if no interaction for > 1h
         if last_interaction and (current - last_interaction).total_seconds() > 3600:
-            state["loneliness"] = int(state.get("loneliness", 0)) + 5 * intervals
+            current_loneliness = int(state.get("loneliness", 0))
+            extra = max(1, int(3 * intervals * (1.0 - current_loneliness / 100.0) + 0.5))
+            state["loneliness"] = min(100, current_loneliness + extra)
+
+        # Rest while away: if idle > 6h since last interaction and energy < 50, recover energy
+        # Uses wall-clock idle since last interaction (not per-tick elapsed)
+        if last_interaction:
+            idle_since_interaction = (current - last_interaction).total_seconds() / 3600.0
+        else:
+            idle_since_interaction = elapsed / 3600.0
+        if idle_since_interaction > 6 and energy < 50:
+            rest_bonus = min(20, idle_since_interaction / 3.0)
+            state["energy"] = int(state.get("energy", 0)) + round(rest_bonus)
+
+        # Charging accelerates recovery
         if device.get("is_charging") is True:
             state["energy"] = int(state.get("energy", 0)) + 2 * intervals
             state["hunger"] = int(state.get("hunger", 0)) - 3 * intervals

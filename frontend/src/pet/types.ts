@@ -3,6 +3,7 @@ export type Mood =
   | "happy"
   | "sad"
   | "sleepy"
+  | "tired"
   | "angry"
   | "shy"
   | "thinking"
@@ -137,6 +138,7 @@ export type VoiceChatResponse = PetResponse & {
   user_text: string;
   audio_understanding: AudioUnderstanding;
   voice_route?: VoiceRouteInfo;
+  error_class?: string | null;
   activation?: {
     type: "wake" | "exit";
     active: boolean;
@@ -152,6 +154,7 @@ export type TextChatResponse = PetResponse & {
     brain_provider: string;
     timings_ms: Record<string, number>;
   };
+  error_class?: string | null;
   activation?: {
     type: "wake" | "exit";
     active: boolean;

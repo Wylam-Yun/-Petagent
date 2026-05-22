@@ -24,7 +24,10 @@ import {
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
 import { detectActivationIntent } from "./pet/activation";
+import { getErrorBubble } from "./pet/errorMessages";
 import { shouldApplyProactive } from "./pet/proactive";
+import { useClientConfig } from "./hooks/useClientConfig";
+import { useNetworkState } from "./hooks/useNetworkState";
 import type {
   ActivationResponse,
   AnimationName,
@@ -61,7 +64,10 @@ function App() {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [thinkingMode, setThinkingMode] = useState(false);
   const [interactions, setInteractions] = useState<InteractionDefinition[]>([]);
+  const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
   const audioRunRef = useRef(0);
+  const clientConfig = useClientConfig();
+  const { isOnline } = useNetworkState();
 
   useEffect(() => {
     let alive = true;
@@ -131,6 +137,7 @@ function App() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
+      if (!isOnline) return;
       if (!shouldApplyProactive({ phase, busy })) return;
       void getProactiveCheck()
         .then((check) => {
@@ -143,16 +150,18 @@ function App() {
         .catch(() => undefined);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [phase, busy]);
+  }, [phase, busy, isOnline]);
 
   // Frontend heartbeat — tells backend the browser is alive
   useEffect(() => {
+    if (!isOnline) return;
     void sendHeartbeat().catch(() => undefined);
     const timer = window.setInterval(() => {
+      if (!isOnline) return;
       void sendHeartbeat().catch(() => undefined);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [isOnline]);
 
   const titleMood = useMemo(() => petState.mood, [petState.mood]);
   const interactionPreview = useMemo(() => {
@@ -208,10 +217,12 @@ function App() {
 
     try {
       if (response.audio_job_id) {
+        setLastAudioJobId(response.audio_job_id);
         setPhase("waiting_voice");
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
+          setLastAudioJobId(null);
           setPhase("speaking");
           setBubbleText("Momo 在说…");
           await playVoice(job.voice_url);
@@ -240,10 +251,6 @@ function App() {
       if (audioRunRef.current !== runId) return;
       setPhase("audio_error");
       setBubbleText("声音刚刚没出来。");
-      await sleep(1600);
-      if (audioRunRef.current === runId) {
-        setPhase("idle");
-      }
     } finally {
       if (audioRunRef.current === runId) {
         setBusy(false);
@@ -253,10 +260,28 @@ function App() {
 
   async function waitForReadyAudio(jobId: string, runId: number) {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < 15_000) {
+    const timeout = clientConfig.audio_wait_ms;
+    const progressive = clientConfig.audio_progressive;
+    const thresholds = Object.keys(progressive)
+      .map(Number)
+      .sort((a, b) => a - b);
+    let lastThresholdIdx = -1;
+
+    while (Date.now() - startedAt < timeout) {
       if (audioRunRef.current !== runId) {
         throw new Error("audio job superseded");
       }
+
+      // Progressive copy: update bubble text at thresholds
+      const elapsed = Date.now() - startedAt;
+      for (let i = thresholds.length - 1; i >= 0; i--) {
+        if (elapsed >= thresholds[i] && i > lastThresholdIdx) {
+          lastThresholdIdx = i;
+          setBubbleText(progressive[String(thresholds[i])] ?? "Momo 准备声音…");
+          break;
+        }
+      }
+
       const job = await getAudioJob(jobId);
       if (job.status === "ready") return job;
       if (job.status === "failed" || job.status === "expired" || job.status === "superseded") {
@@ -267,7 +292,54 @@ function App() {
     throw new Error("audio job timed out");
   }
 
+  async function handleRetryAudio() {
+    if (!lastAudioJobId || busy) return;
+    setBusy(true);
+    setPhase("waiting_voice");
+    setBubbleText("Momo 再试试…");
+    const runId = audioRunRef.current + 1;
+    audioRunRef.current = runId;
+    try {
+      const job = await getAudioJob(lastAudioJobId);
+      if (audioRunRef.current !== runId) return;
+      if (job.voice_url) {
+        setLastAudioJobId(null);
+        setPhase("speaking");
+        setBubbleText("Momo 在说…");
+        await playVoice(job.voice_url);
+        if (audioRunRef.current === runId) {
+          setPhase("idle");
+          setBubbleText("Momo 说完啦。");
+        }
+      } else if (job.status === "failed" || job.status === "expired") {
+        setPhase("audio_error");
+        setBubbleText("声音没出来，可能需要重新说一遍。");
+        setLastAudioJobId(null);
+      } else {
+        setBubbleText("声音还在准备，再等一下…");
+      }
+    } catch {
+      if (audioRunRef.current !== runId) return;
+      setPhase("audio_error");
+      setBubbleText("重试也失败了。");
+      setLastAudioJobId(null);
+    } finally {
+      if (audioRunRef.current === runId) {
+        setBusy(false);
+      }
+    }
+  }
+
   async function handleVoiceResponse(response: VoiceChatResponse) {
+    // If backend returned an error class, show mapped bubble text
+    if (response.error_class) {
+      const errBubble = getErrorBubble(response.error_class);
+      setFaceType(errBubble.mood);
+      setAnimation("slowBlink");
+      setBubbleText(errBubble.text);
+      return;
+    }
+
     // If backend already handled wake/exit via VoicePipeline, apply directly
     if (response.activation) {
       setActiveSession(response.activation.active ? response.activation.session_id : null);
@@ -381,6 +453,14 @@ function App() {
       if (response.activation) {
         setActiveSession(response.activation.active ? response.activation.session_id : null);
       }
+      if (response.error_class) {
+        const errBubble = getErrorBubble(response.error_class);
+        setFaceType(errBubble.mood);
+        setAnimation("slowBlink");
+        setBubbleText(errBubble.text);
+        setBusy(false);
+        return false;
+      }
       applyPetResponse(response);
       return true;
     } catch {
@@ -395,6 +475,11 @@ function App() {
 
   return (
     <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
+      {!isOnline && (
+        <div className="offline-banner" role="status">
+          正在重新连接 Momo…
+        </div>
+      )}
       <StatusBar state={petState} />
       <section className="pet-stage" aria-label={`Momo 当前心情 ${titleMood}`}>
         <h1>Momo</h1>
@@ -419,6 +504,15 @@ function App() {
         />
       </div>
       <div className="secondary-actions">
+        {phase === "audio_error" && lastAudioJobId && (
+          <button
+            className="retry-audio-btn"
+            disabled={busy}
+            onClick={handleRetryAudio}
+          >
+            重试发声
+          </button>
+        )}
         <button
           className="context-refresh-btn"
           disabled={busy}

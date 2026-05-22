@@ -5,6 +5,7 @@ export const animationMap: Record<Mood, AnimationName> = {
   happy: "bounce",
   sad: "droop",
   sleepy: "slowBlink",
+  tired: "slowBlink",
   angry: "shake",
   shy: "wiggle",
   thinking: "blink",

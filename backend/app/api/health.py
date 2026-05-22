@@ -30,10 +30,12 @@ def _age_s(ts: float) -> float:
 def health_light(request: Request) -> Dict[str, Any]:
     """Light health: < 50ms, no DB queries, no locks."""
     settings = request.app.state.settings
+    build_info = getattr(request.app.state, "build_info", {})
     return {
         "ok": True,
         "name": settings.pet_name,
         "version": settings.schema_version,
+        "build_hash": build_info.get("git_sha", ""),
         "pid": _pid,
         "started_at": _started_at,
     }
@@ -119,6 +121,10 @@ def health_deep(request: Request) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Provider probe results
+    probe_manager = getattr(request.app.state, "probe_manager", None)
+    probe_results = probe_manager.to_dict() if probe_manager is not None else {}
+
     return {
         "ok": db_ok,
         "db_quick_check": db_ok,
@@ -131,4 +137,5 @@ def health_deep(request: Request) -> Dict[str, Any]:
         "audio_pending": audio_pending,
         "audio_running": audio_running,
         "candidate_backlog": candidate_backlog,
+        "probes": probe_results,
     }

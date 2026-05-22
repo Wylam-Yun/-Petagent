@@ -31,7 +31,8 @@ describe("stage 3 API helpers", () => {
 
     await getAudioJob("aud-1");
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/audio/jobs/aud-1", undefined);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/audio/jobs/aud-1");
   });
 
   test("reports device state as JSON", async () => {
@@ -62,7 +63,8 @@ describe("stage 3 API helpers", () => {
 
     const response = await getProactiveCheck();
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/pet/proactive", undefined);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/pet/proactive");
     expect(response).toEqual({ active: false });
   });
 });
@@ -85,5 +87,31 @@ describe("sendTextChat", () => {
       text: "帮我写两数之和",
       thinking_mode: true
     });
+  });
+});
+
+describe("requestJson retry", () => {
+  test("retries on failure and succeeds on second attempt", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: false })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await getProactiveCheck();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response).toEqual({ active: false });
+  });
+
+  test("throws after max retries exhausted", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("persistent failure"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getProactiveCheck()).rejects.toThrow("persistent failure");
+    // 1 initial + 2 retries = 3 total
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
