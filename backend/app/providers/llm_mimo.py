@@ -2,11 +2,28 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Protocol
+from time import perf_counter
+from typing import Any, Dict, List, Optional, Protocol
 
 import requests
 
 from app.config import ProviderConfig, Settings
+from app.providers.circuit import ProviderCircuit
+from app.providers.errors import (
+    ProviderAuthError,
+    ProviderBadResponseError,
+    ProviderError,
+    ProviderNetworkError,
+    ProviderQuotaError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+    wrap_provider_error,
+)
+
+
+def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
+    """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
+    return (connect, max(scalar - connect, connect))
 
 
 class LLMProvider(Protocol):
@@ -52,18 +69,43 @@ class MockLLMProvider:
 
 
 class FallbackLLMProvider:
-    def __init__(self, primary: LLMProvider, fallback: LLMProvider) -> None:
+    def __init__(
+        self,
+        primary: LLMProvider,
+        fallback: LLMProvider,
+        circuit: Optional[ProviderCircuit] = None,
+    ) -> None:
         self.primary = primary
         self.fallback = fallback
         self.name = "%s_with_%s_fallback" % (
             getattr(primary, "name", "primary"),
             getattr(fallback, "name", "fallback"),
         )
+        self.last_primary_error: Optional[ProviderError] = None
+        self._circuit = circuit
 
     def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        # Skip primary if circuit is open
+        if self._circuit is not None and self._circuit.is_open:
+            return self.fallback.complete_json(messages)
+
         try:
-            return self.primary.complete_json(messages)
-        except Exception:
+            result = self.primary.complete_json(messages)
+            self.last_primary_error = None
+            if self._circuit is not None:
+                self._circuit.record_success()
+            return result
+        except ProviderError as exc:
+            self.last_primary_error = exc
+            if self._circuit is not None:
+                self._circuit.record_failure()
+            return self.fallback.complete_json(messages)
+        except Exception as exc:
+            self.last_primary_error = wrap_provider_error(
+                exc, provider=getattr(self.primary, "name", "primary"),
+            )
+            if self._circuit is not None:
+                self._circuit.record_failure()
             return self.fallback.complete_json(messages)
 
 
@@ -78,9 +120,16 @@ class MiMoLLMProvider:
     def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         api_key = self.provider_config.api_key or self.settings.api_key
         if not api_key:
-            raise RuntimeError("%s is not configured" % self.provider_config.api_key_env)
+            raise ProviderAuthError(
+                provider=self.name,
+                message="%s is not configured" % self.provider_config.api_key_env,
+            )
         if not self.provider_config.base_url:
-            raise RuntimeError("MIMO_BASE_URL is not configured")
+            raise ProviderError(
+                provider=self.name,
+                code="not_configured",
+                message="MIMO_BASE_URL is not configured",
+            )
 
         payload = {
             "model": self.provider_config.model,
@@ -96,19 +145,56 @@ class MiMoLLMProvider:
             if key in self.provider_config.extra:
                 payload[key] = self.provider_config.extra[key]
 
-        response = requests.post(
-            self.provider_config.base_url.rstrip("/") + "/chat/completions",
-            headers=self._headers(api_key),
-            json=payload,
-            proxies=self._proxies(),
-            timeout=self.provider_config.timeout_seconds,
-        )
-        response.raise_for_status()
-        body = response.json()
-        content = body["choices"][0]["message"]["content"]
-        if isinstance(content, dict):
-            return content
-        return json.loads(_extract_json_text(str(content)))
+        start = perf_counter()
+        try:
+            response = requests.post(
+                self.provider_config.base_url.rstrip("/") + "/chat/completions",
+                headers=self._headers(api_key),
+                json=payload,
+                proxies=self._proxies(),
+                timeout=_timeout_tuple(self.provider_config.timeout_seconds),
+            )
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            if isinstance(content, dict):
+                return content
+            return json.loads(_extract_json_text(str(content)))
+        except requests.Timeout as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderTimeoutError(
+                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
+            ) from exc
+        except requests.ConnectionError as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderNetworkError(
+                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
+            ) from exc
+        except requests.HTTPError as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
+            if status in (401, 403):
+                raise ProviderAuthError(
+                    provider=self.name, status=status, latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            if status == 429:
+                raise ProviderQuotaError(
+                    provider=self.name, status=status, latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            if status is not None and status >= 500:
+                raise ProviderUnavailableError(
+                    provider=self.name, status=status, latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderBadResponseError(
+                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
+            ) from exc
 
     def _headers(self, api_key: str) -> Dict[str, str]:
         headers = {"content-type": "application/json"}

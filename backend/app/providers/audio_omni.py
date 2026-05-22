@@ -13,6 +13,11 @@ import requests
 from app.config import Settings
 
 
+def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
+    """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
+    return (connect, max(scalar - connect, connect))
+
+
 ALLOWED_EMOTIONS = {
     "calm",
     "tired",
@@ -186,7 +191,7 @@ class MiMoAudioUnderstandingProvider:
                     ],
                     "temperature": 0.2,
                 },
-                timeout=self.provider_config.timeout_seconds,
+                timeout=_timeout_tuple(self.provider_config.timeout_seconds),
             )
             response.raise_for_status()
             body = response.json()

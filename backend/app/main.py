@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 logger = logging.getLogger(__name__)
 
 from app.api import activation as activation_api
+from app.api import debug as debug_api
 from app.api import audio as audio_api
 from app.api import context as context_api
 from app.api import frontend as frontend_api
@@ -50,6 +51,9 @@ from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.agent_run import AgentRunRegistry
+from app.runtime.agent_run_store import AgentRunStore
+from app.runtime.backup import DatabaseBackupManager
+from app.runtime.incident import IncidentStore
 from app.runtime.policy_guard import PolicyGuard
 from app.runtime.device import DeviceStateStore
 from app.runtime.maintenance import MaintenanceService
@@ -203,6 +207,11 @@ def create_app(testing: bool = False) -> FastAPI:
         candidate_store=memory_candidate_store,
         timezone_name=cc_config.get("timezone", "Asia/Shanghai"),
     )
+    backup_dir = settings.data_dir / "backups"
+    backup_manager = DatabaseBackupManager(
+        connection=state_store.connection,
+        backup_dir=backup_dir,
+    )
     maintenance_service = MaintenanceService(
         curator=memory_curator,
         summary_manager=summary_manager,
@@ -216,13 +225,17 @@ def create_app(testing: bool = False) -> FastAPI:
         episode_store=episode_manager,
         config=memory_config,
         memory_card_manager=memory_card_manager,
+        backup_manager=backup_manager,
+        connection=state_store.connection,
     )
 
     audio_provider = _select_audio_provider(settings, testing)
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings, state_store.connection)
     tts_provider = _select_tts_provider(settings, testing)
-    agent_run_registry = AgentRunRegistry(max_runs=50)
+    agent_run_store = AgentRunStore(state_store.connection, max_rows=200)
+    incident_store = IncidentStore(state_store.connection, max_rows=500)
+    agent_run_registry = AgentRunRegistry(max_runs=50, store=agent_run_store)
 
     def _on_audio_complete(job_id: str, status: str, error) -> None:
         run = agent_run_registry.find_by_audio_job_id(job_id)
@@ -385,6 +398,8 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.maintenance_service = maintenance_service
     app.state.audio_job_store = audio_job_store
     app.state.audio_job_manager = audio_job_manager
+    app.state.agent_run_store = agent_run_store
+    app.state.incident_store = incident_store
     app.state.agent_run_registry = agent_run_registry
     app.state.memory_card_manager = memory_card_manager
     app.state.policy_guard = policy_guard
@@ -407,6 +422,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(memory_api.router)
     app.include_router(text_api.router)
     app.include_router(interactions_api.router)
+    app.include_router(debug_api.router)
 
     static_root = settings.project_root / "backend" / "static"
     static_root.mkdir(parents=True, exist_ok=True)

@@ -440,6 +440,9 @@ class RuntimeDispatcher:
             run.timings_ms["total"] = int((perf_counter() - pipeline_start) * 1000)
             if episode_id:
                 run.episode_id = episode_id
+            # Persist to SQLite for postmortem
+            if self.agent_run_registry is not None:
+                self.agent_run_registry.persist_if_terminal(run)
 
         response = PetResponse(
             reply=action.reply,

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import logging
+from typing import Any, Dict, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
 
 class ProviderError(Exception):
     """Base class for structured provider failures."""
@@ -66,3 +73,64 @@ class ProviderNetworkError(ProviderError):
     """DNS failure, connection refused, etc."""
 
     error_class = "provider_network_error"
+
+
+def wrap_provider_error(
+    exc: Exception,
+    *,
+    provider: str = "",
+    latency_ms: int | None = None,
+) -> ProviderError:
+    """Wrap a requests/JSON exception into a structured ProviderError.
+
+    Call at provider boundaries so callers never see raw requests exceptions.
+    """
+    if isinstance(exc, ProviderError):
+        return exc
+
+    if isinstance(exc, requests.Timeout):
+        return ProviderTimeoutError(
+            provider=provider, latency_ms=latency_ms, message=str(exc)[:200],
+        )
+
+    if isinstance(exc, requests.ConnectionError):
+        return ProviderNetworkError(
+            provider=provider, latency_ms=latency_ms, message=str(exc)[:200],
+        )
+
+    if isinstance(exc, requests.HTTPError):
+        resp = getattr(exc, "response", None)
+        status = getattr(resp, "status_code", None)
+        if status in (401, 403):
+            return ProviderAuthError(
+                provider=provider, status=status, latency_ms=latency_ms,
+                message=str(exc)[:200],
+            )
+        if status == 429:
+            return ProviderQuotaError(
+                provider=provider, status=status, latency_ms=latency_ms,
+                message=str(exc)[:200],
+            )
+        if status is not None and status >= 500:
+            return ProviderUnavailableError(
+                provider=provider, status=status, latency_ms=latency_ms,
+                message=str(exc)[:200],
+            )
+        return ProviderBadResponseError(
+            provider=provider, status=status, latency_ms=latency_ms,
+            message=str(exc)[:200],
+        )
+
+    if isinstance(exc, (json.JSONDecodeError, KeyError, IndexError, ValueError)):
+        return ProviderBadResponseError(
+            provider=provider, latency_ms=latency_ms, message=str(exc)[:200],
+        )
+
+    # Unknown exception — wrap as generic provider error
+    return ProviderError(
+        provider=provider, latency_ms=latency_ms, message=str(exc)[:200],
+    )
+
+
+# Avoid circular import — json is needed for JSONDecodeError
+import json  # noqa: E402

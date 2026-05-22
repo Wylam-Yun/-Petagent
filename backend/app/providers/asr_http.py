@@ -9,6 +9,11 @@ from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
 
+def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
+    """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
+    return (connect, max(scalar - connect, connect))
+
+
 def parse_transcript_json(
     body: Dict[str, Any],
     text_paths: Optional[Iterable[str]] = None,
@@ -157,7 +162,7 @@ class HttpASRProvider:
             ),
             "params": self._params(),
             "proxies": self._proxies(),
-            "timeout": self.config.timeout_seconds,
+            "timeout": _timeout_tuple(self.config.timeout_seconds),
         }
         if request_format == "binary":
             common["data"] = audio_path.read_bytes()

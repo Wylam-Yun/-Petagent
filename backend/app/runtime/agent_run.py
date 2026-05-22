@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
+if TYPE_CHECKING:
+    from app.runtime.agent_run_store import AgentRunStore
+
+logger = logging.getLogger(__name__)
 
 RUN_TERMINAL_STATUSES = {"committed", "completed", "failed", "superseded"}
 
@@ -70,13 +75,22 @@ class AgentRun:
 
 
 class AgentRunRegistry:
-    """Thread-safe in-memory registry of recent AgentRuns."""
+    """Thread-safe in-memory registry of recent AgentRuns.
 
-    def __init__(self, max_runs: int = 50) -> None:
+    When a store is provided, writes completed/failed runs to SQLite for
+    postmortem debugging.
+    """
+
+    def __init__(
+        self,
+        max_runs: int = 50,
+        store: Optional["AgentRunStore"] = None,
+    ) -> None:
         self._runs: Dict[str, AgentRun] = {}
         self._order: List[str] = []
         self._lock = threading.RLock()
         self.max_runs = max_runs
+        self._store = store
 
     def create(self, event_id: str = "", episode_id: str = "") -> AgentRun:
         run = AgentRun(event_id=event_id, episode_id=episode_id)
@@ -96,6 +110,17 @@ class AgentRunRegistry:
                 if run.audio_job_id == audio_job_id:
                     return run
             return None
+
+    def persist_if_terminal(self, run: AgentRun) -> None:
+        """Write run to SQLite if it reached a terminal status."""
+        if run.status not in RUN_TERMINAL_STATUSES:
+            return
+        if self._store is None:
+            return
+        try:
+            self._store.save(run.to_dict())
+        except Exception:
+            logger.warning("agent_run_store.save failed for %s", run.run_id, exc_info=True)
 
     def recent(self, limit: int = 10) -> List[Dict[str, Any]]:
         with self._lock:
