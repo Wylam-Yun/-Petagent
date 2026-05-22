@@ -1,16 +1,28 @@
 from __future__ import annotations
 
-import base64
+import binascii
+import io
 import json
 import re
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, Union
 
 import requests
 
 from app.config import Settings
+from app.providers.errors import (
+    ProviderAuthError,
+    ProviderBadResponseError,
+    ProviderError,
+    ProviderNetworkError,
+    ProviderQuotaError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+    wrap_provider_error,
+)
 
 
 def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
@@ -119,6 +131,29 @@ def build_audio_prompt() -> str:
     )
 
 
+def encode_audio_base64_chunked(audio_path: Path, chunk_size: int = 48 * 1024) -> str:
+    """Base64 encode audio without reading the raw file into memory at once."""
+    output = io.StringIO()
+    carry = b""
+    with audio_path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            data = carry + chunk
+            safe_len = len(data) - (len(data) % 3)
+            if safe_len:
+                output.write(
+                    binascii.b2a_base64(data[:safe_len], newline=False).decode("ascii")
+                )
+            carry = data[safe_len:]
+    if carry:
+        output.write(
+            binascii.b2a_base64(carry, newline=False).decode("ascii")
+        )
+    return output.getvalue()
+
+
 class MockAudioUnderstandingProvider:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
@@ -139,7 +174,7 @@ class MiMoAudioUnderstandingProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.provider_config = settings.audio_understanding
-        self.api_key = self.provider_config.api_key or settings.api_key
+        self.api_key = self.provider_config.api_key
 
     def _headers(self, api_key: str) -> Dict[str, str]:
         headers: Dict[str, str] = {"content-type": "application/json"}
@@ -161,11 +196,22 @@ class MiMoAudioUnderstandingProvider:
             return FALLBACK_AUDIO_UNDERSTANDING
         if is_probably_empty_audio(audio_path, content_type):
             return FALLBACK_AUDIO_UNDERSTANDING
-        if not self.api_key or not self.provider_config.base_url:
-            return FALLBACK_AUDIO_UNDERSTANDING
+        if not self.api_key:
+            raise ProviderAuthError(
+                provider=self.provider_config.name,
+                code="missing_api_key",
+                message="%s is not configured" % self.provider_config.api_key_env,
+            )
+        if not self.provider_config.base_url:
+            raise ProviderError(
+                provider=self.provider_config.name,
+                code="not_configured",
+                message="audio understanding base_url is not configured",
+            )
 
+        start = perf_counter()
         try:
-            audio_data = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+            audio_data = encode_audio_base64_chunked(audio_path)
             response = requests.post(
                 self.provider_config.base_url.rstrip("/")
                 + "/chat/completions",
@@ -196,9 +242,62 @@ class MiMoAudioUnderstandingProvider:
             response.raise_for_status()
             body = response.json()
             content = body["choices"][0]["message"]["content"]
-            return parse_audio_understanding(content)
-        except Exception:
-            return FALLBACK_AUDIO_UNDERSTANDING
+            parsed = parse_audio_understanding(content)
+            if parsed == FALLBACK_AUDIO_UNDERSTANDING:
+                raise ProviderBadResponseError(
+                    provider=self.provider_config.name,
+                    message="audio understanding response did not contain valid JSON",
+                )
+            return parsed
+        except requests.Timeout as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderTimeoutError(
+                provider=self.provider_config.name,
+                latency_ms=latency_ms,
+                message=str(exc)[:200],
+            ) from exc
+        except requests.ConnectionError as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderNetworkError(
+                provider=self.provider_config.name,
+                latency_ms=latency_ms,
+                message=str(exc)[:200],
+            ) from exc
+        except requests.HTTPError as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
+            if status in (401, 403):
+                raise ProviderAuthError(
+                    provider=self.provider_config.name,
+                    status=status,
+                    latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            if status == 429:
+                raise ProviderQuotaError(
+                    provider=self.provider_config.name,
+                    status=status,
+                    latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            if status is not None and status >= 500:
+                raise ProviderUnavailableError(
+                    provider=self.provider_config.name,
+                    status=status,
+                    latency_ms=latency_ms,
+                    message=str(exc)[:200],
+                ) from exc
+            raise wrap_provider_error(
+                exc, provider=self.provider_config.name, latency_ms=latency_ms,
+            ) from exc
+        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
+            latency_ms = int((perf_counter() - start) * 1000)
+            raise ProviderBadResponseError(
+                provider=self.provider_config.name,
+                latency_ms=latency_ms,
+                message=str(exc)[:200],
+            ) from exc
 
 
 def is_probably_empty_audio(audio_path: Path, content_type: str) -> bool:

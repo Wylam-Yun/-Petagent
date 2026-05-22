@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.providers.errors import ProviderTimeoutError
 from app.runtime.voice_types import ASRTranscript
 
 
@@ -54,6 +55,45 @@ def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
     assert body["voice_route"]["fallback_reason"] == "audio_understanding_insufficient"
     assert body["voice_route"]["emotion_source"] == "asr"
     assert body["user_text"] == "我回来啦"
+
+
+def test_thinking_mode_exposes_audio_understanding_provider_failure():
+    class FailingAudioUnderstanding:
+        def understand(self, audio_path, content_type):
+            raise ProviderTimeoutError(provider="mimo_audio")
+
+    app = create_app(testing=True)
+    app.state.voice_pipeline.audio_provider = FailingAudioUnderstanding()
+    client = TestClient(app)
+
+    response = post_voice(client, data={"thinking_mode": "true"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["voice_route"]["selected"] == "slow"
+    assert body["voice_route"]["provider_failure"]["error_class"] == "provider_timeout"
+    assert body["reply"]
+
+
+def test_asr_fallback_exposes_audio_understanding_provider_failure():
+    class FailingAudioUnderstanding:
+        def understand(self, audio_path, content_type):
+            raise ProviderTimeoutError(provider="mimo_audio")
+
+    app = create_app(testing=True)
+    app.state.asr_provider.text = ""
+    app.state.voice_pipeline.audio_provider = FailingAudioUnderstanding()
+    client = TestClient(app)
+
+    response = post_voice(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    route = body["voice_route"]
+    assert route["selected"] == "slow"
+    assert route["fallback_reason"] == "asr_empty"
+    assert route["provider_failure"]["error_class"] == "provider_timeout"
+    assert body["reply"]
 
 
 def test_voice_pipeline_gates_asr_and_audio_understanding():

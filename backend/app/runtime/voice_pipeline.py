@@ -9,6 +9,7 @@ from app.providers.audio_omni import (
     AudioUnderstanding,
     FALLBACK_AUDIO_UNDERSTANDING,
 )
+from app.providers.errors import ProviderError
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
@@ -132,6 +133,9 @@ class VoicePipeline:
                         asr_error_message=transcript.error_message,
                         brain_provider=result.route_info.brain_provider,
                         fallback_reason=fallback_reason,
+                        emotion_source=result.route_info.emotion_source,
+                        wake_source=result.route_info.wake_source,
+                        provider_failure=result.route_info.provider_failure,
                         timings_ms=merged,
                     ),
                     fallback_reason=fallback_reason,
@@ -207,8 +211,12 @@ class VoicePipeline:
         emotion_source = "fallback"
 
         # Step 1: Try audio understanding first
+        provider_failure = None
         try:
             understanding = self._understand_with_gate(audio_path, content_type)
+        except ProviderError as exc:
+            provider_failure = exc.to_dict()
+            understanding = FALLBACK_AUDIO_UNDERSTANDING
         except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
         timings["audio_understanding"] = _now_ms(started)
@@ -294,6 +302,7 @@ class VoicePipeline:
                 fallback_reason="" if has_usable_text else "audio_understanding_insufficient",
                 emotion_source=emotion_source,
                 wake_source=wake_source,
+                provider_failure=provider_failure,
                 timings_ms=timings,
             ),
             fallback_reason=None if has_usable_text else "audio_understanding_insufficient",
@@ -311,8 +320,13 @@ class VoicePipeline:
     ) -> VoicePipelineResult:
         timings: Dict[str, int] = {}
         started = perf_counter()
+        provider_failure = None
         try:
             understanding = self._understand_with_gate(audio_path, content_type)
+        except ProviderError as exc:
+            understanding = FALLBACK_AUDIO_UNDERSTANDING
+            provider_failure = exc.to_dict()
+            fallback_reason = fallback_reason or "audio_understanding_error"
         except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             fallback_reason = fallback_reason or "audio_understanding_error"
@@ -354,6 +368,7 @@ class VoicePipeline:
                 brain_provider=self.slow_brain_provider_name,
                 fallback_reason=fallback_reason,
                 emotion_source="fallback",
+                provider_failure=provider_failure,
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
