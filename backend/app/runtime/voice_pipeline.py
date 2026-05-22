@@ -150,7 +150,9 @@ class VoicePipeline:
         # Check for wake/exit phrase before dispatching as voice_message
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
+        wake_source = ""
         if activation_event is not None:
+            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
             activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
@@ -183,6 +185,7 @@ class VoicePipeline:
                 brain_provider=brain_provider_name,
                 fallback_reason=fallback_reason,
                 emotion_source=emotion_source,
+                wake_source=wake_source,
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
@@ -255,7 +258,9 @@ class VoicePipeline:
         # Check for wake/exit phrase
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
+        wake_source = ""
         if activation_event is not None:
+            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
             activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
             activation_info = self._build_activation_info(activation_event["type"])
@@ -286,6 +291,7 @@ class VoicePipeline:
                 brain_provider=self.slow_brain_provider_name,
                 fallback_reason="" if has_usable_text else "audio_understanding_insufficient",
                 emotion_source=emotion_source,
+                wake_source=wake_source,
                 timings_ms=timings,
             ),
             fallback_reason=None if has_usable_text else "audio_understanding_insufficient",

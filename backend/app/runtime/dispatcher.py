@@ -71,6 +71,7 @@ class RuntimeDispatcher:
         policy_guard=None,
         maintenance_worker=None,
         provider_gate=None,
+        incident_store=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -94,6 +95,7 @@ class RuntimeDispatcher:
         self.policy_guard = policy_guard
         self.maintenance_worker = maintenance_worker
         self.provider_gate = provider_gate
+        self.incident_store = incident_store
         self._event_lock = threading.RLock()
         # Health counters (lock-free, read by /api/health/watchdog)
         self.event_loop_tick: float = perf_counter()
@@ -297,6 +299,15 @@ class RuntimeDispatcher:
             run.timings_ms["llm"] = int((perf_counter() - llm_start) * 1000)
         if run and raw_action is None:
             run.set_status("failed")
+            if self.incident_store is not None:
+                try:
+                    self.incident_store.record("provider_error", {
+                        "provider": provider_type,
+                        "stage": "llm",
+                        "event_type": event.type,
+                    })
+                except Exception:
+                    pass
             run.error = "LLM provider exception"
         if run and run.status not in {"failed", "superseded"}:
             run.set_status("action_generated")

@@ -36,6 +36,8 @@ class VoiceRouteInfo:
     brain_provider: str = ""
     fallback_reason: str = ""
     emotion_source: str = ""
+    wake_source: str = ""
+    provider_failure: Optional[Dict[str, Any]] = None
     timings_ms: Dict[str, int] = field(default_factory=dict)
 
     def dict(self) -> Dict[str, Any]:
@@ -49,8 +51,11 @@ class VoiceRouteInfo:
             "brain_provider": self.brain_provider,
             "fallback_reason": self.fallback_reason,
             "emotion_source": self.emotion_source,
+            "wake_source": self.wake_source,
             "timings_ms": dict(self.timings_ms),
         }
+        if self.provider_failure:
+            body["provider_failure"] = self.provider_failure
         return body
 
 

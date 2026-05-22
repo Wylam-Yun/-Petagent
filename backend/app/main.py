@@ -289,6 +289,7 @@ def create_app(testing: bool = False) -> FastAPI:
         policy_guard=policy_guard,
         maintenance_worker=maintenance_worker,
         provider_gate=provider_gate,
+        incident_store=incident_store,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,

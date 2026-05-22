@@ -3,14 +3,14 @@
 HOME_DIR="${HOME_DIR:-/data/data/com.termux/files/home}"
 PREFIX_DIR="${PREFIX_DIR:-/data/data/com.termux/files/usr}"
 LOCK_DIR="$HOME_DIR/.termux_service_manager.lock"
-LOG_FILE="$HOME_DIR/.service_manager.log"
-OLD_LOG_FILE="$HOME_DIR/.service_manager.log.old"
+LOG_FILE="${PETAGENT_DIR:-$HOME_DIR/Petagent}/logs/manager.log"
+OLD_LOG_FILE="${PETAGENT_DIR:-$HOME_DIR/Petagent}/logs/manager.log.old"
 PETAGENT_LOG="$HOME_DIR/.petagent_runtime_manager.log"
 MAX_LOG_SIZE=102400
 CHECK_INTERVAL="${CHECK_INTERVAL:-120}"
 SU_CHECK_INTERVAL="${SU_CHECK_INTERVAL:-600}"
 MAX_FAILS="${MAX_FAILS:-5}"
-BACKOFF_SECONDS="${BACKOFF_SECONDS:-600}"
+BACKOFF_SECONDS="${BACKOFF_SECONDS:-120}"
 SSHD_PORT="${SSHD_PORT:-8022}"
 PETAGENT_DIR="${PETAGENT_DIR:-$HOME_DIR/Petagent}"
 PETAGENT_PORT="${PETAGENT_PORT:-8000}"
@@ -18,7 +18,9 @@ PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-180}"
 NETWORK_WAIT_SECONDS="${NETWORK_WAIT_SECONDS:-180}"
 PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
 PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
-MANAGER_VERSION="safe-no-kill-20260519"
+FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"
+STUCK_MAX="${STUCK_MAX:-3}"
+MANAGER_VERSION="watchdog-relaunch-20260522"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -238,6 +240,28 @@ petagent_health() {
     curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
 }
 
+petagent_watchdog() {
+    # Returns 0 if not stuck, 1 if stuck, 2 if unreachable
+    command -v curl >/dev/null 2>&1 || return 2
+    resp="$(curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
+    printf '%s' "$resp" | grep -q '"stuck":true' && return 1
+    return 0
+}
+
+ensure_browser() {
+    # Relaunch browser if frontend heartbeat is stale and runtime is healthy
+    command -v curl >/dev/null 2>&1 || return 0
+    resp="$(curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
+    heartbeat_age="$(printf '%s' "$resp" | sed -n 's/.*"frontend_heartbeat_age_s":\([0-9.]*\).*/\1/p')"
+    [ -z "$heartbeat_age" ] && return 0
+    # Compare: if heartbeat_age > FRONTEND_STARTUP_SECONDS, relaunch
+    age_int="${heartbeat_age%%.*}"
+    if [ "${age_int:-0}" -gt "$FRONTEND_STARTUP_SECONDS" ]; then
+        log "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser"
+        am start -a android.intent.action.VIEW -d "http://127.0.0.1:$PETAGENT_PORT/" 2>/dev/null || true
+    fi
+}
+
 petagent_layered_check() {
     # Returns 0 if healthy, 1 if process dead, 2 if port down, 3 if HTTP fail
     if ! petagent_process_alive; then
@@ -313,8 +337,11 @@ main() {
     acquire_wake_lock
     start_proxy_once
 
+    mkdir -p "$PETAGENT_DIR/logs" 2>/dev/null || true
+
     ssh_fail_count=0
     petagent_fail_count=0
+    stuck_count=0
     su_fail_count=0
     last_su_check="$(date +%s 2>/dev/null || echo 0)"
 
@@ -336,6 +363,28 @@ main() {
                     sleep "$BACKOFF_SECONDS"
                 fi
             fi
+        fi
+
+        # Watchdog stuck detection
+        if petagent_layered_check; then
+            watchdog_rc=0
+            petagent_watchdog || watchdog_rc=$?
+            if [ "$watchdog_rc" -eq 1 ]; then
+                stuck_count=$((stuck_count + 1))
+                log "PetAgent watchdog reports stuck ($stuck_count/$STUCK_MAX)"
+                if [ "$stuck_count" -ge "$STUCK_MAX" ]; then
+                    log "CRITICAL: PetAgent stuck for $STUCK_MAX cycles; restarting"
+                    stuck_count=0
+                    pid="$(petagent_pid)"
+                    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+                    sleep 2
+                    start_petagent || true
+                fi
+            elif [ "$watchdog_rc" -eq 0 ]; then
+                stuck_count=0
+            fi
+            # Browser relaunch check
+            ensure_browser
         fi
 
         petagent_rc=0

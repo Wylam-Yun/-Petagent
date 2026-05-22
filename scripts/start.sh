@@ -118,7 +118,13 @@ if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
 fi
 
 cd "$PROJECT_DIR/backend"
-PYTHONPATH="$PROJECT_DIR/backend" nohup "$PYTHON_BIN" -m uvicorn app.main:app --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
+PYTHONPATH="$PROJECT_DIR/backend" nohup "$PYTHON_BIN" -m uvicorn app.main:app \
+  --host "$HOST" --port "$PORT" \
+  --timeout-keep-alive 15 \
+  --timeout-graceful-shutdown 10 \
+  --backlog 32 \
+  --limit-max-requests 2000 \
+  > "$LOG_FILE" 2>&1 &
 echo "$!" > "$PID_FILE" 2>/dev/null || {
   repair_android_context
   echo "$!" > "$PID_FILE"
