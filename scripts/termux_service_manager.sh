@@ -237,13 +237,13 @@ petagent_start_in_progress() {
 
 petagent_health() {
     command -v curl >/dev/null 2>&1 || return 1
-    curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
+    curl -fsS --connect-timeout 1 --max-time 2 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
 }
 
 petagent_watchdog() {
     # Returns 0 if not stuck, 1 if stuck, 2 if unreachable
     command -v curl >/dev/null 2>&1 || return 2
-    resp="$(curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
+    resp="$(curl -fsS --connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
     printf '%s' "$resp" | grep -q '"stuck":true' && return 1
     return 0
 }
@@ -251,7 +251,7 @@ petagent_watchdog() {
 ensure_browser() {
     # Relaunch browser if frontend heartbeat is stale and runtime is healthy
     command -v curl >/dev/null 2>&1 || return 0
-    resp="$(curl -fsS --connect-timeout 3 --max-time 8 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
+    resp="$(curl -fsS --connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
     heartbeat_age="$(printf '%s' "$resp" | sed -n 's/.*"frontend_heartbeat_age_s":\([0-9.]*\).*/\1/p')"
     [ -z "$heartbeat_age" ] && return 0
     # Compare: if heartbeat_age > FRONTEND_STARTUP_SECONDS, relaunch

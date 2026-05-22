@@ -44,6 +44,21 @@ def test_watchdog_stuck_on_stale_agent():
     assert body["agent_inflight_age_s"] > 90
 
 
+def test_watchdog_stuck_on_stale_provider():
+    """Watchdog should report stuck=True when a provider call is stale."""
+    app = create_app(testing=True)
+    app.state.provider_gate.acquire("llm_slow")
+    app.state.provider_gate._started_at["llm_slow"] = perf_counter() - 120
+    client = TestClient(app)
+    try:
+        resp = client.get("/api/health/watchdog")
+        body = resp.json()
+        assert body["stuck"] is True
+        assert body["provider_inflight_age_s"] > 90
+    finally:
+        app.state.provider_gate.release("llm_slow")
+
+
 def test_watchdog_not_stuck_with_recent_tick():
     """Watchdog should report stuck=False when tick is recent."""
     app = create_app(testing=True)

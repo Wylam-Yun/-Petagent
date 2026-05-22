@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -51,6 +52,30 @@ def test_audio_job_reports_failed_tts_without_blocking_response():
     job = _wait_for_job(client, body["audio_job_id"])
     assert job["status"] == "failed"
     assert job["voice_url"] is None
+
+
+def test_audio_job_manager_gates_tts_provider():
+    from app.providers.tts_mimo import MockTTSProvider
+    from app.runtime.audio_jobs import AudioJobManager
+    from pathlib import Path
+    from tempfile import mkdtemp
+
+    gate = MagicMock()
+    tts = MockTTSProvider(Path(mkdtemp()))
+    mgr = AudioJobManager(tts, max_workers=1, ttl_seconds=60, provider_gate=gate)
+
+    job_id = mgr.enqueue("hello")
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        job = mgr.get(job_id)
+        if job and job.status in {"ready", "failed"}:
+            break
+        time.sleep(0.02)
+
+    gate.acquire.assert_called_once_with("tts")
+    gate.release.assert_called_once_with("tts")
+    assert mgr.pending_count() == 0
+    mgr.shutdown()
 
 
 def test_proactive_low_cost_does_not_create_audio_job():

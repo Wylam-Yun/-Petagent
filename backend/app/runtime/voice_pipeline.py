@@ -32,6 +32,7 @@ class VoicePipeline:
         fast_brain_provider_name: str = "fast_llm",
         slow_brain_provider_name: str = "slow_llm",
         activation_manager: Any = None,
+        provider_gate: Any = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.fast_brain = fast_brain
@@ -43,6 +44,7 @@ class VoicePipeline:
         self.fast_brain_provider_name = fast_brain_provider_name
         self.slow_brain_provider_name = slow_brain_provider_name
         self.activation_manager = activation_manager
+        self.provider_gate = provider_gate
 
     def handle(
         self,
@@ -86,7 +88,7 @@ class VoicePipeline:
         fallback_reason = ""
         emotion_source = "asr"
         try:
-            transcript = self.asr_provider.transcribe(audio_path, content_type)
+            transcript = self._transcribe_with_gate(audio_path, content_type)
         except Exception:
             transcript = ASRTranscript(
                 text="",
@@ -206,7 +208,7 @@ class VoicePipeline:
 
         # Step 1: Try audio understanding first
         try:
-            understanding = self.audio_provider.understand(audio_path, content_type)
+            understanding = self._understand_with_gate(audio_path, content_type)
         except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
         timings["audio_understanding"] = _now_ms(started)
@@ -220,7 +222,7 @@ class VoicePipeline:
             # Optionally run ASR as transcript assist (non-blocking)
             asr_start = perf_counter()
             try:
-                transcript = self.asr_provider.transcribe(audio_path, content_type)
+                transcript = self._transcribe_with_gate(audio_path, content_type)
             except Exception:
                 pass
             timings["asr_assist"] = _now_ms(asr_start)
@@ -228,7 +230,7 @@ class VoicePipeline:
             # Audio understanding failed or returned empty — fall back to ASR
             asr_start = perf_counter()
             try:
-                transcript = self.asr_provider.transcribe(audio_path, content_type)
+                transcript = self._transcribe_with_gate(audio_path, content_type)
             except Exception:
                 transcript = ASRTranscript(
                     text="",
@@ -310,7 +312,7 @@ class VoicePipeline:
         timings: Dict[str, int] = {}
         started = perf_counter()
         try:
-            understanding = self.audio_provider.understand(audio_path, content_type)
+            understanding = self._understand_with_gate(audio_path, content_type)
         except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             fallback_reason = fallback_reason or "audio_understanding_error"
@@ -371,3 +373,25 @@ class VoicePipeline:
 
     def _asr_name(self) -> str:
         return str(getattr(self.asr_provider, "name", "unknown_asr"))
+
+    def _transcribe_with_gate(self, audio_path: Path, content_type: str) -> ASRTranscript:
+        acquired = False
+        if self.provider_gate is not None:
+            self.provider_gate.acquire("asr")
+            acquired = True
+        try:
+            return self.asr_provider.transcribe(audio_path, content_type)
+        finally:
+            if acquired and self.provider_gate is not None:
+                self.provider_gate.release("asr")
+
+    def _understand_with_gate(self, audio_path: Path, content_type: str) -> AudioUnderstanding:
+        acquired = False
+        if self.provider_gate is not None:
+            self.provider_gate.acquire("audio_understanding")
+            acquired = True
+        try:
+            return self.audio_provider.understand(audio_path, content_type)
+        finally:
+            if acquired and self.provider_gate is not None:
+                self.provider_gate.release("audio_understanding")

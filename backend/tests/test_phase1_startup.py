@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.main import create_app
 
@@ -56,3 +57,11 @@ def test_core_ready_false_before_lifespan():
     # Don't enter lifespan context
     assert app.state.core_ready is False
     assert app.state.providers_ready is False
+
+
+def test_termux_manager_uses_mobile_safe_health_timeouts():
+    """Manager health curl budgets should match Phase 1 mobile-safe plan."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "termux_service_manager.sh"
+    text = script.read_text()
+    assert '--connect-timeout 1 --max-time 2 "http://127.0.0.1:$PETAGENT_PORT/api/health"' in text
+    assert text.count('--connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog"') >= 2

@@ -56,7 +56,11 @@ def health_watchdog(request: Request) -> Dict[str, Any]:
     # Stuck detection: agent loop or event loop stalled for > 90s
     agent_age = _age_s(dispatcher.agent_inflight_start)
     tick_age = _age_s(dispatcher.event_loop_tick)
-    stuck = (agent_age > 90) or (tick_age > 90)
+    provider_gate = getattr(request.app.state, "provider_gate", None)
+    provider_age = (
+        provider_gate.inflight_age_s() if provider_gate is not None else -1.0
+    )
+    stuck = (agent_age > 90) or (tick_age > 90) or (provider_age > 90)
 
     return {
         "ok": True,
@@ -65,6 +69,7 @@ def health_watchdog(request: Request) -> Dict[str, Any]:
         "event_loop_tick_age_s": round(tick_age, 1),
         "active_requests": dispatcher.active_requests,
         "agent_inflight_age_s": round(agent_age, 1),
+        "provider_inflight_age_s": round(provider_age, 1),
         "audio_queue_depth": audio_queue,
         "frontend_heartbeat_age_s": heartbeat_age,
         "stuck": stuck,
@@ -124,6 +129,10 @@ def health_deep(request: Request) -> Dict[str, Any]:
     # Provider probe results
     probe_manager = getattr(request.app.state, "probe_manager", None)
     probe_results = probe_manager.to_dict() if probe_manager is not None else {}
+    provider_gate = getattr(request.app.state, "provider_gate", None)
+    provider_age = (
+        provider_gate.inflight_age_s() if provider_gate is not None else -1.0
+    )
 
     return {
         "ok": db_ok,
@@ -134,6 +143,7 @@ def health_deep(request: Request) -> Dict[str, Any]:
         "event_loop_tick_age_s": round(_age_s(dispatcher.event_loop_tick), 1),
         "active_requests": dispatcher.active_requests,
         "agent_inflight_age_s": round(_age_s(dispatcher.agent_inflight_start), 1),
+        "provider_inflight_age_s": round(provider_age, 1),
         "audio_pending": audio_pending,
         "audio_running": audio_running,
         "candidate_backlog": candidate_backlog,

@@ -146,6 +146,7 @@ def test_proactive_api_can_use_llm_mode_for_active_event():
     state["updated_at"] = state["last_interaction_at"]
     app.state.state_store.save_state(state)
     client = TestClient(app)
+    client.post("/api/frontend/heartbeat", json={"user_agent": "test"})
 
     response = client.post("/api/pet/proactive/trigger?mode=llm")
 

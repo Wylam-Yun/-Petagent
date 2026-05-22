@@ -87,8 +87,12 @@ def test_provider_gate_acquire_release():
     gate = ProviderGate({"llm_fast": 2})
     gate.acquire("llm_fast")
     assert gate.get_usage()["llm_fast"]["current"] == 1
+    assert gate.inflight_age_s("llm_fast") >= 0
+    assert gate.inflight_age_s() >= 0
     gate.release("llm_fast")
     assert gate.get_usage()["llm_fast"]["current"] == 0
+    assert gate.inflight_age_s("llm_fast") < 0
+    assert gate.inflight_age_s() < 0
 
 
 def test_provider_gate_raises_when_full():
@@ -102,6 +106,24 @@ def test_provider_gate_raises_when_full():
     except ProviderBusyError:
         pass
 
+    gate.release("llm_fast")
+
+
+def test_provider_gate_failed_acquire_does_not_reset_active_age():
+    """A rejected acquire must not release or hide the active provider slot."""
+    gate = ProviderGate({"llm_fast": 1})
+    gate.acquire("llm_fast")
+    age_before = gate.inflight_age_s("llm_fast")
+
+    try:
+        gate.acquire("llm_fast")
+        assert False, "Should have raised"
+    except ProviderBusyError:
+        pass
+
+    usage = gate.get_usage()["llm_fast"]
+    assert usage["current"] == 1
+    assert gate.inflight_age_s("llm_fast") >= age_before
     gate.release("llm_fast")
 
 

@@ -56,6 +56,28 @@ def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
     assert body["user_text"] == "我回来啦"
 
 
+def test_voice_pipeline_gates_asr_and_audio_understanding():
+    app = create_app(testing=True)
+    gate = app.state.provider_gate
+    seen = []
+    original_acquire = gate.acquire
+
+    def track(provider_type):
+        seen.append(provider_type)
+        original_acquire(provider_type)
+
+    gate.acquire = track
+    client = TestClient(app)
+
+    fast = post_voice(client)
+    slow = post_voice(client, data={"thinking_mode": "true"})
+
+    assert fast.status_code == 200
+    assert slow.status_code == 200
+    assert "asr" in seen
+    assert "audio_understanding" in seen
+
+
 def test_voice_chat_falls_back_to_slow_route_when_asr_is_empty():
     app = create_app(testing=True)
     app.state.asr_provider.text = ""

@@ -33,6 +33,7 @@ def test_health_watchdog_returns_expected_fields():
     assert "event_loop_tick_age_s" in body
     assert "active_requests" in body
     assert "agent_inflight_age_s" in body
+    assert "provider_inflight_age_s" in body
     assert "audio_queue_depth" in body
 
 
@@ -67,6 +68,7 @@ def test_health_deep_accepts_valid_token():
     body = resp.json()
     assert "db_quick_check" in body
     assert "wal_bytes" in body
+    assert "provider_inflight_age_s" in body
     assert "audio_pending" in body
     assert "candidate_backlog" in body
 

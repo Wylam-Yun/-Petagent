@@ -10,6 +10,7 @@ from uuid import uuid4
 
 if TYPE_CHECKING:
     from app.runtime.audio_job_store import AudioJobStore
+    from app.runtime.concurrency import ProviderGate
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class AudioJobManager:
         provider_name: str = "tts",
         on_complete: Optional[Callable[[str, str, Optional[str]], None]] = None,
         store: Optional["AudioJobStore"] = None,
+        provider_gate: Optional["ProviderGate"] = None,
     ) -> None:
         self.tts_provider = tts_provider
         self.ttl_seconds = ttl_seconds
@@ -79,10 +81,12 @@ class AudioJobManager:
         self.provider_name = provider_name
         self.on_complete = on_complete
         self._store = store
+        self.provider_gate = provider_gate
         self._jobs: Dict[str, AudioJob] = {}
         self._order: List[str] = []
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._pending_count = 0
 
     def enqueue(
         self,
@@ -118,6 +122,7 @@ class AudioJobManager:
                         existing.status = "superseded"
                         existing.error = "superseded by newer job"
                         existing.updated_at = datetime.utcnow().isoformat()
+                        self._adjust_pending_locked(-1)
 
             # Enforce per-session pending limit
             if session_id:
@@ -137,9 +142,11 @@ class AudioJobManager:
                         oldest.status = "superseded"
                         oldest.error = "pending limit exceeded"
                         oldest.updated_at = datetime.utcnow().isoformat()
+                        self._adjust_pending_locked(-1)
 
             self._jobs[job_id] = job
             self._order.append(job_id)
+            self._pending_count += 1
             self._evict_if_needed()
 
             # Write-through to SQLite
@@ -167,6 +174,7 @@ class AudioJobManager:
                     job.status = "expired"
                     job.error = "audio job expired"
                     job.updated_at = datetime.utcnow().isoformat()
+                    self._adjust_pending_locked(-1)
                 return AudioJob(**job.__dict__)
 
         # Fall back to SQLite for jobs not in memory cache (e.g. after restart)
@@ -203,7 +211,11 @@ class AudioJobManager:
             queue_ms = 0
 
         tts_start = datetime.utcnow()
+        gate_acquired = False
         try:
+            if self.provider_gate is not None:
+                self.provider_gate.acquire("tts")
+                gate_acquired = True
             voice_url = self.tts_provider.synthesize(job.text, job.voice_style)
             tts_ms = int((datetime.utcnow() - tts_start).total_seconds() * 1000)
         except Exception as exc:
@@ -221,6 +233,7 @@ class AudioJobManager:
                 current.timings_ms["tts"] = tts_ms
                 current.timings_ms["audio_queue"] = queue_ms
                 current.updated_at = datetime.utcnow().isoformat()
+                self._adjust_pending_locked(-1)
 
                 if self._store:
                     try:
@@ -234,6 +247,12 @@ class AudioJobManager:
                 except Exception:
                     logger.warning("on_complete callback failed", exc_info=True)
             return
+        finally:
+            if gate_acquired and self.provider_gate is not None:
+                try:
+                    self.provider_gate.release("tts")
+                except Exception:
+                    pass
 
         with self._lock:
             current = self._jobs.get(job_id)
@@ -250,6 +269,7 @@ class AudioJobManager:
                 current.status = "failed"
                 current.voice_url = None
                 current.error = "tts returned empty"
+            self._adjust_pending_locked(-1)
 
             if self._store:
                 try:
@@ -288,6 +308,8 @@ class AudioJobManager:
                 self._jobs.pop(old_id, None)
             else:
                 # Force-expire stuck non-terminal job
+                if old_job.status == "pending":
+                    self._adjust_pending_locked(-1)
                 old_job.status = "expired"
                 old_job.error = "expired: queue full"
                 old_job.updated_at = datetime.utcnow().isoformat()
@@ -301,9 +323,11 @@ class AudioJobManager:
             self._executor.shutdown(wait=False)
 
     def pending_count(self) -> int:
-        """Count of pending jobs (public API for health checks)."""
-        with self._lock:
-            return sum(1 for j in self._jobs.values() if j.status == "pending")
+        """Count of pending jobs (lock-free read for watchdog health)."""
+        return max(0, int(self._pending_count))
+
+    def _adjust_pending_locked(self, delta: int) -> None:
+        self._pending_count = max(0, self._pending_count + delta)
 
     def mark_restart_failed(self) -> int:
         """Mark all pending/running jobs as failed_runtime_restart in SQLite."""
@@ -313,6 +337,8 @@ class AudioJobManager:
             with self._lock:
                 for job in self._jobs.values():
                     if job.status in ("pending", "running"):
+                        if job.status == "pending":
+                            self._adjust_pending_locked(-1)
                         job.status = "failed_runtime_restart"
                         job.failure_reason = "runtime_restarted"
                         job.error = "runtime restarted while job was in-flight"
@@ -327,6 +353,8 @@ class AudioJobManager:
             with self._lock:
                 for job in self._jobs.values():
                     if job.status in ("pending", "running"):
+                        if job.status == "pending":
+                            self._adjust_pending_locked(-1)
                         job.status = "failed_shutdown"
                         job.failure_reason = "process_shutdown"
                         job.error = "process shutdown while job was in-flight"

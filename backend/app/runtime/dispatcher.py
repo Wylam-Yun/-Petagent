@@ -279,9 +279,11 @@ class RuntimeDispatcher:
         provider_type = _profile_to_gate_type(decision.provider_profile if decision else "slow_llm")
         llm_start = perf_counter()
         raw_action = None
+        gate_acquired = False
         try:
             if self.provider_gate is not None:
                 self.provider_gate.acquire(provider_type)
+                gate_acquired = True
             try:
                 raw_action = active_brain.generate_action(event, context)
             except Exception:
@@ -290,7 +292,7 @@ class RuntimeDispatcher:
             logger.warning("Provider %s busy, returning fallback", provider_type)
             raw_action = None
         finally:
-            if self.provider_gate is not None:
+            if gate_acquired and self.provider_gate is not None:
                 try:
                     self.provider_gate.release(provider_type)
                 except Exception:

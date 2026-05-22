@@ -48,8 +48,15 @@ def trigger_pet_proactive(request: Request, mode: str = ""):
     if event is None:
         return {"active": False}
     selected_mode = _proactive_mode(request, mode)
+    scheduler = getattr(request.app.state, "proactive_scheduler", None)
+    frontend_stale = bool(scheduler and scheduler.is_frontend_stale())
+    if frontend_stale:
+        selected_mode = "low_cost"
     proactive_config = request.app.state.settings.app_config.get("proactive", {})
-    synthesize_voice = bool(proactive_config.get("synthesize_voice", False))
+    synthesize_voice = (
+        bool(proactive_config.get("synthesize_voice", False))
+        and not frontend_stale
+    )
     response = request.app.state.dispatcher.handle_event(
         event.dict(),
         brain=(
@@ -61,4 +68,5 @@ def trigger_pet_proactive(request: Request, mode: str = ""):
     ).dict()
     response["active"] = True
     response["runtime"]["proactive_mode"] = selected_mode
+    response["runtime"]["frontend_stale"] = frontend_stale
     return response

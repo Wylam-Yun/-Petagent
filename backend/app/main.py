@@ -244,6 +244,7 @@ def create_app(testing: bool = False) -> FastAPI:
         if run:
             run.record(f"audio_{status}", {"job_id": job_id, "error": error})
 
+    provider_gate = ProviderGate()
     audio_job_store = AudioJobStore(state_store.connection)
     audio_job_manager = AudioJobManager(
         tts_provider,
@@ -252,6 +253,7 @@ def create_app(testing: bool = False) -> FastAPI:
         provider_name=str(getattr(tts_provider, "name", "tts")),
         on_complete=_on_audio_complete,
         store=audio_job_store,
+        provider_gate=provider_gate,
     )
     # Mark any jobs that were pending/running when the process last died
     audio_job_manager.mark_restart_failed()
@@ -263,7 +265,6 @@ def create_app(testing: bool = False) -> FastAPI:
         maintenance_service,
         log_path=runtime_log_path if runtime_log_path.parent.exists() else None,
     )
-    provider_gate = ProviderGate()
     probe_manager = ProviderProbeManager()
 
     dispatcher = RuntimeDispatcher(
@@ -304,6 +305,7 @@ def create_app(testing: bool = False) -> FastAPI:
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
         activation_manager=activation_manager,
+        provider_gate=provider_gate,
     )
     text_pipeline = TextPipeline(
         dispatcher=dispatcher,
