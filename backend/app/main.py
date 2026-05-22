@@ -327,11 +327,21 @@ def create_app(testing: bool = False) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         import asyncio as _asyncio
+        from contextlib import suppress as _suppress
+        from time import perf_counter as _perf_counter
 
         # Startup — core stores are ready immediately
         app.state.shutdown_in_progress = False
         app.state.core_ready = True
         app.state.providers_ready = True
+        # Low-cost event-loop heartbeat for watchdog. A quiet pet with no recent
+        # interactions is healthy; this only grows stale when the loop itself is wedged.
+        async def _event_loop_heartbeat() -> None:
+            while True:
+                dispatcher.event_loop_tick = _perf_counter()
+                await _asyncio.sleep(1)
+
+        heartbeat_task = _asyncio.create_task(_event_loop_heartbeat())
         # Start maintenance worker
         try:
             maintenance_worker.start()
@@ -358,6 +368,9 @@ def create_app(testing: bool = False) -> FastAPI:
         # Shutdown
         logger.info("PetAgent Momo shutting down")
         app.state.shutdown_in_progress = True
+        heartbeat_task.cancel()
+        with _suppress(_asyncio.CancelledError):
+            await heartbeat_task
         # Stop maintenance worker
         try:
             maintenance_worker.stop()

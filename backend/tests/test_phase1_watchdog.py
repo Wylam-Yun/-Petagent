@@ -1,6 +1,7 @@
 """Tests for STAB-033: Manager watchdog-stuck detection."""
 from __future__ import annotations
 
+import time
 from time import perf_counter
 
 from fastapi.testclient import TestClient
@@ -21,7 +22,7 @@ def test_watchdog_not_stuck_normal():
 
 
 def test_watchdog_stuck_on_stale_tick():
-    """Watchdog should report stuck=True when event_loop_tick is stale."""
+    """Synthetic stale tick still reports stuck outside lifespan heartbeat."""
     app = create_app(testing=True)
     # Simulate stale tick by setting it far in the past
     app.state.dispatcher.event_loop_tick = perf_counter() - 120
@@ -30,6 +31,18 @@ def test_watchdog_stuck_on_stale_tick():
     body = resp.json()
     assert body["stuck"] is True
     assert body["event_loop_tick_age_s"] > 90
+
+
+def test_watchdog_lifespan_heartbeat_prevents_idle_false_positive():
+    """Normal idle with a live event loop must not look watchdog-stuck."""
+    app = create_app(testing=True)
+    app.state.dispatcher.event_loop_tick = perf_counter() - 120
+    with TestClient(app) as client:
+        time.sleep(1.2)
+        resp = client.get("/api/health/watchdog")
+    body = resp.json()
+    assert body["stuck"] is False
+    assert body["event_loop_tick_age_s"] < 5
 
 
 def test_watchdog_stuck_on_stale_agent():
