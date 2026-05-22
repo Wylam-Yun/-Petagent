@@ -56,19 +56,20 @@ class MemoryCurator:
         self.max_batch = max_batch
 
     def curate_batch(self, candidate_store: MemoryCandidateStore) -> Dict[str, int]:
-        """Process pending candidates. Returns {saved, ignored, errors}."""
+        """Process pending candidates. Returns {saved, ignored, errors, retried}."""
         candidates = candidate_store.pending(limit=self.max_batch)
         if not candidates:
-            return {"saved": 0, "ignored": 0, "errors": 0}
+            return {"saved": 0, "ignored": 0, "errors": 0, "retried": 0}
 
-        result = {"saved": 0, "ignored": 0, "errors": 0}
+        result = {"saved": 0, "ignored": 0, "errors": 0, "retried": 0}
         try:
             decisions = self._call_llm(candidates)
         except Exception:
-            logger.warning("Curator LLM call failed", exc_info=True)
+            logger.warning("Curator LLM call failed, marking for retry", exc_info=True)
             for cand in candidates:
-                candidate_store.mark_processed(cand["id"], "error")
-            result["errors"] = len(candidates)
+                attempt = cand.get("attempt_count", 0) + 1
+                candidate_store.mark_retryable(cand["id"], attempt)
+                result["retried"] += 1
             return result
 
         for i, cand in enumerate(candidates):

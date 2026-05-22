@@ -104,8 +104,8 @@ def test_curator_handles_llm_failure():
     curator = MemoryCurator(FailingLLM(), mm)
     result = curator.curate_batch(cs)
 
-    assert result["errors"] == 1
-    # Candidate should be marked as error, not left pending
+    assert result["retried"] == 1
+    # Candidate should be marked for retry, not left pending
     assert cs.count_pending() == 0
 
 

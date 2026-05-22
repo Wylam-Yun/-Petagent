@@ -432,6 +432,9 @@ class MemoryCandidateStore:
                 """
             )
             self.connection.commit()
+        # Migration: add retry columns
+        _ensure_column(self.connection, "memory_candidate", "attempt_count", "INTEGER", "0")
+        _ensure_column(self.connection, "memory_candidate", "next_retry_at", "TEXT", "")
 
     def add(
         self,
@@ -458,18 +461,23 @@ class MemoryCandidateStore:
             return cursor.lastrowid
 
     def pending(self, limit: int = 8) -> List[Dict[str, Any]]:
-        """Fetch pending candidates ordered by created_at."""
+        """Fetch pending candidates ordered by created_at.
+
+        Includes retryable candidates whose next_retry_at has passed.
+        """
+        now = datetime.utcnow().isoformat()
         with self.connection.locked():
             rows = self.connection.execute(
                 """
                 SELECT id, source_event_id, episode_id, candidate_text,
-                       trigger_reason, created_at
+                       trigger_reason, created_at, attempt_count
                 FROM memory_candidate
                 WHERE status = 'pending'
+                   OR (status = 'retryable' AND (next_retry_at <= ? OR next_retry_at = ''))
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (now, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -484,6 +492,31 @@ class MemoryCandidateStore:
                 WHERE id = ?
                 """,
                 (status, now, candidate_id),
+            )
+            self.connection.commit()
+
+    def mark_retryable(self, candidate_id: int, attempt_count: int) -> None:
+        """Mark a candidate for retry with exponential backoff.
+
+        Backoff: 2^attempt minutes, capped at 60 minutes, max 5 attempts.
+        """
+        from datetime import timedelta
+
+        if attempt_count >= 5:
+            # Too many retries — permanent error
+            self.mark_processed(candidate_id, "error")
+            return
+
+        delay_minutes = min(2 ** attempt_count, 60)
+        next_retry = (datetime.utcnow() + timedelta(minutes=delay_minutes)).isoformat()
+        with self.connection.locked():
+            self.connection.execute(
+                """
+                UPDATE memory_candidate
+                SET status = 'retryable', attempt_count = ?, next_retry_at = ?
+                WHERE id = ?
+                """,
+                (attempt_count, next_retry, candidate_id),
             )
             self.connection.commit()
 
