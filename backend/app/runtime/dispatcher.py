@@ -21,9 +21,20 @@ from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.events import normalize_event
 from app.runtime.registry import SkillRegistry
+from app.runtime.concurrency import ProviderBusyError, ProviderGate
 from app.runtime.route_policy import decide_route
 
 logger = logging.getLogger(__name__)
+
+_PROFILE_TO_GATE = {
+    "fast_llm": "llm_fast",
+    "slow_llm": "llm_slow",
+}
+
+
+def _profile_to_gate_type(provider_profile: str) -> str:
+    return _PROFILE_TO_GATE.get(provider_profile, "llm_slow")
+
 
 _EXPLICIT_MEMORY_KEYWORDS = [
     "\u8bb0\u4f4f",       # 记住
@@ -58,6 +69,8 @@ class RuntimeDispatcher:
         agent_run_registry=None,
         memory_card_manager=None,
         policy_guard=None,
+        maintenance_worker=None,
+        provider_gate=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -79,7 +92,13 @@ class RuntimeDispatcher:
         self.agent_run_registry = agent_run_registry
         self.memory_card_manager = memory_card_manager
         self.policy_guard = policy_guard
+        self.maintenance_worker = maintenance_worker
+        self.provider_gate = provider_gate
         self._event_lock = threading.RLock()
+        # Health counters (lock-free, read by /api/health/watchdog)
+        self.event_loop_tick: float = perf_counter()
+        self.agent_inflight_start: float = 0.0
+        self.active_requests: int = 0
 
     def handle_event(
         self,
@@ -87,28 +106,46 @@ class RuntimeDispatcher:
         brain: PetBrain = None,
         synthesize_voice: bool = True,
     ) -> PetResponse:
-        with self._event_lock:
-            response = self._handle_event_inner(raw_event, brain, synthesize_voice)
+        self.event_loop_tick = perf_counter()
+        self.active_requests += 1
+        try:
+            self.agent_inflight_start = perf_counter()
+            try:
+                response = self._handle_event_split(raw_event, brain, synthesize_voice)
+            finally:
+                self.agent_inflight_start = 0.0
 
-        # Maintenance tick runs OUTSIDE the event lock — never blocks response
-        self._try_maintenance_tick()
+            # Maintenance tick runs OUTSIDE the event lock — never blocks response
+            self._try_maintenance_tick()
 
-        return response
+            return response
+        finally:
+            self.active_requests = max(0, self.active_requests - 1)
 
-    def _handle_event_inner(
+    def _handle_event_split(
         self,
         raw_event: Dict[str, Any],
         brain: PetBrain = None,
         synthesize_voice: bool = True,
     ) -> PetResponse:
+        """Three-phase event handling: snapshot → slow work → commit.
+
+        Phase 1 (locked): Read state + version, apply tick, get episode, reserve IDs
+        Phase 2 (unlocked): LLM call, tool execution, context building — uses immutable snapshot
+        Phase 3 (locked): CAS save state, record event, enqueue audio
+        """
         pipeline_start = perf_counter()
         event = normalize_event(raw_event)
+        active_brain = brain or self.brain
 
         # --- AgentRun lifecycle begins ---
         run: AgentRun = None
         decision = None
         if self.agent_run_registry is not None:
             run = self.agent_run_registry.create(event_id=event.id)
+
+        # ===== PHASE 1: LOCKED SNAPSHOT =====
+        with self._event_lock:
             thinking_mode = bool(event.payload.get("thinking_mode", False))
             user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
             decision = decide_route(
@@ -117,36 +154,40 @@ class RuntimeDispatcher:
                 user_text=user_text,
                 thinking_mode=thinking_mode,
             )
-            run.route = decision.route
-            run.context_profile = decision.context_profile
-            run.provider = decision.provider_profile
-            run.set_status("planning")
+            if run:
+                run.route = decision.route
+                run.context_profile = decision.context_profile
+                run.provider = decision.provider_profile
+                run.set_status("planning")
 
-        # 1. Apply tick
-        if self.tick_service is not None:
-            self.tick_service.apply_if_due()
+            # Apply tick
+            if self.tick_service is not None:
+                self.tick_service.apply_if_due()
 
-        # 2. Get current state and capture before snapshot
-        current_state = self.state_store.get_state()
-        state_before = dict(current_state)
+            # Read current state + version (immutable snapshot)
+            current_state = self.state_store.get_state()
+            state_before = dict(current_state)
+            expected_version = current_state.get("version", 0)
 
-        # 3. Apply event rules
-        ruled_state = apply_event_rules(current_state, event.type)
-        active_brain = brain or self.brain
+            # Apply deterministic event rules
+            ruled_state = apply_event_rules(current_state, event.type)
 
-        # 4. Get/create current episode
-        episode = None
-        closed_episode_id = None
-        if self.episode_manager is not None:
-            idle_min = self.context_manager.idle_episode_minutes if self.context_manager else 45
-            episode, closed_episode_id = self.episode_manager.get_or_create_current(
-                idle_minutes=idle_min
-            )
-            # Enqueue summary job for idle-timeout closed episode
-            if closed_episode_id and self.summary_job_store is not None:
-                self.summary_job_store.enqueue(closed_episode_id)
+            # Get/create current episode
+            episode = None
+            closed_episode_id = None
+            if self.episode_manager is not None:
+                idle_min = self.context_manager.idle_episode_minutes if self.context_manager else 45
+                episode, closed_episode_id = self.episode_manager.get_or_create_current(
+                    idle_minutes=idle_min
+                )
+                if closed_episode_id and self.summary_job_store is not None:
+                    self.summary_job_store.enqueue(closed_episode_id)
 
-        # 5. Build cognition context via ContextManager
+            episode_id = episode.get("episode_id", "") if episode else ""
+
+        # ===== PHASE 2: SLOW WORK OUTSIDE LOCK =====
+
+        # Build cognition context
         cognition_context = None
         if self.context_manager is not None:
             cognition_context = self.context_manager.build(
@@ -168,7 +209,7 @@ class RuntimeDispatcher:
                     "budget_used": cognition_context.get("context_budget", {}).get("used_chars", 0),
                 })
 
-        # 6. Build planning context (backward compat + cognition_context)
+        # Build planning context
         planning_context = build_runtime_context(
             event,
             ruled_state,
@@ -176,7 +217,7 @@ class RuntimeDispatcher:
             cognition_context=cognition_context,
         )
 
-        # 7. Run skills (gated by route policy)
+        # Run skills (gated by route policy)
         if decision is None or decision.allow_tools:
             tool_start = perf_counter()
             skill_results = self._run_requested_skills(event, active_brain, planning_context)
@@ -207,7 +248,7 @@ class RuntimeDispatcher:
                 for sr in skill_results
             ]
 
-        # 8. Rebuild context with skill results
+        # Rebuild context with skill results
         if self.context_manager is not None and cognition_context is not None:
             cognition_context = self.context_manager.build(
                 event=event,
@@ -232,12 +273,26 @@ class RuntimeDispatcher:
             cognition_context=cognition_context,
         )
 
-        # 9. Generate action
+        # Generate action (LLM call — the slowest part, gated by provider concurrency)
+        provider_type = _profile_to_gate_type(decision.provider_profile if decision else "slow_llm")
         llm_start = perf_counter()
+        raw_action = None
         try:
-            raw_action = active_brain.generate_action(event, context)
-        except Exception:
+            if self.provider_gate is not None:
+                self.provider_gate.acquire(provider_type)
+            try:
+                raw_action = active_brain.generate_action(event, context)
+            except Exception:
+                raw_action = None
+        except ProviderBusyError:
+            logger.warning("Provider %s busy, returning fallback", provider_type)
             raw_action = None
+        finally:
+            if self.provider_gate is not None:
+                try:
+                    self.provider_gate.release(provider_type)
+                except Exception:
+                    pass
         if run:
             run.timings_ms["llm"] = int((perf_counter() - llm_start) * 1000)
         if run and raw_action is None:
@@ -259,13 +314,11 @@ class RuntimeDispatcher:
                 "voice_style": action.voice_style,
             }
 
-        # 10. Apply state delta and save
-        # Strip energy from LLM state_delta — pet_effort is the sole authority for energy
+        # Compute state delta (deterministic, can be recomputed on CAS retry)
         sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
         if "energy" in action.state_delta:
             logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
         final_state = apply_state_delta(ruled_state, sanitized_delta)
-        # Apply pet_effort fatigue — deterministic energy deduction
         pre_llm_energy = int(ruled_state.get("energy", 0))
         effort = action.state_affect.pet_effort
         if effort == "medium":
@@ -283,63 +336,88 @@ class RuntimeDispatcher:
         final_state["mood"] = action.mood
         final_state["mode"] = "idle"
         final_state["last_interaction_at"] = datetime.utcnow().isoformat()
-        saved_state = self.state_store.save_state(final_state)
 
-        # 11. Record in event_log (before TTS so it's never blocked)
-        episode_id = episode.get("episode_id", "") if episode else ""
-        if self.event_log_store is not None and episode_id:
-            self.event_log_store.record(
-                event_id=event.id,
-                episode_id=episode_id,
-                event_type=event.type,
-                source=event.source,
-                user_text=str(event.payload.get("user_text", "")),
-                pet_reply=action.reply,
-                skill_results=skill_results or None,
-                state_before=state_before,
-                state_after=saved_state,
-                mood_after=action.mood,
-                state_affect=action.state_affect.dict(),
-            )
-        if run and run.status not in {"failed", "superseded"}:
-            run.set_status("committed")
+        # ===== PHASE 3: LOCKED COMMIT =====
+        with self._event_lock:
+            # CAS save state
+            saved_state = self.state_store.save_state_cas(final_state, expected_version)
+            if saved_state is None:
+                # Version mismatch — re-read state and recompute deterministic deltas
+                logger.info("CAS failed, retrying with fresh state")
+                current_state = self.state_store.get_state()
+                state_before = dict(current_state)
+                ruled_state = apply_event_rules(current_state, event.type)
+                final_state = apply_state_delta(ruled_state, sanitized_delta)
+                if effort == "medium":
+                    final_state["energy"] = min(
+                        int(final_state.get("energy", 0)) - 2,
+                        int(ruled_state.get("energy", 0)) - 2,
+                    )
+                elif effort == "high":
+                    final_state["energy"] = min(
+                        int(final_state.get("energy", 0)) - 5,
+                        int(ruled_state.get("energy", 0)) - 4,
+                    )
+                    final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
+                final_state = clamp_state(final_state)
+                final_state["mood"] = action.mood
+                final_state["mode"] = "idle"
+                final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+                saved_state = self.state_store.save_state(final_state)
 
-        # 12. Update episode event count
-        if self.episode_manager is not None and episode_id:
-            self.episode_manager.update_event_count(episode_id)
-
-        # 13. Close episode on exit_phrase (after event is logged)
-        closed_on_exit = None
-        if event.type == "exit_phrase" and self.episode_manager is not None:
-            closed_on_exit = self.episode_manager.close_current("exit_phrase")
-            if closed_on_exit and self.summary_job_store is not None:
-                self.summary_job_store.enqueue(closed_on_exit)
-
-        # 14. TTS job (failure doesn't block the behavior response)
-        voice_url = None
-        audio_job_id = None
-        if synthesize_voice:
-            if self.audio_job_manager is not None:
-                audio_job_id = self.audio_job_manager.enqueue(
-                    action.reply,
-                    action.voice_style,
-                    run_id=run.run_id if run else "",
+            # Record in event_log
+            if self.event_log_store is not None and episode_id:
+                self.event_log_store.record(
                     event_id=event.id,
-                    session_id=episode_id,
+                    episode_id=episode_id,
+                    event_type=event.type,
+                    source=event.source,
+                    user_text=str(event.payload.get("user_text", "")),
+                    pet_reply=action.reply,
+                    skill_results=skill_results or None,
+                    state_before=state_before,
+                    state_after=saved_state,
+                    mood_after=action.mood,
+                    state_affect=action.state_affect.dict(),
                 )
-                if run and audio_job_id:
-                    run.audio_job_id = audio_job_id
-                    run.record("audio_enqueued", {"job_id": audio_job_id})
-            else:
-                try:
-                    voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
-                except Exception:
-                    voice_url = None
+            if run and run.status not in {"failed", "superseded"}:
+                run.set_status("committed")
 
-        # 15. Save memory candidates (Stage 3.6 pipeline)
+            # Update episode event count
+            if self.episode_manager is not None and episode_id:
+                self.episode_manager.update_event_count(episode_id)
+
+            # Close episode on exit_phrase
+            closed_on_exit = None
+            if event.type == "exit_phrase" and self.episode_manager is not None:
+                closed_on_exit = self.episode_manager.close_current("exit_phrase")
+                if closed_on_exit and self.summary_job_store is not None:
+                    self.summary_job_store.enqueue(closed_on_exit)
+
+            # TTS job
+            voice_url = None
+            audio_job_id = None
+            if synthesize_voice:
+                if self.audio_job_manager is not None:
+                    audio_job_id = self.audio_job_manager.enqueue(
+                        action.reply,
+                        action.voice_style,
+                        run_id=run.run_id if run else "",
+                        event_id=event.id,
+                        session_id=episode_id,
+                    )
+                    if run and audio_job_id:
+                        run.audio_job_id = audio_job_id
+                        run.record("audio_enqueued", {"job_id": audio_job_id})
+                else:
+                    try:
+                        voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
+                    except Exception:
+                        voice_url = None
+
+        # Post-commit work (outside lock)
         self._collect_memory_candidates(event, action, episode_id)
 
-        # 16. Log to interaction_log
         if self.interaction_log is not None:
             self.interaction_log.record(
                 event.type,
@@ -348,7 +426,6 @@ class RuntimeDispatcher:
                 user_text=str(event.payload.get("user_text", "")),
             )
 
-        # 17. Cleanup event log if needed
         if self.event_log_store is not None:
             max_rows = self.context_manager.raw_max_rows if self.context_manager else 3000
             self.event_log_store.cleanup_if_needed(
@@ -434,11 +511,13 @@ class RuntimeDispatcher:
             return 500
 
     def _try_maintenance_tick(self) -> None:
-        """Run one maintenance tick in a background thread — never blocks the response."""
-        if self.maintenance_service is None:
-            return
-        t = threading.Thread(target=self._run_maintenance_tick, daemon=True)
-        t.start()
+        """Notify maintenance worker — never blocks the response."""
+        if self.maintenance_worker is not None:
+            self.maintenance_worker.notify()
+        elif self.maintenance_service is not None:
+            # Fallback: legacy per-event thread (should not happen after Task 8)
+            t = threading.Thread(target=self._run_maintenance_tick, daemon=True)
+            t.start()
 
     def _run_maintenance_tick(self) -> None:
         try:

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from functools import partial
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from starlette.concurrency import run_in_threadpool
 
 from app.providers.errors import ProviderError
+from app.runtime.concurrency import ServerBusyError
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,11 @@ def _max_text_chars(request: Request) -> int:
 
 @router.post("/chat")
 async def post_text_chat(payload: TextChatRequest, request: Request):
+    if getattr(request.app.state, "shutdown_in_progress", False):
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Server is shutting down", "reason": "shutting_down"},
+        )
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text message is empty")
@@ -40,10 +46,13 @@ async def post_text_chat(payload: TextChatRequest, request: Request):
     started = datetime.utcnow()
     request.app.state.tick_service.apply_if_due()
     try:
-        result = await run_in_threadpool(
-            request.app.state.text_pipeline.handle,
-            text,
-            thinking_mode=payload.thinking_mode,
+        executor = request.app.state.agent_work_executor
+        fn = partial(request.app.state.text_pipeline.handle, text, thinking_mode=payload.thinking_mode)
+        result = await executor.submit(fn)
+    except ServerBusyError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Server is busy, please try again", "error_class": "server_busy"},
         )
     except ProviderError as exc:
         logger.warning("text_chat provider error: %s", exc.to_dict())

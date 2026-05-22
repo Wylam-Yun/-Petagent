@@ -9,7 +9,12 @@ def test_api_health_contract():
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "name": "Momo"}
+    body = response.json()
+    assert body["ok"] is True
+    assert body["name"] == "Momo"
+    assert "version" in body
+    assert "pid" in body
+    assert "started_at" in body
 
 
 def test_runtime_contracts():

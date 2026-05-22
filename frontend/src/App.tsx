@@ -17,6 +17,7 @@ import {
   refreshContext,
   reportDeviceState,
   resetRuntime,
+  sendHeartbeat,
   sendTextChat,
   triggerProactiveEvent,
   wakeMomo
@@ -143,6 +144,15 @@ function App() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [phase, busy]);
+
+  // Frontend heartbeat — tells backend the browser is alive
+  useEffect(() => {
+    void sendHeartbeat().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      void sendHeartbeat().catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const titleMood = useMemo(() => petState.mood, [petState.mood]);
   const interactionPreview = useMemo(() => {

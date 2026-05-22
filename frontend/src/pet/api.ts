@@ -140,6 +140,13 @@ export function sendTextChat(
   });
 }
 
+export function sendHeartbeat(): Promise<{ ok: boolean; received_at: string }> {
+  return requestJson("/api/frontend/heartbeat", {
+    method: "POST",
+    headers: { "content-type": "application/json" }
+  });
+}
+
 function extensionForType(type: string): string {
   if (type.includes("wav")) return "wav";
   if (type.includes("mpeg")) return "mp3";

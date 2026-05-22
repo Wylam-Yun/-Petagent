@@ -8,6 +8,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
 
+def _ensure_column(
+    connection: sqlite3.Connection, table: str, column: str, col_type: str, default: str = ""
+) -> None:
+    """Add a column to a table if it doesn't exist."""
+    rows = connection.execute("PRAGMA table_info(%s)" % table).fetchall()
+    if any(row["name"] == column for row in rows):
+        return
+    ddl = "ALTER TABLE %s ADD COLUMN %s %s" % (table, column, col_type)
+    if default:
+        ddl += " DEFAULT %s" % default
+    connection.execute(ddl)
+
+
 STATE_COLUMNS = [
     "name",
     "mood",
@@ -177,6 +190,7 @@ class PetStateStore:
                 )
                 """
             )
+            _ensure_column(self.connection, "pet_state", "version", "INTEGER", "0")
             self.connection.execute(
                 "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, '0.1')"
             )
@@ -201,6 +215,7 @@ class PetStateStore:
             return state
         data = {key: row[key] for key in STATE_COLUMNS}
         data["schema_version"] = "0.1"
+        data["version"] = row["version"] if "version" in row.keys() else 0
         return data
 
     def save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -209,16 +224,53 @@ class PetStateStore:
         saved["updated_at"] = now
         saved.setdefault("last_interaction_at", now)
         with self.connection.locked():
+            # Increment version for CAS support
             self.connection.execute(
                 """
                 UPDATE pet_state SET
                     name = ?, mood = ?, energy = ?, intimacy = ?, hunger = ?,
                     cleanliness = ?, loneliness = ?, sleepiness = ?, mode = ?,
-                    last_interaction_at = ?, updated_at = ?
+                    last_interaction_at = ?, updated_at = ?,
+                    version = version + 1
                 WHERE id = 1
                 """,
                 tuple(saved[column] for column in STATE_COLUMNS),
             )
             self.connection.commit()
+            # Read back the new version
+            row = self.connection.execute("SELECT version FROM pet_state WHERE id = 1").fetchone()
+            saved["version"] = row["version"] if row else 0
+        saved["schema_version"] = "0.1"
+        return saved
+
+    def save_state_cas(
+        self, state: Dict[str, Any], expected_version: int
+    ) -> Optional[Dict[str, Any]]:
+        """Save state with Compare-And-Swap on version.
+
+        Returns the saved state if CAS succeeded, None if version mismatch.
+        """
+        saved = dict(state)
+        now = datetime.utcnow().isoformat()
+        saved["updated_at"] = now
+        saved.setdefault("last_interaction_at", now)
+        with self.connection.locked():
+            cursor = self.connection.execute(
+                """
+                UPDATE pet_state SET
+                    name = ?, mood = ?, energy = ?, intimacy = ?, hunger = ?,
+                    cleanliness = ?, loneliness = ?, sleepiness = ?, mode = ?,
+                    last_interaction_at = ?, updated_at = ?,
+                    version = version + 1
+                WHERE id = 1 AND version = ?
+                """,
+                tuple(saved[column] for column in STATE_COLUMNS) + (expected_version,),
+            )
+            if cursor.rowcount == 0:
+                # Version mismatch — CAS failed
+                return None
+            self.connection.commit()
+            row = self.connection.execute("SELECT version FROM pet_state WHERE id = 1").fetchone()
+            saved["version"] = row["version"] if row else 0
         saved["schema_version"] = "0.1"
         return saved

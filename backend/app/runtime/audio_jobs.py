@@ -5,12 +5,16 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from app.runtime.audio_job_store import AudioJobStore
 
 logger = logging.getLogger(__name__)
 
-AUDIO_JOB_TERMINAL = {"ready", "failed", "expired", "superseded"}
+AUDIO_JOB_TERMINAL = {"ready", "failed", "expired", "superseded",
+                       "failed_runtime_restart", "failed_shutdown"}
 
 
 @dataclass
@@ -28,6 +32,7 @@ class AudioJob:
     error: Optional[str] = None
     provider: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
+    failure_reason: str = ""
 
     def dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +46,7 @@ class AudioJob:
             "timings_ms": dict(self.timings_ms),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "failure_reason": self.failure_reason,
         }
 
 
@@ -64,6 +70,7 @@ class AudioJobManager:
         max_workers: int = 2,
         provider_name: str = "tts",
         on_complete: Optional[Callable[[str, str, Optional[str]], None]] = None,
+        store: Optional["AudioJobStore"] = None,
     ) -> None:
         self.tts_provider = tts_provider
         self.ttl_seconds = ttl_seconds
@@ -71,6 +78,7 @@ class AudioJobManager:
         self.max_pending_per_session = max_pending_per_session
         self.provider_name = provider_name
         self.on_complete = on_complete
+        self._store = store
         self._jobs: Dict[str, AudioJob] = {}
         self._order: List[str] = []
         self._lock = threading.RLock()
@@ -134,19 +142,53 @@ class AudioJobManager:
             self._order.append(job_id)
             self._evict_if_needed()
 
+            # Write-through to SQLite
+            if self._store:
+                try:
+                    self._store.save(job.__dict__)
+                except Exception:
+                    logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
+                # Also persist superseded jobs
+                for existing_id, existing_job in self._jobs.items():
+                    if existing_id != job_id and existing_job.status == "superseded":
+                        try:
+                            self._store.save(existing_job.__dict__)
+                        except Exception:
+                            pass
+
         self._executor.submit(self._run_job, job_id)
         return job_id
 
     def get(self, job_id: str) -> Optional[AudioJob]:
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None:
-                return None
-            if job.status == "pending" and self._is_expired(job):
-                job.status = "expired"
-                job.error = "audio job expired"
-                job.updated_at = datetime.utcnow().isoformat()
-            return AudioJob(**job.__dict__)
+            if job is not None:
+                if job.status == "pending" and self._is_expired(job):
+                    job.status = "expired"
+                    job.error = "audio job expired"
+                    job.updated_at = datetime.utcnow().isoformat()
+                return AudioJob(**job.__dict__)
+
+        # Fall back to SQLite for jobs not in memory cache (e.g. after restart)
+        if self._store:
+            row = self._store.get(job_id)
+            if row is not None:
+                return AudioJob(
+                    job_id=row["job_id"],
+                    status=row["status"],
+                    text=row.get("text", ""),
+                    voice_style=row.get("voice_style", ""),
+                    created_at=row.get("created_at", ""),
+                    updated_at=row.get("updated_at", ""),
+                    run_id=row.get("run_id", ""),
+                    event_id=row.get("event_id", ""),
+                    session_id=row.get("session_id", ""),
+                    voice_url=row.get("voice_url"),
+                    error=row.get("error"),
+                    provider=row.get("provider", ""),
+                    timings_ms=row.get("timings_ms", {}),
+                )
+        return None
 
     def _run_job(self, job_id: str) -> None:
         with self._lock:
@@ -180,6 +222,12 @@ class AudioJobManager:
                 current.timings_ms["audio_queue"] = queue_ms
                 current.updated_at = datetime.utcnow().isoformat()
 
+                if self._store:
+                    try:
+                        self._store.save(current.__dict__)
+                    except Exception:
+                        logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
+
             if self.on_complete:
                 try:
                     self.on_complete(job_id, "failed", sanitized)
@@ -202,6 +250,12 @@ class AudioJobManager:
                 current.status = "failed"
                 current.voice_url = None
                 current.error = "tts returned empty"
+
+            if self._store:
+                try:
+                    self._store.save(current.__dict__)
+                except Exception:
+                    logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
 
         if self.on_complete:
             try:
@@ -240,8 +294,45 @@ class AudioJobManager:
                 self._order.pop(0)
                 self._jobs.pop(old_id, None)
 
-    def shutdown(self) -> None:
-        self._executor.shutdown(wait=False)
+    def shutdown(self, drain_timeout_s: Optional[float] = None) -> None:
+        if drain_timeout_s and drain_timeout_s > 0:
+            self._executor.shutdown(wait=True, timeout=drain_timeout_s)
+        else:
+            self._executor.shutdown(wait=False)
+
+    def pending_count(self) -> int:
+        """Count of pending jobs (public API for health checks)."""
+        with self._lock:
+            return sum(1 for j in self._jobs.values() if j.status == "pending")
+
+    def mark_restart_failed(self) -> int:
+        """Mark all pending/running jobs as failed_runtime_restart in SQLite."""
+        if self._store:
+            count = self._store.mark_restart_failed()
+            # Also update in-memory cache
+            with self._lock:
+                for job in self._jobs.values():
+                    if job.status in ("pending", "running"):
+                        job.status = "failed_runtime_restart"
+                        job.failure_reason = "runtime_restarted"
+                        job.error = "runtime restarted while job was in-flight"
+                        job.updated_at = datetime.utcnow().isoformat()
+            return count
+        return 0
+
+    def mark_shutdown_failed(self) -> int:
+        """Mark all pending/running jobs as failed_shutdown in SQLite."""
+        if self._store:
+            count = self._store.mark_shutdown_failed()
+            with self._lock:
+                for job in self._jobs.values():
+                    if job.status in ("pending", "running"):
+                        job.status = "failed_shutdown"
+                        job.failure_reason = "process_shutdown"
+                        job.error = "process shutdown while job was in-flight"
+                        job.updated_at = datetime.utcnow().isoformat()
+            return count
+        return 0
 
 
 def _sanitize_error(exc: Exception) -> str:

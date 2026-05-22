@@ -204,7 +204,11 @@ def is_probably_empty_audio(audio_path: Path, content_type: str) -> bool:
             frame_count = handle.getnframes()
             sample_rate = handle.getframerate()
             sample_width = handle.getsampwidth()
-            frames = handle.readframes(frame_count)
+            # Sample up to 16 windows of 4096 frames instead of reading all frames
+            window_size = 4096
+            max_windows = 16
+            total_frames_to_read = min(frame_count, window_size * max_windows)
+            frames = handle.readframes(total_frames_to_read)
     except Exception:
         return False
 
@@ -212,9 +216,12 @@ def is_probably_empty_audio(audio_path: Path, content_type: str) -> bool:
         return True
     if sample_width != 2:
         return False
+
+    # Check sampled frames for amplitude
     max_amplitude = 0
-    for index in range(0, len(frames) - 1, 2):
-        sample = int.from_bytes(frames[index : index + 2], "little", signed=True)
+    chunk_size = 2  # 16-bit samples = 2 bytes
+    for index in range(0, len(frames) - 1, chunk_size * 64):  # Sample every 64th frame
+        sample = int.from_bytes(frames[index : index + chunk_size], "little", signed=True)
         max_amplitude = max(max_amplitude, abs(sample))
         if max_amplitude > 96:
             return False

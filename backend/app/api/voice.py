@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from starlette.concurrency import run_in_threadpool
 
 from app.providers.errors import ProviderError
+from app.runtime.concurrency import ServerBusyError
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,6 @@ async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
             status_code=400,
             detail="Unsupported audio content type: %s" % (content_type or "unknown"),
         )
-    data = await file.read()
-    if len(data) > max_audio_bytes(settings):
-        raise HTTPException(status_code=413, detail="Audio file is too large")
     upload_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     filename = "voice-%s-%s.%s" % (
@@ -60,7 +58,19 @@ async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
         _extension_for_content_type(content_type),
     )
     path = upload_dir / filename
-    path.write_bytes(data)
+    limit = max_audio_bytes(settings)
+    total = 0
+    with path.open("wb") as out:
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > limit:
+                out.close()
+                path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Audio file is too large")
+            out.write(chunk)
     return path
 
 
@@ -71,18 +81,30 @@ async def post_voice_chat(
     thinking_mode: str = Form("false"),
     route: str = Form("auto"),
 ):
+    if getattr(request.app.state, "shutdown_in_progress", False):
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Server is shutting down", "reason": "shutting_down"},
+        )
     settings = request.app.state.settings
     started = datetime.utcnow()
     path = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
     request.app.state.tick_service.apply_if_due()
     try:
-        result = await run_in_threadpool(
+        executor = request.app.state.agent_work_executor
+        fn = partial(
             request.app.state.voice_pipeline.handle,
             path,
             file.content_type or "",
             requested_route=route,
             thinking_mode=_as_bool(thinking_mode),
+        )
+        result = await executor.submit(fn)
+    except ServerBusyError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Server is busy, please try again", "error_class": "server_busy"},
         )
     except ProviderError as exc:
         logger.warning("voice_chat provider error: %s", exc.to_dict())

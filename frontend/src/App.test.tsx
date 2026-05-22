@@ -52,6 +52,7 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
       })
     })
     .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
     .mockReturnValueOnce(eventPromise)
     .mockResolvedValueOnce({
       ok: true,
@@ -139,6 +140,7 @@ describe("text chat", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse })
       .mockResolvedValueOnce({
         ok: true,
@@ -162,7 +164,7 @@ describe("text chat", () => {
 
     await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
 
-    const [, textInit] = fetchMock.mock.calls[2];
+    const [, textInit] = fetchMock.mock.calls[3];
     expect(textInit.method).toBe("POST");
     expect(JSON.parse(textInit.body as string)).toMatchObject({
       text: "帮我写两数之和",

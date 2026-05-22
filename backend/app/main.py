@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+logger = logging.getLogger(__name__)
+
 from app.api import activation as activation_api
 from app.api import audio as audio_api
 from app.api import context as context_api
+from app.api import frontend as frontend_api
+from app.api import health as health_api
 from app.api import interactions as interactions_api
 from app.api import device as device_api
 from app.api import memory as memory_api
@@ -34,7 +41,11 @@ from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLM
 from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
 from app.runtime.activation import ActivationManager
+from app.runtime.audio_job_store import AudioJobStore
 from app.runtime.audio_jobs import AudioJobManager
+from app.runtime.concurrency import AgentWorkExecutor, ProviderGate
+from app.runtime.maintenance_worker import MaintenanceWorker
+from app.runtime.proactive_scheduler import ProactiveScheduler
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
@@ -218,14 +229,22 @@ def create_app(testing: bool = False) -> FastAPI:
         if run:
             run.record(f"audio_{status}", {"job_id": job_id, "error": error})
 
+    audio_job_store = AudioJobStore(state_store.connection)
     audio_job_manager = AudioJobManager(
         tts_provider,
         ttl_seconds=int(settings.app_config.get("audio_jobs", {}).get("ttl_seconds", 900)),
         max_workers=2,
         provider_name=str(getattr(tts_provider, "name", "tts")),
         on_complete=_on_audio_complete,
+        store=audio_job_store,
     )
+    # Mark any jobs that were pending/running when the process last died
+    audio_job_manager.mark_restart_failed()
     policy_guard = PolicyGuard()
+    agent_work_executor = AgentWorkExecutor(max_workers=4, max_queue=8)
+    proactive_scheduler = ProactiveScheduler()
+    maintenance_worker = MaintenanceWorker(maintenance_service)
+    provider_gate = ProviderGate()
 
     dispatcher = RuntimeDispatcher(
         state_store=state_store,
@@ -248,6 +267,8 @@ def create_app(testing: bool = False) -> FastAPI:
         agent_run_registry=agent_run_registry,
         memory_card_manager=memory_card_manager,
         policy_guard=policy_guard,
+        maintenance_worker=maintenance_worker,
+        provider_gate=provider_gate,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -280,7 +301,48 @@ def create_app(testing: bool = False) -> FastAPI:
         if origin not in allowed_origins:
             allowed_origins.append(origin)
 
-    app = FastAPI(title="PetAgent Momo", version=settings.schema_version)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Startup — core stores are ready immediately
+        app.state.shutdown_in_progress = False
+        app.state.core_ready = True
+        app.state.providers_ready = True
+        # Start maintenance worker
+        try:
+            maintenance_worker.start()
+        except Exception:
+            logger.warning("Failed to start maintenance worker", exc_info=True)
+        # Generate catch_up event for offline interval
+        try:
+            proactive_scheduler.catch_up_event()
+        except Exception:
+            logger.warning("Failed to generate catch_up event", exc_info=True)
+        logger.info("PetAgent Momo starting up (core_ready=True)")
+        yield
+        # Shutdown
+        logger.info("PetAgent Momo shutting down")
+        app.state.shutdown_in_progress = True
+        # Stop maintenance worker
+        try:
+            maintenance_worker.stop()
+        except Exception:
+            logger.warning("Failed to stop maintenance worker", exc_info=True)
+        # Drain audio jobs
+        shutdown_count = audio_job_manager.mark_shutdown_failed()
+        if shutdown_count:
+            logger.info("Marked %d audio jobs as failed_shutdown", shutdown_count)
+        audio_job_manager.shutdown()
+        # Close SQLite connections
+        try:
+            conn = getattr(state_store, "connection", None)
+            if conn is not None:
+                raw = getattr(conn, "_connection", conn)
+                raw.close()
+        except Exception:
+            logger.warning("Failed to close state_store connection", exc_info=True)
+        logger.info("PetAgent Momo shutdown complete")
+
+    app = FastAPI(title="PetAgent Momo", version=settings.schema_version, lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -291,6 +353,9 @@ def create_app(testing: bool = False) -> FastAPI:
 
     # Internal debug/management token (CC-0)
     internal_token = get_internal_token(settings)
+    app.state.shutdown_in_progress = False
+    app.state.core_ready = False
+    app.state.providers_ready = False
     app.state.settings = settings
     app.state.internal_token = internal_token
     app.state.state_store = state_store
@@ -318,15 +383,19 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.memory_curator = memory_curator
     app.state.summary_manager = summary_manager
     app.state.maintenance_service = maintenance_service
+    app.state.audio_job_store = audio_job_store
     app.state.audio_job_manager = audio_job_manager
     app.state.agent_run_registry = agent_run_registry
     app.state.memory_card_manager = memory_card_manager
     app.state.policy_guard = policy_guard
+    app.state.agent_work_executor = agent_work_executor
+    app.state.proactive_scheduler = proactive_scheduler
+    app.state.maintenance_worker = maintenance_worker
+    app.state.provider_gate = provider_gate
 
-    @app.get("/api/health")
-    def health():
-        return {"ok": True, "name": settings.pet_name}
-
+    # Health router registered first (light/watchdog/deep)
+    app.include_router(health_api.router)
+    app.include_router(frontend_api.router)
     app.include_router(runtime_api.router)
     app.include_router(pet_api.router)
     app.include_router(voice_api.router)
