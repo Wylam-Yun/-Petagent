@@ -11,6 +11,7 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-120}"
 SU_CHECK_INTERVAL="${SU_CHECK_INTERVAL:-600}"
 MAX_FAILS="${MAX_FAILS:-5}"
 BACKOFF_SECONDS="${BACKOFF_SECONDS:-120}"
+PROXY_BACKOFF_SECONDS="${PROXY_BACKOFF_SECONDS:-120}"
 SSHD_PORT="${SSHD_PORT:-8022}"
 PETAGENT_DIR="${PETAGENT_DIR:-$HOME_DIR/Petagent}"
 PETAGENT_PORT="${PETAGENT_PORT:-8000}"
@@ -190,11 +191,14 @@ ensure_proxy() {
         sleep 2
         if check_port_listen 7897; then
             log "Proxy restarted successfully"
+            return 0
         else
             log "WARNING: proxy restart did not bring up port 7897"
+            return 1
         fi
     else
         log "WARNING: proxy restart script failed"
+        return 1
     fi
 }
 
@@ -341,13 +345,23 @@ main() {
 
     ssh_fail_count=0
     petagent_fail_count=0
+    proxy_fail_count=0
     stuck_count=0
     su_fail_count=0
     last_su_check="$(date +%s 2>/dev/null || echo 0)"
 
     while true; do
         rotate_log
-        ensure_proxy
+        if ensure_proxy; then
+            proxy_fail_count=0
+        else
+            proxy_fail_count=$((proxy_fail_count + 1))
+            if [ "$proxy_fail_count" -ge "$MAX_FAILS" ]; then
+                log "CRITICAL: proxy failed $MAX_FAILS times; backing off ${PROXY_BACKOFF_SECONDS}s"
+                proxy_fail_count=0
+                sleep "$PROXY_BACKOFF_SECONDS"
+            fi
+        fi
 
         if check_sshd_listen; then
             ssh_fail_count=0

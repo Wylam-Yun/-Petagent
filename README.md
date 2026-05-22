@@ -72,3 +72,46 @@ Via 等轻量浏览器会依赖系统 WebView。旧 WebView 产出的 `webm/opus
 ## Secrets
 
 真实 API key 只放本地 `.env`，不要提交到 GitHub。`.env.example` 只保留空 key、base URL 和模型配置示例。
+
+V1.1 的 debug/internal endpoint 使用本地内部 token。默认 token 会生成在
+`backend/secrets/internal_token`，文件权限为 `0600`，该目录已被 `.gitignore`
+忽略。带 token 调试时使用：
+
+```bash
+TOKEN="$(cat backend/secrets/internal_token)"
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/health/deep
+```
+
+需要重新配对本地调试工具时，可用当前 token 轮换：
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8000/api/debug/token/rotate
+```
+
+接口只返回 token 指纹和 token 文件路径，不返回原始 token。轮换后重新从
+`backend/secrets/internal_token` 读取新 token。若使用 `DEBUG_INTERNAL_TOKEN`
+环境变量固定 token，轮换接口会拒绝操作。
+
+## Nubia Operations
+
+常用健康检查：
+
+```bash
+ssh nubia 'curl -s http://127.0.0.1:8000/api/health'
+ssh nubia 'curl -s http://127.0.0.1:8000/api/health/watchdog'
+ssh nubia 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
+```
+
+日志路径：
+
+- manager: `~/Petagent/logs/manager.log`
+- manager old rotation: `~/Petagent/logs/manager.log.old`
+- runtime launcher: `~/.petagent_runtime_manager.log`
+- backend runtime: `~/Petagent/backend/data/logs/runtime.log`
+- backend runtime old rotation: `~/Petagent/backend/data/logs/runtime.log.old`
+
+Termux manager 会检查 proxy 端口 `127.0.0.1:7897`，端口掉线时会尝试执行
+`/data/local/tmp/start-proxy.sh`，连续失败会按 `PROXY_BACKOFF_SECONDS` 退避。
+
+更多维护命令见 `docs/operations.md`。

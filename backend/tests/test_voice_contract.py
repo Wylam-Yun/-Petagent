@@ -4,13 +4,15 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
+WEBM_BYTES = b"\x1a\x45\xdf\xa3momo audio bytes"
+
 
 def test_voice_chat_returns_behavior_package_for_audio_upload():
     client = TestClient(create_app(testing=True))
 
     response = client.post(
         "/api/voice/chat",
-        files={"file": ("hello.webm", b"momo audio bytes", "audio/webm")},
+        files={"file": ("hello.webm", WEBM_BYTES, "audio/webm")},
     )
 
     assert response.status_code == 200
@@ -67,7 +69,7 @@ def test_voice_chat_falls_back_when_audio_provider_fails():
     response = client.post(
         "/api/voice/chat",
         data={"route": "slow"},
-        files={"file": ("noise.webm", b"noise", "audio/webm")},
+        files={"file": ("noise.webm", b"\x1a\x45\xdf\xa3noise", "audio/webm")},
     )
 
     assert response.status_code == 200
@@ -91,7 +93,7 @@ def test_voice_chat_does_not_create_accumulating_debug_log(
 
     response = client.post(
         "/api/voice/chat",
-        files={"file": ("hello.webm", b"momo audio bytes", "audio/webm")},
+        files={"file": ("hello.webm", WEBM_BYTES, "audio/webm")},
     )
 
     assert response.status_code == 200

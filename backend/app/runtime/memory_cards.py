@@ -170,25 +170,26 @@ class MemoryCardManager:
 
     def read_card_with_provenance(self, card_name: str) -> List[Dict[str, str]]:
         """Read card file and return list of {content, source_id, type, updated, ttl}."""
-        path = self._paths.get(card_name)
-        if path is None:
-            return []
-        # Migration fallback: try old subdirectory path if new path doesn't exist
-        if not path.exists():
-            old_path = self._old_paths.get(card_name)
-            if old_path and old_path.exists():
-                path = old_path
-            else:
+        with self._lock:
+            path = self._paths.get(card_name)
+            if path is None:
                 return []
-        result = []
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                parsed = self._parse_line(line)
-                if parsed:
-                    result.append(parsed)
-        except OSError:
-            return []
-        return result
+            # Migration fallback: try old subdirectory path if new path doesn't exist
+            if not path.exists():
+                old_path = self._old_paths.get(card_name)
+                if old_path and old_path.exists():
+                    path = old_path
+                else:
+                    return []
+            result = []
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    parsed = self._parse_line(line)
+                    if parsed:
+                        result.append(parsed)
+            except OSError:
+                return []
+            return result
 
     def _process_card_items(self, card_name: str, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Filter sensitive

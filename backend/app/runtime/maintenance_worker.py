@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -84,10 +85,11 @@ class MaintenanceWorker:
             if size <= self._max_log_bytes:
                 return
             old_path = self._log_path.with_suffix(".log.old")
-            # Atomic-ish: write old, then truncate current
-            data = self._log_path.read_bytes()
-            old_path.write_bytes(data)
-            self._log_path.write_bytes(b"")
+            # Copy in chunks so old Android devices never hold the full log in memory.
+            with self._log_path.open("rb") as src, old_path.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=64 * 1024)
+            with self._log_path.open("wb"):
+                pass
             logger.info("Rotated runtime.log (%d bytes)", size)
         except OSError:
             pass  # Best-effort; don't crash maintenance over log rotation

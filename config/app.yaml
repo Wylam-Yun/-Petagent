@@ -45,6 +45,7 @@ voice:
     - audio/webm
     - audio/wav
     - audio/mpeg
+    - audio/ogg
     - audio/mp4
   max_audio_bytes: 8388608
   asr_min_confidence: 0.25

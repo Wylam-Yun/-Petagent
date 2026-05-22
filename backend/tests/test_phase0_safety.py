@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.api.auth import get_internal_token, is_loopback, require_internal_token
+from app.api import debug as debug_api
 from app.main import create_app
 from app.providers.errors import (
     ProviderAuthError,
@@ -227,3 +228,54 @@ def test_cors_allows_loopback_origin():
     )
     assert resp.status_code in (200, 204)
     assert "access-control-allow-origin" in resp.headers
+
+
+def test_cors_rejects_unlisted_origin():
+    app = create_app(testing=True)
+    client = TestClient(app)
+    resp = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://192.168.99.99:8000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert "access-control-allow-origin" not in resp.headers
+
+
+def test_internal_incident_requires_loopback_even_with_token(monkeypatch):
+    app = create_app(testing=True)
+    token = app.state.internal_token
+    client = TestClient(app)
+
+    monkeypatch.setattr(debug_api, "is_loopback", lambda request: False)
+    resp = client.post(
+        "/api/internal/incident",
+        json={"kind": "test"},
+        headers={"Authorization": "Bearer %s" % token},
+    )
+
+    assert resp.status_code == 403
+    incidents = app.state.incident_store.recent(limit=5)
+    assert any(
+        item["kind"] == "auth_rejected"
+        and item["payload"]["path"] == "/api/internal/incident"
+        and item["payload"]["reason"] == "non_loopback_internal"
+        for item in incidents
+    )
+
+
+def test_internal_incident_accepts_loopback_with_token(monkeypatch):
+    app = create_app(testing=True)
+    token = app.state.internal_token
+    client = TestClient(app)
+
+    monkeypatch.setattr(debug_api, "is_loopback", lambda request: True)
+    resp = client.post(
+        "/api/internal/incident",
+        json={"kind": "test_loopback"},
+        headers={"Authorization": "Bearer %s" % token},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True

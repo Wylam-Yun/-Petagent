@@ -16,7 +16,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice")
 
-DEFAULT_AUDIO_TYPES = {"audio/webm", "audio/wav", "audio/mpeg", "audio/mp4"}
+DEFAULT_AUDIO_TYPES = {
+    "audio/webm",
+    "audio/wav",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/mp4",
+}
 DEFAULT_MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 
@@ -25,6 +31,8 @@ def _extension_for_content_type(content_type: str) -> str:
         return "wav"
     if content_type == "audio/mpeg":
         return "mp3"
+    if content_type == "audio/ogg":
+        return "ogg"
     if content_type == "audio/mp4":
         return "mp4"
     return "webm"
@@ -43,23 +51,42 @@ def _as_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _invalid_audio(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={"error": message, "error_class": "invalid_audio"},
+    )
+
+
 def _validate_magic_bytes(path: Path, content_type: str) -> None:
     """Validate magic bytes for known audio types. Raises HTTPException on mismatch."""
-    if content_type != "audio/wav":
+    required = {
+        "audio/wav": 12,
+        "audio/mpeg": 3,
+        "audio/ogg": 4,
+        "audio/webm": 4,
+    }.get(content_type)
+    if required is None:
         return
     try:
         with path.open("rb") as f:
-            header = f.read(12)
-        if len(header) < 12:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "File too small to be a valid WAV", "error_class": "invalid_audio"},
-            )
-        if header[:4] != b"RIFF" or header[8:12] != b"WAVE":
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "Invalid WAV file header", "error_class": "invalid_audio"},
-            )
+            header = f.read(required)
+        if len(header) < required:
+            raise _invalid_audio("File too small to be a valid audio file")
+        if content_type == "audio/wav":
+            if header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+                raise _invalid_audio("Invalid WAV file header")
+        elif content_type == "audio/mpeg":
+            has_id3 = header[:3] == b"ID3"
+            has_frame_sync = len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0
+            if not (has_id3 or has_frame_sync):
+                raise _invalid_audio("Invalid MP3 file header")
+        elif content_type == "audio/ogg":
+            if header[:4] != b"OggS":
+                raise _invalid_audio("Invalid OGG file header")
+        elif content_type == "audio/webm":
+            if header[:4] != b"\x1a\x45\xdf\xa3":
+                raise _invalid_audio("Invalid WebM file header")
     except HTTPException:
         raise
     except OSError:
