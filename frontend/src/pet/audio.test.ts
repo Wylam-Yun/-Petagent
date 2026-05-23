@@ -162,6 +162,83 @@ describe("audio recording helpers", () => {
     expect(view.getUint32(28, true)).toBe(96000);
     now.mockRestore();
   });
+
+  test("uses legacy navigator getUserMedia when mediaDevices is missing", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const legacyGetUserMedia = vi.fn(
+      (
+        _constraints: MediaStreamConstraints,
+        success: (stream: MediaStream) => void
+      ) => success(stream)
+    );
+    const originalMediaDevices = navigator.mediaDevices;
+    const originalGetUserMedia = (
+      navigator as Navigator & {
+        webkitGetUserMedia?: typeof legacyGetUserMedia;
+      }
+    ).webkitGetUserMedia;
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: undefined
+    });
+    Object.defineProperty(navigator, "webkitGetUserMedia", {
+      configurable: true,
+      value: legacyGetUserMedia
+    });
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeAudioContext {
+      sampleRate = 16_000;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array([0.2, 0.1])
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    await expect(session.stop()).resolves.toBeInstanceOf(Blob);
+    expect(legacyGetUserMedia).toHaveBeenCalledWith(
+      { audio: true },
+      expect.any(Function),
+      expect.any(Function)
+    );
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: originalMediaDevices
+    });
+    Object.defineProperty(navigator, "webkitGetUserMedia", {
+      configurable: true,
+      value: originalGetUserMedia
+    });
+    now.mockRestore();
+  });
 });
 
 function readBlob(blob: Blob): Promise<ArrayBuffer> {

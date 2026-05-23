@@ -1,6 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { getAudioJob, getProactiveCheck, reportDeviceState, sendTextChat, uploadVoice } from "./api";
+import {
+  getAudioJob,
+  getProactiveCheck,
+  reportDeviceState,
+  sendHeartbeat,
+  sendTextChat,
+  uploadVoice
+} from "./api";
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -67,6 +74,22 @@ describe("stage 3 API helpers", () => {
     expect(url).toBe("/api/pet/proactive");
     expect(response).toEqual({ active: false });
   });
+
+  test("sends frontend heartbeat as JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, received_at: "now" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendHeartbeat();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/frontend/heartbeat");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(JSON.parse(init.body as string)).toHaveProperty("user_agent");
+  });
 });
 
 describe("sendTextChat", () => {
@@ -91,6 +114,68 @@ describe("sendTextChat", () => {
 });
 
 describe("requestJson retry", () => {
+  test("does not require AbortController in old Android browsers", async () => {
+    const originalAbortController = globalThis.AbortController;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: false })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("AbortController", undefined);
+
+    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init).not.toHaveProperty("signal");
+    vi.stubGlobal("AbortController", originalAbortController);
+  });
+
+  test("falls back to XMLHttpRequest when fetch is missing", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+
+    class FakeXMLHttpRequest {
+      static DONE = 4;
+      readyState = 0;
+      status = 0;
+      responseText = "";
+      timeout = 0;
+      onreadystatechange: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      headers: Record<string, string> = {};
+      method = "";
+      url = "";
+      body: XMLHttpRequestBodyInit | null = null;
+
+      open(method: string, url: string) {
+        this.method = method;
+        this.url = url;
+      }
+
+      setRequestHeader(name: string, value: string) {
+        this.headers[name] = value;
+      }
+
+      send(body: XMLHttpRequestBodyInit | null) {
+        this.body = body;
+        this.status = 200;
+        this.responseText = JSON.stringify({ active: false });
+        this.readyState = FakeXMLHttpRequest.DONE;
+        this.onreadystatechange?.();
+      }
+    }
+
+    vi.stubGlobal("fetch", undefined);
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+
+    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+
+    vi.stubGlobal("fetch", originalFetch);
+    vi.stubGlobal("XMLHttpRequest", originalXhr);
+  });
+
   test("retries on failure and succeeds on second attempt", async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error("network error"))

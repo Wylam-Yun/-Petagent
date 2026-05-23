@@ -20,22 +20,102 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     if (attempt > 0) {
       await new Promise((r) => window.setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
     }
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-      window.clearTimeout(timer);
+      const response = await requestWithTransport(url, init, timeoutMs);
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
       return response.json() as Promise<T>;
     } catch (err) {
-      window.clearTimeout(timer);
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt === maxRetries) throw lastError;
     }
   }
   throw lastError ?? new Error("request failed");
+}
+
+type JsonTransportResponse = {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+};
+
+function requestWithTransport(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<JsonTransportResponse> {
+  if (typeof fetch === "function") {
+    return requestWithFetch(url, init, timeoutMs);
+  }
+  return requestWithXhr(url, init, timeoutMs);
+}
+
+async function requestWithFetch(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<JsonTransportResponse> {
+  const controller = createAbortController();
+  const timer = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  try {
+    return await fetch(url, {
+      ...init,
+      ...(controller ? { signal: controller.signal } : {})
+    });
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
+  }
+}
+
+function requestWithXhr(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<JsonTransportResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(init?.method ?? "GET", url, true);
+    xhr.timeout = timeoutMs;
+
+    for (const [name, value] of normalizedHeaders(init?.headers)) {
+      xhr.setRequestHeader(name, value);
+    }
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== XMLHttpRequest.DONE) return;
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => JSON.parse(xhr.responseText || "null")
+      });
+    };
+    xhr.onerror = () => reject(new TypeError("network error"));
+    xhr.ontimeout = () => reject(new Error("request timeout"));
+    xhr.onabort = () => reject(new Error("request aborted"));
+    xhr.send((init?.body as XMLHttpRequestBodyInit | null | undefined) ?? null);
+  });
+}
+
+function normalizedHeaders(headers: HeadersInit | undefined): [string, string][] {
+  if (!headers) return [];
+  if (typeof Headers !== "undefined" && headers instanceof Headers) {
+    const result: [string, string][] = [];
+    headers.forEach((value, name) => result.push([name, value]));
+    return result;
+  }
+  if (Array.isArray(headers)) {
+    return headers.map(([name, value]) => [name, value]);
+  }
+  const plainHeaders = headers as Record<string, string>;
+  return Object.keys(plainHeaders).map((name) => [name, String(plainHeaders[name])]);
+}
+
+function createAbortController(): AbortController | null {
+  if (typeof AbortController === "undefined") return null;
+  return new AbortController();
 }
 
 export function getPetState(): Promise<PetState> {
@@ -162,7 +242,8 @@ export function sendTextChat(
 export function sendHeartbeat(): Promise<{ ok: boolean; received_at: string }> {
   return requestJson("/api/frontend/heartbeat", {
     method: "POST",
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ user_agent: navigator.userAgent ?? "" })
   });
 }
 

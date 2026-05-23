@@ -27,9 +27,34 @@ export type VoiceRecordingSession = {
 };
 
 type RecordingOptions = {
-  mediaDevices?: Pick<MediaDevices, "getUserMedia">;
+  mediaDevices?: MediaDeviceSource;
   mediaRecorderCtor?: typeof MediaRecorder;
   audioContextCtor?: typeof AudioContext;
+};
+
+type MediaDeviceSource = Pick<MediaDevices, "getUserMedia">;
+
+type LegacyNavigatorMedia = Navigator & {
+  getUserMedia?: (
+    constraints: MediaStreamConstraints,
+    success: (stream: MediaStream) => void,
+    error: (err: unknown) => void
+  ) => void;
+  webkitGetUserMedia?: (
+    constraints: MediaStreamConstraints,
+    success: (stream: MediaStream) => void,
+    error: (err: unknown) => void
+  ) => void;
+  mozGetUserMedia?: (
+    constraints: MediaStreamConstraints,
+    success: (stream: MediaStream) => void,
+    error: (err: unknown) => void
+  ) => void;
+  msGetUserMedia?: (
+    constraints: MediaStreamConstraints,
+    success: (stream: MediaStream) => void,
+    error: (err: unknown) => void
+  ) => void;
 };
 
 class UnsupportedWavRecorderError extends Error {
@@ -61,7 +86,7 @@ export async function createVoiceRecordingSession(
 async function createWavRecordingSession(
   options: RecordingOptions = {}
 ): Promise<VoiceRecordingSession> {
-  const mediaDevices = options.mediaDevices ?? navigator.mediaDevices;
+  const mediaDevices = options.mediaDevices ?? getMediaDeviceSource();
   const AudioContextCtor = options.audioContextCtor ?? getAudioContextCtor();
   const unavailableReason = microphoneUnavailableReason(mediaDevices);
   if (unavailableReason) {
@@ -73,7 +98,7 @@ async function createWavRecordingSession(
 
   let stream: MediaStream;
   try {
-    stream = await mediaDevices.getUserMedia({ audio: true });
+    stream = await getUserMedia(mediaDevices, { audio: true });
   } catch {
     throw new MicrophonePermissionError("permission_denied");
   }
@@ -150,7 +175,7 @@ async function createWavRecordingSession(
 async function createMediaRecorderSession(
   options: RecordingOptions = {}
 ): Promise<VoiceRecordingSession> {
-  const mediaDevices = options.mediaDevices ?? navigator.mediaDevices;
+  const mediaDevices = options.mediaDevices ?? getMediaDeviceSource();
   const MediaRecorderCtor = options.mediaRecorderCtor ?? window.MediaRecorder;
   const unavailableReason = microphoneUnavailableReason(mediaDevices);
   if (unavailableReason) {
@@ -162,7 +187,7 @@ async function createMediaRecorderSession(
 
   let stream: MediaStream;
   try {
-    stream = await mediaDevices.getUserMedia({ audio: true });
+    stream = await getUserMedia(mediaDevices, { audio: true });
   } catch {
     throw new MicrophonePermissionError("permission_denied");
   }
@@ -235,7 +260,7 @@ function getAudioContextCtor(): typeof AudioContext | undefined {
 }
 
 function microphoneUnavailableReason(
-  mediaDevices?: Pick<MediaDevices, "getUserMedia">
+  mediaDevices?: MediaDeviceSource
 ): "insecure_context" | "missing_api" | null {
   if (!isLocalhost() && window.isSecureContext === false) {
     return "insecure_context";
@@ -244,6 +269,35 @@ function microphoneUnavailableReason(
     return "missing_api";
   }
   return null;
+}
+
+function getMediaDeviceSource(): MediaDeviceSource | undefined {
+  const modernMediaDevices = navigator.mediaDevices as Partial<MediaDeviceSource> | undefined;
+  if (typeof modernMediaDevices?.getUserMedia === "function") {
+    return modernMediaDevices as MediaDeviceSource;
+  }
+
+  const legacyNavigator = navigator as LegacyNavigatorMedia;
+  const legacyGetUserMedia =
+    legacyNavigator.getUserMedia ??
+    legacyNavigator.webkitGetUserMedia ??
+    legacyNavigator.mozGetUserMedia ??
+    legacyNavigator.msGetUserMedia;
+  if (!legacyGetUserMedia) return undefined;
+
+  return {
+    getUserMedia: (constraints: MediaStreamConstraints) =>
+      new Promise<MediaStream>((resolve, reject) => {
+        legacyGetUserMedia.call(legacyNavigator, constraints, resolve, reject);
+      })
+  };
+}
+
+function getUserMedia(
+  mediaDevices: MediaDeviceSource,
+  constraints: MediaStreamConstraints
+): Promise<MediaStream> {
+  return Promise.resolve(mediaDevices.getUserMedia(constraints));
 }
 
 function isLocalhost(): boolean {
