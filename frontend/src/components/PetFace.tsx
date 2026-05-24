@@ -9,7 +9,7 @@ type PetFaceProps = {
 export function PetFace({ faceType, animation }: PetFaceProps) {
   return (
     <div
-      aria-label="Momo 表情"
+      aria-label="豆豆表情"
       className={`pet-face animation-${animation}`}
       data-face-type={faceType}
     >

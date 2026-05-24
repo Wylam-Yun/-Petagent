@@ -29,10 +29,10 @@ describe("TextInputBar", () => {
     render(<TextInputBar disabled={false} onSubmit={onSubmit} />);
 
     const input = screen.getByPlaceholderText("输入一句话……");
-    fireEvent.change(input, { target: { value: "夸夸 Momo" } });
+    fireEvent.change(input, { target: { value: "夸夸豆豆" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSubmit).toHaveBeenCalledWith("夸夸 Momo");
+    expect(onSubmit).toHaveBeenCalledWith("夸夸豆豆");
   });
 
   test("keeps text when submission fails without leaking rejection", async () => {

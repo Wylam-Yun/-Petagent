@@ -235,5 +235,5 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "pet_state": new_state,
-        "reply": "\u4f60\u597d\u5440\uff0c\u6211\u662f Momo\u3002\u6211\u4eec\u91cd\u65b0\u5f00\u59cb\u8ba4\u8bc6\u5427\u3002",  # 你好呀，我是 Momo。我们重新开始认识吧。
+        "reply": "\u4f60\u597d\u5440\uff0c\u6211\u662f\u8c46\u8c46\u3002\u6211\u4eec\u91cd\u65b0\u5f00\u59cb\u8ba4\u8bc6\u5427\u3002",  # 你好呀，我是豆豆。我们重新开始认识吧。
     }

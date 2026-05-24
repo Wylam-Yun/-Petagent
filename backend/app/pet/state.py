@@ -103,7 +103,7 @@ class LockedSQLiteConnection:
         return getattr(self._connection, name)
 
 
-def default_state(name: str = "Momo") -> Dict[str, Any]:
+def default_state(name: str = "豆豆") -> Dict[str, Any]:
     now = datetime.utcnow().isoformat()
     return {
         "schema_version": "0.1",
@@ -122,7 +122,7 @@ def default_state(name: str = "Momo") -> Dict[str, Any]:
 
 
 class PetStateStore:
-    def __init__(self, db_path: Optional[Path], pet_name: str = "Momo") -> None:
+    def __init__(self, db_path: Optional[Path], pet_name: str = "豆豆") -> None:
         self.pet_name = pet_name
         recovered_once = False
         if db_path is not None:

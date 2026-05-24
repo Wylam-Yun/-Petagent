@@ -6,7 +6,7 @@ import { VoiceButton } from "./VoiceButton";
 import type { VoiceChatResponse } from "../pet/types";
 
 const voiceResponse: VoiceChatResponse = {
-  reply: "辛苦啦。Momo 陪你缓一下。",
+  reply: "辛苦啦。豆豆陪你缓一下。",
   mood: "concerned",
   face_type: "concerned",
   animation: "tilt",
@@ -22,7 +22,7 @@ const voiceResponse: VoiceChatResponse = {
     confidence: 0.82
   },
   pet_state: {
-    name: "Momo",
+    name: "豆豆",
     mood: "concerned",
     energy: 72,
     intimacy: 41,
@@ -134,7 +134,7 @@ describe("VoiceButton", () => {
 
     expect(createRecorder).not.toHaveBeenCalled();
     expect(uploadVoice).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith("按住久一点，Momo 才听得到。");
+    expect(onError).toHaveBeenCalledWith("按住久一点，豆豆才听得到。");
     vi.useRealTimers();
   });
 });

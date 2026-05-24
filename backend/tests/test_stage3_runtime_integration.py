@@ -24,7 +24,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
 
         def complete_json(self, messages):
             return {
-                "reply": "辛苦啦，Momo 陪你慢慢缓一下。",
+                "reply": "辛苦啦，豆豆陪你慢慢缓一下。",
                 "mood": "concerned",
                 "face_type": "concerned",
                 "animation": "tilt",

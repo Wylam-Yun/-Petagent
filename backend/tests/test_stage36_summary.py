@@ -14,7 +14,7 @@ class MockSummaryLLM:
 
     def __init__(self, result=None):
         self._result = result or {
-            "summary": "用户和 Momo 聊了天气和心情",
+            "summary": "用户和豆豆聊了天气和心情",
             "key_events": ["聊了天气", "用户说有点累"],
             "mood_notes": "用户有点疲惫",
             "important_quotes": [
@@ -45,7 +45,7 @@ def test_episode_summary_generated():
         event_type="voice_message",
         source="voice_fast",
         user_text="今天好累啊",
-        pet_reply="辛苦啦，Momo 陪你",
+        pet_reply="辛苦啦，豆豆陪你",
         mood_after="concerned",
     )
     episodes.update_event_count(ep["episode_id"])
@@ -59,7 +59,7 @@ def test_episode_summary_generated():
 
     assert result is not None
     assert result["episode_id"] == ep["episode_id"]
-    assert "天气" in result["summary"] or "Momo" in result["summary"]
+    assert "天气" in result["summary"] or "豆豆" in result["summary"]
 
     # Episode summary should be saved
     summaries = ess.recent(limit=5)

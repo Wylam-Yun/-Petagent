@@ -9,7 +9,7 @@ from app.runtime.tick import TickService
 
 
 _FULL_STATE = {
-    "name": "Momo", "mood": "idle", "energy": 50, "intimacy": 40,
+    "name": "豆豆", "mood": "idle", "energy": 50, "intimacy": 40,
     "hunger": 50, "cleanliness": 85, "loneliness": 50, "sleepiness": 10,
     "mode": "idle", "last_interaction_at": "2026-05-22T10:00:00", "updated_at": "2026-05-22T10:00:00",
 }

@@ -4,7 +4,7 @@ from app.pet.guard import DEFAULT_STATE_DELTA_LIMITS, guard_action
 def test_guard_replaces_invalid_mood_and_limits_delta():
     action = guard_action(
         {
-            "reply": "Momo 在呢。",
+            "reply": "豆豆在呢。",
             "mood": "not-a-mood",
             "face_type": "not-a-face",
             "animation": "not-animation",
@@ -29,7 +29,7 @@ def test_guard_uses_fallback_for_invalid_json():
 
 
 def test_guard_allows_natural_length_replies_up_to_configured_limit():
-    reply = "Momo 可以陪你把思路写清楚，先用哈希表记录见过的数字，再找目标差值。"
+    reply = "豆豆可以陪你把思路写清楚，先用哈希表记录见过的数字，再找目标差值。"
 
     action = guard_action({"reply": reply, "mood": "thinking"}, max_reply_chars=500)
 

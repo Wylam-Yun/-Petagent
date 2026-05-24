@@ -41,7 +41,7 @@ class ProactiveService:
         return PetEvent(
             type=event_type,
             source="proactive",
-            payload={"description": "Momo 主动陪伴事件", "time": current.isoformat()},
+            payload={"description": "豆豆主动陪伴事件", "time": current.isoformat()},
         )
 
     def next_event(self, now: Optional[datetime] = None) -> Optional[PetEvent]:

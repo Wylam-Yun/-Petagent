@@ -5,6 +5,6 @@ import { PetFace } from "./PetFace";
 test("PetFace renders the selected kaomoji and animation class", () => {
   render(<PetFace faceType="happy" animation="bounce" />);
 
-  expect(screen.getByLabelText("Momo 表情")).toHaveTextContent("(^▽^)");
-  expect(screen.getByLabelText("Momo 表情")).toHaveClass("animation-bounce");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(^▽^)");
+  expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-bounce");
 });

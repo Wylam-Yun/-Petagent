@@ -14,7 +14,7 @@ def test_corrupt_database_is_quarantined_and_recreated(tmp_path: Path) -> None:
 
     store = PetStateStore(db_path)
 
-    assert store.get_state()["name"] == "Momo"
+    assert store.get_state()["name"] == "豆豆"
     assert sqlite3.connect(db_path).execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
     backup_roots = list((tmp_path / "db-backups").glob("corrupt-*"))

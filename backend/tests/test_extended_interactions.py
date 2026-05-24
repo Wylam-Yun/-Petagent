@@ -57,7 +57,7 @@ def test_extended_button_event_returns_contextual_response():
         json={
             "event": "praise_momo",
             "payload": {
-                "description": "用户夸夸 Momo",
+                "description": "用户夸夸豆豆",
                 "interaction_group": "pet_care",
             },
         },

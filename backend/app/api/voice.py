@@ -164,7 +164,7 @@ async def post_voice_chat(
     except ProviderError as exc:
         logger.warning("voice_chat provider error: %s", exc.to_dict())
         body: Dict[str, Any] = {
-            "reply": "Momo 有点累了，稍后再试试吧~",
+            "reply": "豆豆有点累了，稍后再试试吧~",
             "mood": "tired",
             "face_type": "tired",
             "animation": "slowBlink",

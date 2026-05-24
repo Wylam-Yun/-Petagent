@@ -8,7 +8,7 @@ type StatusBarProps = {
 
 export function StatusBar({ state }: StatusBarProps) {
   return (
-    <section className="status-bar" aria-label="Momo 状态">
+    <section className="status-bar" aria-label="豆豆状态">
       <StatusItem icon={<Heart />} label="亲密" value={state.intimacy} />
       <StatusItem icon={<Battery />} label="活力" value={state.energy} />
       <StatusItem icon={<Sparkles />} label="心情" value={state.mood} />

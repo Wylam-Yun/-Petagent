@@ -94,7 +94,7 @@ def test_event_log_stores_state_affect():
             "interaction_tone": "affectionate",
             "pet_effort": "medium",
             "emotional_effect": "happy",
-            "reason": "用户在和 Momo 玩",
+            "reason": "用户在和豆豆玩",
         }
         return result
 

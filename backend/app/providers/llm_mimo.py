@@ -49,7 +49,7 @@ class MockLLMProvider:
 
     def complete_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         return {
-            "reply": "嘿嘿，Momo 在呢。",
+            "reply": "嘿嘿，豆豆在呢。",
             "mood": "happy",
             "face_type": "happy",
             "animation": "bounce",

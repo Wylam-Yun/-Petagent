@@ -44,7 +44,7 @@ def post_activation_wake(payload: ActivationRequest, request: Request):
             "schema_version": request.app.state.settings.schema_version,
             "active": False,
             "session_id": None,
-            "reply": "唔，Momo 好像没听清。",
+            "reply": "唔，豆豆好像没听清。",
             "mood": "concerned",
             "face_type": "concerned",
             "animation": "tilt",

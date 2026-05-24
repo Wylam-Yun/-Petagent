@@ -24,7 +24,7 @@ def provider_config() -> ProviderConfig:
 
 
 def test_parse_transcript_json_accepts_common_shapes():
-    assert parse_transcript_json({"text": "你好 Momo"}) == ("你好 Momo", 1.0)
+    assert parse_transcript_json({"text": "你好豆豆"}) == ("你好豆豆", 1.0)
     assert parse_transcript_json({"transcript": "你好默默", "confidence": 0.72}) == (
         "你好默默",
         0.72,
@@ -38,7 +38,7 @@ def test_parse_transcript_json_uses_configured_paths_for_nested_provider():
     body = {
         "payload": {
             "speech": {
-                "text": "Momo 我回来啦",
+                "text": "豆豆我回来啦",
                 "confidence_score": 0.64,
             }
         }
@@ -48,7 +48,7 @@ def test_parse_transcript_json_uses_configured_paths_for_nested_provider():
         body,
         text_paths=["payload.speech.text"],
         confidence_paths=["payload.speech.confidence_score"],
-    ) == ("Momo 我回来啦", 0.64)
+    ) == ("豆豆我回来啦", 0.64)
 
 
 def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypatch):
@@ -63,7 +63,7 @@ def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypat
             return None
 
         def json(self):
-            return {"text": "你好 Momo", "confidence": 0.81}
+            return {"text": "你好豆豆", "confidence": 0.81}
 
     def fake_post(url, **kwargs):
         captured["url"] = url
@@ -82,7 +82,7 @@ def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypat
         "http": "http://127.0.0.1:7897",
         "https": "http://127.0.0.1:7897",
     }
-    assert transcript.text == "你好 Momo"
+    assert transcript.text == "你好豆豆"
     assert transcript.confidence == 0.81
     assert transcript.provider == "nvidia_http_asr"
 

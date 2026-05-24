@@ -122,7 +122,7 @@ class ProactiveScheduler:
                 "event_type": "catch_up",
                 "payload": {
                     "offline_seconds": int(offline_seconds),
-                    "message": f"Momo was offline for {int(offline_seconds)} seconds",
+                    "message": f"豆豆 was offline for {int(offline_seconds)} seconds",
                 },
                 "bucket": self._started_at.isoformat(),
                 "enqueued_at": datetime.utcnow().isoformat(),

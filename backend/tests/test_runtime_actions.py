@@ -11,12 +11,12 @@ def test_pet_action_requires_reply():
 
 def test_pet_response_has_runtime_metadata():
     response = PetResponse(
-        reply="嘿嘿，Momo 在呢。",
+        reply="嘿嘿，豆豆在呢。",
         mood="happy",
         face_type="happy",
         animation="bounce",
         vibration="light",
-        pet_state={"name": "Momo"},
+        pet_state={"name": "豆豆"},
         runtime={"event_id": "evt-test", "skills_used": []},
     )
 

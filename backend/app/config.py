@@ -209,7 +209,7 @@ def load_settings(
         upload_dir=upload_dir,
         frontend_dist=frontend_dist,
         runtime_name=runtime.get("name", "PetAgent"),
-        pet_name=runtime.get("pet_name", "Momo"),
+        pet_name=runtime.get("pet_name", "豆豆"),
         schema_version=runtime.get("schema_version", "0.1"),
         app_config=app_config,
         models_config=models_config,

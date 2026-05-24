@@ -55,7 +55,7 @@ def test_mimo_tts_smoke_generates_audio():
         pytest.skip("MIMO_API_KEY is not configured")
 
     provider = MiMoTTSProvider(settings)
-    url = provider.synthesize("嘿嘿，Momo 轻轻冒个泡。")
+    url = provider.synthesize("嘿嘿，豆豆轻轻冒个泡。")
 
     assert url is not None
     path = settings.project_root / url.lstrip("/")

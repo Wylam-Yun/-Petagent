@@ -132,7 +132,7 @@ def test_runtime_reset_clears_everything():
     assert body["ok"] is True
     assert "pet_state" in body
     assert "reply" in body
-    assert "Momo" in body["reply"]
+    assert "豆豆" in body["reply"]
 
     # All data cleared
     assert mm.count() == 0

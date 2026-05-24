@@ -122,7 +122,7 @@ def _audio_format_from_content_type(content_type: str) -> str:
 
 def build_audio_prompt() -> str:
     return (
-        "你正在帮助一个叫 Momo 的手机桌宠理解用户的语音。"
+        "你正在帮助一个叫豆豆的手机桌宠理解用户的语音。"
         "请从音频中提取用户大概说了什么、当前情绪、语气特点、"
         "是否有叹气/笑声/沉默/环境噪音等非语言声音。"
         "只输出 JSON："

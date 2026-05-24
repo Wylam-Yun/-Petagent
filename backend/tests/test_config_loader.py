@@ -11,7 +11,7 @@ def test_config_loader_reads_model_config_without_api_key(tmp_path: Path):
         """
 runtime:
   name: PetAgent
-  pet_name: Momo
+  pet_name: 豆豆
 paths:
   data_dir: backend/data
   audio_dir: backend/static/audio
@@ -38,13 +38,13 @@ providers:
 """,
         encoding="utf-8",
     )
-    (config_dir / "pet_persona.yaml").write_text("name: Momo\n", encoding="utf-8")
+    (config_dir / "pet_persona.yaml").write_text("name: 豆豆\n", encoding="utf-8")
     (config_dir / "skills.yaml").write_text("skills: []\n", encoding="utf-8")
     (config_dir / "ui_theme.json").write_text("{}", encoding="utf-8")
 
     settings = load_settings(root=root, env={})
 
-    assert settings.pet_name == "Momo"
+    assert settings.pet_name == "豆豆"
     assert settings.llm.model == "test-llm"
     assert settings.tts.model == "test-tts"
     assert settings.tts.voice == "冰糖"
@@ -59,7 +59,7 @@ def test_config_loader_reads_fast_voice_providers_without_leaking_secrets(tmp_pa
         """
 runtime:
   name: PetAgent
-  pet_name: Momo
+  pet_name: 豆豆
 voice:
   default_route: fast
   slow_fallback_enabled: true
@@ -140,7 +140,7 @@ providers:
 """,
         encoding="utf-8",
     )
-    (config_dir / "pet_persona.yaml").write_text("name: Momo\n", encoding="utf-8")
+    (config_dir / "pet_persona.yaml").write_text("name: 豆豆\n", encoding="utf-8")
     (config_dir / "skills.yaml").write_text("skills: []\n", encoding="utf-8")
     (config_dir / "ui_theme.json").write_text("{}", encoding="utf-8")
 

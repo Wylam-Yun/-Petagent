@@ -13,7 +13,7 @@ def test_event_log_records_all_fields():
         episode_id="ep-test1",
         event_type="voice_message",
         source="voice_fast",
-        user_text="你好 Momo",
+        user_text="你好豆豆",
         pet_reply="你好呀！",
         skill_results=[{"skill_id": "weather.current", "result": {}}],
         state_before={"mood": "idle", "energy": 72},
@@ -27,7 +27,7 @@ def test_event_log_records_all_fields():
     assert evt["event_id"] == "evt-test1"
     assert evt["episode_id"] == "ep-test1"
     assert evt["event_type"] == "voice_message"
-    assert evt["user_text"] == "你好 Momo"
+    assert evt["user_text"] == "你好豆豆"
     assert evt["pet_reply"] == "你好呀！"
     assert evt["mood_after"] == "happy"
 

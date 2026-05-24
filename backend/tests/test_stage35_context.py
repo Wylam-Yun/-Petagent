@@ -24,7 +24,7 @@ def test_context_manager_respects_budget():
             event_type="voice_message",
             source="voice_fast",
             user_text=f"这是一条比较长的用户消息，用来测试上下文预算裁剪功能 {i}",
-            pet_reply=f"这是 Momo 的回复，也稍微长一点来帮助测试 {i}",
+            pet_reply=f"这是豆豆的回复，也稍微长一点来帮助测试 {i}",
         )
 
     event = PetEvent(type="voice_message", source="voice_fast", payload={"user_text": "测试"})

@@ -28,7 +28,7 @@ describe("TouchArea", () => {
         interactions={[
           {
             event_id: "feed_momo",
-            label: "喂 Momo 一口",
+            label: "喂豆豆一口",
             group: "pet_care",
             default_mood: "happy",
             default_animation: "bounce",
@@ -39,7 +39,7 @@ describe("TouchArea", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "喂 Momo 一口" }));
+    fireEvent.click(screen.getByRole("button", { name: "喂豆豆一口" }));
 
     expect(onPetEvent).toHaveBeenCalledWith("feed_momo");
     expect(screen.queryByRole("button", { name: "投喂" })).not.toBeInTheDocument();

@@ -16,7 +16,7 @@ def test_pet_action_accepts_state_affect():
             interaction_tone="affectionate",
             pet_effort="low",
             emotional_effect="encouraged",
-            reason="用户夸了 Momo。",
+            reason="用户夸了豆豆。",
         ),
     )
 
@@ -28,7 +28,7 @@ def test_pet_action_accepts_state_affect():
 def test_guard_sanitizes_invalid_state_affect():
     action = guard_action(
         {
-            "reply": "Momo 有点懵。",
+            "reply": "豆豆有点懵。",
             "mood": "idle",
             "state_affect": {
                 "interaction_tone": "bad-tone",
@@ -48,13 +48,13 @@ def test_guard_sanitizes_invalid_state_affect():
 def test_guard_keeps_valid_state_affect():
     action = guard_action(
         {
-            "reply": "Momo 被你鼓励到啦。",
+            "reply": "豆豆被你鼓励到啦。",
             "mood": "happy",
             "state_affect": {
                 "interaction_tone": "encouraging",
                 "pet_effort": "low",
                 "emotional_effect": "encouraged",
-                "reason": "用户鼓励了 Momo。",
+                "reason": "用户鼓励了豆豆。",
             },
         }
     )
@@ -71,13 +71,13 @@ def test_pet_response_can_expose_state_affect():
         face_type="happy",
         animation="bounce",
         vibration="light",
-        pet_state={"name": "Momo"},
+        pet_state={"name": "豆豆"},
         runtime={"event_id": "evt-test", "skills_used": []},
         state_affect={
             "interaction_tone": "affectionate",
             "pet_effort": "low",
             "emotional_effect": "happy",
-            "reason": "用户摸了摸 Momo。",
+            "reason": "用户摸了摸豆豆。",
         },
     )
 
@@ -104,7 +104,7 @@ def test_event_log_records_state_affect_json(tmp_path, monkeypatch):
             "interaction_tone": "affectionate",
             "pet_effort": "low",
             "emotional_effect": "encouraged",
-            "reason": "用户夸了 Momo。",
+            "reason": "用户夸了豆豆。",
         },
     )
 

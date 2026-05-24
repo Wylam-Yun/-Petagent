@@ -86,7 +86,7 @@ export function VoiceButton({
 
   async function stopRecordingAndUpload() {
     if (clearArmTimer()) {
-      onError("按住久一点，Momo 才听得到。");
+      onError("按住久一点，豆豆才听得到。");
       return;
     }
     const session = sessionRef.current;
@@ -99,17 +99,17 @@ export function VoiceButton({
       onVoiceResponse(response);
       const fallbackReason = response.voice_route?.fallback_reason;
       if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
-        onError("Momo 没太听清，再说一次？");
+        onError("豆豆没太听清，再说一次？");
       } else if (fallbackReason === "asr_timeout") {
         onError("语音识别有点慢，再说一次？");
       } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
-        onError("语音识别暂时不太灵，但 Momo 还在听。");
+        onError("语音识别暂时不太灵，但豆豆还在听。");
       }
       changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
       changePhase("error");
       if (error instanceof RecordingTooShortError) {
-        onError("Momo 刚刚只听到一点点。");
+        onError("豆豆刚刚只听到一点点。");
       } else if (error instanceof TypeError || (error instanceof Error && error.message.includes("fetch"))) {
         onError("网络好像有点慢，再试一次？");
       } else {
@@ -171,7 +171,7 @@ function labelForPhase(phase: PetUIPhase): string {
     case "waiting_voice":
       return "准备开口";
     case "speaking":
-      return "Momo 在说";
+      return "豆豆在说";
     case "audio_error":
       return "声音没出来";
     case "error":

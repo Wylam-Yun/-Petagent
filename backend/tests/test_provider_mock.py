@@ -143,7 +143,7 @@ def test_fallback_llm_provider_uses_secondary_only_after_primary_failure():
 def test_mock_tts_provider_returns_audio_url(tmp_path: Path):
     provider = MockTTSProvider(audio_dir=tmp_path)
 
-    url = provider.synthesize("Momo 在呢。")
+    url = provider.synthesize("豆豆在呢。")
 
     assert url is not None
     assert url.startswith("/static/audio/")
@@ -152,7 +152,7 @@ def test_mock_tts_provider_returns_audio_url(tmp_path: Path):
 def test_mock_tts_provider_can_return_none(tmp_path: Path):
     provider = MockTTSProvider(audio_dir=tmp_path, fail=True)
 
-    assert provider.synthesize("Momo 在呢。") is None
+    assert provider.synthesize("豆豆在呢。") is None
 
 
 def test_tts_voice_prompt_uses_speed_style():
@@ -200,7 +200,7 @@ def test_tts_provider_can_use_openai_speech_binary_response(tmp_path: Path, monk
     )
     monkeypatch.setattr("app.providers.tts_mimo.requests.post", fake_post)
 
-    url = MiMoTTSProvider(settings).synthesize("Momo 在呢。", "happy")
+    url = MiMoTTSProvider(settings).synthesize("豆豆在呢。", "happy")
 
     assert url is not None
     assert url.endswith(".mp3")
@@ -215,7 +215,7 @@ def test_tts_provider_can_use_openai_speech_binary_response(tmp_path: Path, monk
     assert captured["json"]["model"] == "FunAudioLLM/CosyVoice2-0.5B"
     assert captured["json"]["voice"] == "FunAudioLLM/CosyVoice2-0.5B:claire"
     assert captured["json"]["response_format"] == "mp3"
-    assert "Momo 在呢。" in captured["json"]["input"]
+    assert "豆豆在呢。" in captured["json"]["input"]
 
 
 def test_fallback_tts_provider_uses_secondary_when_primary_returns_none(tmp_path: Path):
@@ -223,7 +223,7 @@ def test_fallback_tts_provider_uses_secondary_when_primary_returns_none(tmp_path
     fallback = MockTTSProvider(audio_dir=tmp_path)
     provider = FallbackTTSProvider(primary, fallback)
 
-    url = provider.synthesize("Momo 在呢。")
+    url = provider.synthesize("豆豆在呢。")
 
     assert url is not None
     assert url.startswith("/static/audio/")

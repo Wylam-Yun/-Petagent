@@ -11,7 +11,7 @@ from app.runtime.memory_store import MemoryCandidateStore, MemoryManager
 
 logger = logging.getLogger(__name__)
 
-CURATOR_SYSTEM_PROMPT = """你是一个记忆管理助手。你的任务是判断用户和 Momo 的对话中哪些信息值得长期记住。
+CURATOR_SYSTEM_PROMPT = """你是一个记忆管理助手。你的任务是判断用户和豆豆的对话中哪些信息值得长期记住。
 
 候选记忆格式：每条有 trigger_reason（来源）和 candidate_text（原文）。
 

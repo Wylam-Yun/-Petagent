@@ -94,12 +94,12 @@ def test_text_prompt_mentions_state_affect_and_contextual_buttons():
     event = normalize_event(
         {
             "event": "praise_momo",
-            "payload": {"description": "用户夸夸 Momo", "interaction_group": "pet_care"},
+            "payload": {"description": "用户夸夸豆豆", "interaction_group": "pet_care"},
         }
     )
     context = build_runtime_context(
         event,
-        {"name": "Momo", "mood": "happy", "energy": 70},
+        {"name": "豆豆", "mood": "happy", "energy": 70},
         cognition_context={"recent_exact_events": [{"user": "刚刚写了代码"}]},
     )
 

@@ -5,7 +5,7 @@ import { StatusBar } from "./StatusBar";
 import type { PetState } from "../pet/types";
 
 const state: PetState = {
-  name: "Momo",
+  name: "豆豆",
   mood: "happy",
   energy: 68,
   intimacy: 52,
