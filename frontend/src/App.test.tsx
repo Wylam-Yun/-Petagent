@@ -1,7 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 
 import App from "./App";
+
+const OriginalImage = globalThis.Image;
+
+function mockImageLoad() {
+  // @ts-expect-error replacing global Image constructor
+  globalThis.Image = class extends OriginalImage {
+    constructor() {
+      super();
+      setTimeout(() => {
+        this.dispatchEvent(new Event("load"));
+      }, 0);
+    }
+  };
+}
 
 class MockAudio {
   onended: (() => void) | null = null;
@@ -28,18 +42,33 @@ const interactionCatalogResponse = [
   }
 ];
 
-test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
-  let resolveEvent: (value: unknown) => void = () => undefined;
-  const eventPromise = new Promise((resolve) => {
-    resolveEvent = resolve;
+beforeEach(() => {
+  vi.useFakeTimers();
+  mockImageLoad();
+});
+
+afterEach(() => {
+  globalThis.Image = OriginalImage;
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+async function flush() {
+  // Advance enough for Image onload, fetch responses, and initial renders.
+  // Do NOT use runAllTimersAsync — the ambient setInterval would loop forever.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
   });
+}
+
+test("App renders 豆豆 and shows sprite", async () => {
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "Momo" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         schema_version: "0.1",
-        name: "Momo",
+        name: "豆豆",
         mood: "idle",
         energy: 72,
         intimacy: 40,
@@ -47,14 +76,47 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
         cleanliness: 85,
         loneliness: 35,
         sleepiness: 15,
-        mode: "idle",
-        last_interaction_at: "now",
-        updated_at: "now"
+        mode: "idle"
+      })
+    })
+    .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  expect(screen.getByText("豆豆")).toBeInTheDocument();
+  // DoudouSprite should render (with aria-label "豆豆")
+  const sprites = screen.getAllByLabelText("豆豆");
+  expect(sprites.length).toBeGreaterThanOrEqual(1);
+});
+
+test("tap on sprite shows local reaction before backend responds", async () => {
+  let resolveEvent: (value: unknown) => void = () => undefined;
+  const eventPromise = new Promise((resolve) => {
+    resolveEvent = resolve;
+  });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        schema_version: "0.1",
+        name: "豆豆",
+        mood: "idle",
+        energy: 72,
+        intimacy: 40,
+        hunger: 30,
+        cleanliness: 85,
+        loneliness: 35,
+        sleepiness: 15,
+        mode: "idle"
       })
     })
     .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
-    .mockReturnValueOnce(eventPromise)
+    .mockReturnValueOnce(eventPromise) // tap backend sync (pet_head)
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -69,46 +131,28 @@ test("App renders Momo and applies optimistic wiggle on pet_head", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
-  await screen.findByText("Momo");
+  await flush();
 
-  fireEvent.click(screen.getByRole("button", { name: "摸摸头" }));
+  // Find the sprite (role="img" with aria-label "豆豆")
+  const sprite = screen.getAllByLabelText("豆豆").find(
+    (el) => el.getAttribute("role") === "img"
+  );
+  expect(sprite).toBeTruthy();
 
-  expect(screen.getByLabelText("Momo 表情")).toHaveClass("animation-wiggle");
+  // Tap the sprite
+  fireEvent.click(sprite!);
 
-  await act(async () => {
-    resolveEvent({
-      ok: true,
-      json: async () => ({
-        reply: "嘿嘿，Momo 在呢。",
-        mood: "happy",
-        face_type: "happy",
-        animation: "bounce",
-        vibration: "light",
-        voice_url: null,
-        audio_job_id: "aud-event",
-        pet_state: {
-          name: "Momo",
-          mood: "happy",
-          energy: 72,
-          intimacy: 42,
-          hunger: 30,
-          cleanliness: 85,
-          loneliness: 30,
-          sleepiness: 15
-        },
-        runtime: { event_id: "evt-test", skills_used: [] }
-      })
-    });
-  });
-
-  await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
+  // Bubble should show a local tap reaction immediately (no waiting for backend)
+  const bubbleTexts = ["摸到了。", "嗯~", "喵~", "在的在的。"];
+  const bubble = document.querySelector(".pet-bubble")!;
+  expect(bubbleTexts.some((t) => bubble.textContent?.includes(t))).toBe(true);
 });
 
 describe("text chat", () => {
   test("typed text sends POST and applies response", async () => {
     const petStateResponse = {
       schema_version: "0.1",
-      name: "Momo",
+      name: "豆豆",
       mood: "idle",
       energy: 72,
       intimacy: 40,
@@ -120,7 +164,7 @@ describe("text chat", () => {
     };
 
     const textChatResponse = {
-      reply: "好呀，Momo 帮你想。",
+      reply: "好呀，豆豆帮你想。",
       mood: "thinking",
       face_type: "thinking",
       animation: "tilt",
@@ -139,7 +183,7 @@ describe("text chat", () => {
     };
 
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "Momo" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
@@ -158,13 +202,20 @@ describe("text chat", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await screen.findByText("Momo");
+    await flush();
 
     const input = screen.getByPlaceholderText("输入一句话……");
     fireEvent.change(input, { target: { value: "帮我写两数之和" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    await waitFor(() => expect(screen.getByText("Momo 说完啦。")).toBeInTheDocument());
+    // Advance timers for fetch resolution, audio polling, and playback
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+    }
+
+    expect(screen.getByText("豆豆说完啦。")).toBeInTheDocument();
 
     const [, textInit] = fetchMock.mock.calls[4];
     expect(textInit.method).toBe("POST");
@@ -172,5 +223,43 @@ describe("text chat", () => {
       text: "帮我写两数之和",
       thinking_mode: false
     });
+  });
+});
+
+describe("more menu", () => {
+  test("more toggle button exists and toggles touch area", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          schema_version: "0.1",
+          name: "豆豆",
+          mood: "idle",
+          energy: 72,
+          intimacy: 40,
+          hunger: 30,
+          cleanliness: 85,
+          loneliness: 35,
+          sleepiness: 15,
+          mode: "idle"
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await flush();
+
+    const moreBtn = screen.getByRole("button", { name: "更多互动" });
+    expect(moreBtn).toBeInTheDocument();
+
+    // Touch area should not be visible initially
+    expect(screen.queryByRole("button", { name: "摸摸头" })).not.toBeInTheDocument();
+
+    // Click more to show
+    fireEvent.click(moreBtn);
+    expect(screen.getByRole("button", { name: "摸摸头" })).toBeInTheDocument();
   });
 });

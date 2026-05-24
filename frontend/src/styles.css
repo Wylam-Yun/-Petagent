@@ -94,6 +94,23 @@ button {
   color: #172033;
 }
 
+.doudou-sprite {
+  display: block;
+  margin: 0 auto;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.54);
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  box-shadow: 0 18px 48px rgba(67, 179, 174, 0.12);
+}
+
+.doudou-sprite--fallback {
+  background-color: rgba(255, 255, 255, 0.54);
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 28px;
+  color: #172033;
+}
+
 .pet-face {
   width: min(92vw, 760px);
   min-height: clamp(170px, 34vh, 320px);
@@ -318,6 +335,22 @@ button {
 .voice-audio_error {
   background: #ffffff;
   color: #172033;
+}
+
+.more-toggle-btn {
+  min-height: 40px;
+  border: 1px solid rgba(23, 32, 51, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  color: rgba(23, 32, 51, 0.55);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.more-toggle-btn:hover {
+  color: rgba(23, 32, 51, 0.75);
+  border-color: rgba(23, 32, 51, 0.2);
 }
 
 .touch-area {
