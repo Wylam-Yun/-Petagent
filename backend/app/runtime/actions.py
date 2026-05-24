@@ -34,6 +34,17 @@ ALLOWED_ANIMATIONS = {
 ALLOWED_VIBRATIONS = {"none", "light", "medium"}
 ALLOWED_VOICE_STYLES = {"soft", "normal", "happy", "sleepy", "shy"}
 
+ALLOWED_BEHAVIOR_ACTIONS = {
+    "idle", "waiting", "review", "waving", "jumping",
+    "failed", "running", "running-left", "running-right",
+}
+ALLOWED_BEHAVIOR_SLOTS = {"before_speech", "speech", "after_speech", "idle_after"}
+ALLOWED_BEHAVIOR_INTENTS = {
+    "soft_comfort", "clingy_happy", "clingy_wronged_happy",
+    "lazy_busy", "quiet_sleepy", "playful_proud",
+    "confused_wronged", "neutral_companion",
+}
+
 ALLOWED_INTERACTION_TONES = {
     "affectionate", "playful", "comforting", "encouraging",
     "demanding", "tiring", "quiet", "caregiving", "neutral",
@@ -72,6 +83,16 @@ class StateAffect(BaseModel):
     reason: str = ""
 
 
+class BehaviorStep(BaseModel):
+    action: str
+    slot: str = "speech"
+    duration_ms: int = 1400
+    loop_: bool = Field(default=False, alias="loop")
+
+    class Config:
+        populate_by_name = True
+
+
 class PetAction(BaseModel):
     schema_version: str = "0.1"
     reply: str
@@ -85,6 +106,8 @@ class PetAction(BaseModel):
     state_delta: Dict[str, int] = Field(default_factory=dict)
     state_affect: StateAffect = Field(default_factory=StateAffect)
     memory_update: MemoryUpdate = Field(default_factory=MemoryUpdate)
+    behavior_intent: Optional[str] = None
+    behavior_plan: Optional[list] = None
 
 
 class PetResponse(BaseModel):
@@ -99,3 +122,5 @@ class PetResponse(BaseModel):
     voice_url: Optional[str] = None
     audio_job_id: Optional[str] = None
     state_affect: Optional[Dict[str, Any]] = None
+    behavior_intent: Optional[str] = None
+    behavior_plan: Optional[list] = None

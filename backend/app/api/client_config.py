@@ -23,8 +23,8 @@ def client_config(request: Request) -> Dict[str, Any]:
 
     # Progressive copy thresholds (ms → message)
     audio_progressive = {
-        "0": "Momo 准备声音…",
-        "5000": "Momo 有点慢，再等一下…",
+        "0": "豆豆准备声音…",
+        "5000": "豆豆有点慢，再等一下…",
         "30000": "声音可能要再等一会儿…",
     }
 

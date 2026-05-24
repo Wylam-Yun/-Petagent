@@ -472,6 +472,8 @@ class RuntimeDispatcher:
             },
             audio_job_id=audio_job_id,
             state_affect=action.state_affect.dict(),
+            behavior_intent=action.behavior_intent,
+            behavior_plan=action.behavior_plan,
         )
         if run:
             response.runtime["run_id"] = run.run_id

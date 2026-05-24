@@ -9,11 +9,11 @@ export type ClientConfig = {
 const DEFAULT_CONFIG: ClientConfig = {
   audio_wait_ms: 90_000,
   audio_progressive: {
-    "0": "Momo 准备声音…",
-    "5000": "Momo 有点慢，再等一下…",
+    "0": "豆豆准备声音…",
+    "5000": "豆豆有点慢，再等一下…",
     "30000": "声音可能要再等一会儿…",
   },
-  pet_name: "Momo",
+  pet_name: "豆豆",
 };
 
 export function useClientConfig(): ClientConfig {

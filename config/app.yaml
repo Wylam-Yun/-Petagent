@@ -1,6 +1,6 @@
 runtime:
   name: PetAgent
-  pet_name: Momo
+  pet_name: 豆豆
   schema_version: "0.1"
 server:
   host: 0.0.0.0
@@ -15,7 +15,7 @@ audio_cache:
   max_audio_age_hours: 72
 state:
   initial:
-    name: Momo
+    name: 豆豆
     mood: idle
     energy: 72
     intimacy: 40
@@ -28,11 +28,15 @@ activation:
   foreground_wake_enabled: true
   background_wake_enabled: false
   wake_phrases:
+    - 豆豆
+    - 嗨豆豆
+    - 你好豆豆
     - hi momo
     - hey momo
     - 嗨 momo
     - 你好 momo
   exit_phrases:
+    - 豆豆休息吧
     - momo休息吧
     - 退出
     - 先这样

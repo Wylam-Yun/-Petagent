@@ -363,10 +363,10 @@ def create_app(testing: bool = False) -> FastAPI:
                 logger.warning("Provider probes failed", exc_info=True)
 
         _asyncio.create_task(_run_probes())
-        logger.info("PetAgent Momo starting up (core_ready=True)")
+        logger.info("PetAgent Doudou starting up (core_ready=True)")
         yield
         # Shutdown
-        logger.info("PetAgent Momo shutting down")
+        logger.info("PetAgent Doudou shutting down")
         app.state.shutdown_in_progress = True
         heartbeat_task.cancel()
         with _suppress(_asyncio.CancelledError):
@@ -389,9 +389,9 @@ def create_app(testing: bool = False) -> FastAPI:
                 raw.close()
         except Exception:
             logger.warning("Failed to close state_store connection", exc_info=True)
-        logger.info("PetAgent Momo shutdown complete")
+        logger.info("PetAgent Doudou shutdown complete")
 
-    app = FastAPI(title="PetAgent Momo", version=settings.schema_version, lifespan=lifespan)
+    app = FastAPI(title="PetAgent Doudou", version=settings.schema_version, lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,

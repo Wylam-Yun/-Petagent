@@ -25,7 +25,7 @@ def test_mock_llm_provider_returns_valid_action():
 def test_mock_llm_invalid_json_falls_back():
     action = guard_action("{broken json")
 
-    assert action.reply == "嗯嗯，Momo 在这儿。"
+    assert action.reply == "嗯嗯，豆豆在这儿。"
 
 
 def test_mimo_llm_provider_forwards_no_thinking_option(monkeypatch):

@@ -5,8 +5,8 @@ export type ActivationConfig = {
 };
 
 export const defaultActivationConfig: ActivationConfig = {
-  wakePhrases: ["hi momo", "hey momo", "嗨 momo", "你好 momo"],
-  exitPhrases: ["momo休息吧", "退出", "先这样", "不用陪了"],
+  wakePhrases: ["豆豆", "嗨豆豆", "你好豆豆", "hi momo", "hey momo", "嗨 momo", "你好 momo"],
+  exitPhrases: ["豆豆休息吧", "momo休息吧", "退出", "先这样", "不用陪了"],
   minConfidence: 0.75
 };
 

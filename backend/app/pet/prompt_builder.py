@@ -20,7 +20,11 @@ OUTPUT_SCHEMA_HINT = {
     "voice_style": "soft/normal/happy/sleepy/shy",
     "vibration": "none/light/medium",
     "intent": "这次行为意图",
-    "autonomy_notes": "简短说明 Momo 为什么这样反应",
+    "autonomy_notes": "简短说明豆豆为什么这样反应",
+    "behavior_intent": "可选：soft_comfort/clingy_happy/clingy_wronged_happy/lazy_busy/quiet_sleepy/playful_proud/confused_wronged/neutral_companion",
+    "behavior_plan": [
+        {"action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right", "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600-2500}
+    ],
     "state_delta": {
         "energy": 0,
         "intimacy": 0,
@@ -33,7 +37,7 @@ OUTPUT_SCHEMA_HINT = {
         "interaction_tone": "affectionate/playful/comforting/encouraging/demanding/tiring/quiet/caregiving/neutral",
         "pet_effort": "none/low/medium/high",
         "emotional_effect": "happy/comforted/encouraged/pressured/annoyed/sleepy/calm/lonely_relieved/uncertain",
-        "reason": "一句话说明为什么这样影响 Momo 状态",
+        "reason": "一句话说明为什么这样影响豆豆状态",
     },
     "memory_update": {"should_save": False, "content": ""},
 }
@@ -88,7 +92,7 @@ def build_pet_messages(
         system_prompt += (
             "\n\n文字事件规则：\n"
             "1. 用户是在打字和你聊天，默认也要自然回应。\n"
-            "2. 可以完成简单任务，但仍保持 Momo 的语气。\n"
+            "2. 可以完成简单任务，但仍保持豆豆的语气。\n"
             "3. 不要因为自己是宠物就故意说不会。\n"
         )
     if event.type in BUTTON_EVENTS:
@@ -96,7 +100,7 @@ def build_pet_messages(
             "\n\n按钮互动规则：\n"
             "1. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
             "2. 如果用户连续点同一按钮，要表现出自然变化。\n"
-            "3. 投喂 feed_momo 是用户主动投喂，不等于手机充电。"
+            "3. 投喂(feed_momo)是用户主动投喂，不等于手机充电。"
         )
         interaction = get_interaction(event.type)
         if interaction:
@@ -120,7 +124,7 @@ def build_pet_messages(
     if context.skill_results:
         system_prompt += (
             "\n\nSkill 结果规则：\n"
-            "1. skill 只提供事实，最终表达必须仍像 Momo。\n"
+            "1. skill 只提供事实，最终表达必须仍像豆豆。\n"
             "2. skill 失败时温柔兜底，不暴露接口错误。\n"
             "3. 不要说\u201c根据 API/数据库/工具结果\u201d。"
         )
@@ -133,7 +137,7 @@ def build_pet_messages(
         "4. sleepiness = 作息困意。夜间、哄睡、长时间闲置时升；早晨、充电、陪玩成功时降。\n"
         "5. 用户夸你、摸你、抱你或陪你时，intimacy 可以上升，loneliness 可以下降。\n"
         "6. 按钮事件也必须结合最近上下文，不要只根据按钮名机械回复。\n"
-        "7. pet_effort 表示本轮你（Momo）付出的精力：\n"
+        "7. pet_effort 表示本轮你（豆豆）付出的精力：\n"
         "   - none: 闲聊、打招呼 → 无疲劳\n"
         "   - low: 简单回答、按钮互动 → 极小或无变化\n"
         "   - medium: 需要思考的回答 → energy 小幅下降\n"
@@ -153,7 +157,7 @@ def build_pet_messages(
     elif profile == "recall":
         system_prompt += "\n\n回忆模式：用户在问之前的事，尽力回忆并回答，可以稍长。"
     elif profile == "tool":
-        system_prompt += "\n\n工具模式：用户需要事实信息，先给出事实，再用 Momo 的语气包装。"
+        system_prompt += "\n\n工具模式：用户需要事实信息，先给出事实，再用豆豆的语气包装。"
     elif profile == "long_task":
         system_prompt += "\n\n深度模式：用户需要详细回答，可以展开，但不输出思考过程。"
 

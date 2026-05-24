@@ -24,7 +24,7 @@ def test_guard_replaces_invalid_mood_and_limits_delta():
 def test_guard_uses_fallback_for_invalid_json():
     action = guard_action("not json")
 
-    assert action.reply == "嗯嗯，Momo 在这儿。"
+    assert action.reply == "嗯嗯，豆豆在这儿。"
     assert action.mood == "happy"
 
 
@@ -110,3 +110,110 @@ def test_guard_action_strips_prompt_leak():
     })
     assert "state_delta" not in action.reply
     assert "cognition_context" not in action.reply
+
+
+def test_guard_preserves_valid_behavior_plan():
+    action = guard_action({
+        "reply": "豆豆开心~",
+        "mood": "happy",
+        "behavior_intent": "clingy_happy",
+        "behavior_plan": [
+            {"action": "waving", "slot": "before_speech", "duration_ms": 1200},
+            {"action": "jumping", "slot": "speech", "duration_ms": 1000},
+        ],
+    })
+    assert action.behavior_intent == "clingy_happy"
+    assert action.behavior_plan is not None
+    assert len(action.behavior_plan) == 2
+    assert action.behavior_plan[0]["action"] == "waving"
+    assert action.behavior_plan[1]["action"] == "jumping"
+
+
+def test_guard_drops_unknown_behavior_actions():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": [
+            {"action": "sleep", "slot": "speech", "duration_ms": 1000},
+            {"action": "waving", "slot": "speech", "duration_ms": 1200},
+        ],
+    })
+    assert action.behavior_plan is not None
+    assert len(action.behavior_plan) == 1
+    assert action.behavior_plan[0]["action"] == "waving"
+
+
+def test_guard_repairs_unknown_behavior_slots():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": [
+            {"action": "idle", "slot": "invalid", "duration_ms": 1000},
+        ],
+    })
+    assert action.behavior_plan is not None
+    assert action.behavior_plan[0]["slot"] == "speech"
+
+
+def test_guard_clamps_behavior_duration():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": [
+            {"action": "idle", "slot": "speech", "duration_ms": 100},
+            {"action": "waving", "slot": "speech", "duration_ms": 9999},
+        ],
+    })
+    assert action.behavior_plan is not None
+    assert action.behavior_plan[0]["duration_ms"] == 600
+    assert action.behavior_plan[1]["duration_ms"] == 2500
+
+
+def test_guard_limits_behavior_plan_to_4_steps():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": [
+            {"action": "idle", "slot": "speech", "duration_ms": 1000},
+            {"action": "waving", "slot": "speech", "duration_ms": 1000},
+            {"action": "jumping", "slot": "speech", "duration_ms": 1000},
+            {"action": "failed", "slot": "speech", "duration_ms": 1000},
+            {"action": "review", "slot": "speech", "duration_ms": 1000},
+        ],
+    })
+    assert action.behavior_plan is not None
+    assert len(action.behavior_plan) == 4
+
+
+def test_guard_caps_behavior_total_duration():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": [
+            {"action": "idle", "slot": "speech", "duration_ms": 2500},
+            {"action": "waving", "slot": "speech", "duration_ms": 2500},
+            {"action": "jumping", "slot": "speech", "duration_ms": 2500},
+            {"action": "failed", "slot": "speech", "duration_ms": 2500},
+        ],
+    })
+    assert action.behavior_plan is not None
+    total = sum(s["duration_ms"] for s in action.behavior_plan)
+    assert total <= 8000
+
+
+def test_guard_returns_none_plan_for_invalid_input():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_plan": "not a list",
+    })
+    assert action.behavior_plan is None
+
+
+def test_guard_rejects_invalid_behavior_intent():
+    action = guard_action({
+        "reply": "嗯",
+        "mood": "idle",
+        "behavior_intent": "unknown_intent",
+    })
+    assert action.behavior_intent is None

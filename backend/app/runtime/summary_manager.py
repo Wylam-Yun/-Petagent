@@ -21,7 +21,7 @@ _TZ_OFFSETS = {
     "Europe/London": timedelta(hours=0),
 }
 
-EPISODE_SUMMARY_PROMPT = """你是 Momo 的记忆助手。请根据以下对话事件，生成一份 episode 摘要。
+EPISODE_SUMMARY_PROMPT = """你是豆豆的记忆助手。请根据以下对话事件，生成一份 episode 摘要。
 
 输出 JSON：
 {
@@ -49,7 +49,7 @@ EPISODE_SUMMARY_PROMPT = """你是 Momo 的记忆助手。请根据以下对话�
 2. 只提取有情绪重量或长期价值的原话
 3. summary 要简洁，不超过 100 字"""
 
-DAILY_SUMMARY_PROMPT = """你是 Momo 的记忆助手。请根据以下 episode 摘要，生成每日总结。
+DAILY_SUMMARY_PROMPT = """你是豆豆的记忆助手。请根据以下 episode 摘要，生成每日总结。
 
 输出 JSON：
 {
@@ -114,7 +114,7 @@ class SummaryManager:
             if user_text:
                 line += "用户: %s" % user_text
             if pet_reply:
-                line += " | Momo: %s" % pet_reply
+                line += " | 豆豆: %s" % pet_reply
             if mood:
                 line += " [%s]" % mood
             if line:

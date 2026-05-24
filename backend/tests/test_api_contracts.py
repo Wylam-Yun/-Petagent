@@ -11,7 +11,7 @@ def test_api_health_contract():
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["name"] == "Momo"
+    assert body["name"] == "豆豆"
     assert "version" in body
     assert "pid" in body
     assert "started_at" in body
@@ -25,7 +25,7 @@ def test_runtime_contracts():
     assert client.get("/api/runtime/health").json() == {
         "ok": True,
         "runtime": "PetAgent",
-        "pet": "Momo",
+        "pet": "豆豆",
     }
     resp = client.get("/api/runtime/skills", headers={"Authorization": f"Bearer {token}"})
     skills = resp.json()["skills"]
@@ -44,7 +44,7 @@ def test_pet_state_contract():
     assert response.status_code == 200
     body = response.json()
     assert body["schema_version"] == "0.1"
-    assert body["name"] == "Momo"
+    assert body["name"] == "豆豆"
     assert 0 <= body["energy"] <= 100
 
 

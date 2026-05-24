@@ -59,7 +59,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         group="pet_care",
         default_mood="happy",
         default_animation="jump",
-        description="用户夸夸了 Momo",
+        description="用户夸夸了豆豆",
         state_semantics={"energy": "up", "intimacy": "up"},
     ),
     "feed_momo": InteractionDef(
@@ -68,7 +68,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         group="pet_care",
         default_mood="happy",
         default_animation="bounce",
-        description="用户投喂了 Momo",
+        description="用户投喂了豆豆",
         state_semantics={"energy": "up", "hunger": "down"},
     ),
     "tuck_in": InteractionDef(
