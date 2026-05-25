@@ -242,6 +242,17 @@ def create_app(testing: bool = False) -> FastAPI:
         connection=state_store.connection,
         backup_dir=backup_dir,
     )
+    # V1.3: Nightly cleanup runner (provider_gate wired after creation)
+    from app.runtime.nightly_cleanup import NightlyCleanupRunner
+    nightly_cleanup_runner = NightlyCleanupRunner(
+        notebook_manager=notebook_manager,
+        provider=slow_llm_provider,
+        event_log_store=event_log_store,
+        maintenance_state=maintenance_state,
+        provider_gate=None,
+        dispatcher=None,
+    )
+
     maintenance_service = MaintenanceService(
         curator=memory_curator,
         summary_manager=summary_manager,
@@ -259,6 +270,7 @@ def create_app(testing: bool = False) -> FastAPI:
         connection=state_store.connection,
         memory_judgment_queue=memory_judgment_queue,
         notebook_manager=notebook_manager,
+        nightly_cleanup_runner=nightly_cleanup_runner,
     )
 
     audio_provider = _select_audio_provider(settings, testing)
@@ -275,8 +287,9 @@ def create_app(testing: bool = False) -> FastAPI:
             run.record(f"audio_{status}", {"job_id": job_id, "error": error})
 
     provider_gate = ProviderGate()
-    # Wire provider_gate into judgment queue now that it exists
+    # Wire provider_gate into judgment queue and nightly cleanup now that it exists
     memory_judgment_queue._provider_gate = provider_gate
+    nightly_cleanup_runner._provider_gate = provider_gate
     audio_job_store = AudioJobStore(state_store.connection)
     audio_job_manager = AudioJobManager(
         tts_provider,
@@ -478,6 +491,9 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.maintenance_worker = maintenance_worker
     app.state.provider_gate = provider_gate
     app.state.probe_manager = probe_manager
+    app.state.nightly_cleanup_runner = nightly_cleanup_runner
+    # Wire dispatcher into nightly cleanup runner now that it exists
+    nightly_cleanup_runner._dispatcher = dispatcher
 
     # Read frontend build-info.json if present
     build_info: Dict[str, str] = {}

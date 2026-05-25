@@ -388,3 +388,179 @@ class NotebookManager:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+    # ── Cleanup operations ──
+
+    def apply_cleanup_operations(self, operations: Dict[str, Any]) -> Dict[str, int]:
+        """Apply validated add/update/delete operations to notebook files.
+
+        Acquires self._lock for entire validate-backup-apply-validate cycle.
+        LLM call must happen BEFORE calling this method.
+        """
+        adds = operations.get("add", [])
+        updates = operations.get("update", [])
+        deletes = operations.get("delete", [])
+
+        stats = {"adds": 0, "updates": 0, "deletes": 0, "errors": 0}
+
+        with self._lock:
+            for target in ("user.md", "memory.md"):
+                path = self._user_path if target == "user.md" else self._memory_path
+                if not path.exists():
+                    continue
+
+                try:
+                    current_lines = path.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+
+                new_lines = list(current_lines)
+                target_adds = [a for a in adds if a.get("target") == target]
+                target_updates = [u for u in updates if u.get("target") == target]
+                target_deletes = [d for d in deletes if d.get("target") == target]
+
+                # Apply deletes (skip identity lines)
+                for d in target_deletes:
+                    old = d.get("old", "").strip()
+                    if not old:
+                        stats["errors"] += 1
+                        continue
+                    found_idx = self._find_line_prefix(new_lines, old)
+                    if found_idx is None:
+                        stats["errors"] += 1
+                        continue
+                    entry = self._parse_line(new_lines[found_idx], found_idx + 1)
+                    if entry and entry.category == "identity":
+                        logger.warning("apply_cleanup: rejecting identity delete")
+                        stats["errors"] += 1
+                        continue
+                    new_lines.pop(found_idx)
+                    stats["deletes"] += 1
+
+                # Apply updates
+                for u in target_updates:
+                    old = u.get("old", "").strip()
+                    new_cat = u.get("new_category", "")
+                    new_content = u.get("new_content", "").strip()
+                    if not old or new_cat not in _CATEGORY_WHITELIST or not new_content:
+                        stats["errors"] += 1
+                        continue
+                    found_idx = self._find_line_prefix(new_lines, old)
+                    if found_idx is None:
+                        stats["errors"] += 1
+                        continue
+                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    new_lines[found_idx] = f"- [{ts}][{new_cat}] {new_content}"
+                    stats["updates"] += 1
+
+                # Apply adds
+                for a in target_adds:
+                    cat = a.get("category", "")
+                    content = str(a.get("content", "")).strip()
+                    if cat not in _CATEGORY_WHITELIST or not content:
+                        stats["errors"] += 1
+                        continue
+                    if _is_sensitive(content):
+                        stats["errors"] += 1
+                        continue
+                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    new_lines.append(f"- [{ts}][{cat}] {content}")
+                    stats["adds"] += 1
+
+                # Backup before rewrite
+                backup_path = self._backup_file(path)
+                if not self._rewrite_and_validate(path, new_lines, backup_path):
+                    stats["errors"] += 1
+
+        return stats
+
+    def _find_line_prefix(self, lines: List[str], old: str) -> Optional[int]:
+        """Find line index by exact match or prefix match."""
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == old:
+                return i
+            # Prefix match on timestamp+category portion
+            old_parts = old.split("] ", 2)
+            if len(old_parts) >= 2:
+                prefix = "] ".join(old_parts[:2])
+                if prefix in stripped:
+                    return i
+        return None
+
+    def _backup_file(self, path: Path) -> Optional[Path]:
+        """Create a timestamped backup of the file."""
+        if not path.exists():
+            return None
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        backup_path = path.parent / f"{path.name}.bak.{ts}"
+        try:
+            import shutil
+            shutil.copy2(str(path), str(backup_path))
+            return backup_path
+        except OSError:
+            logger.warning("_backup_file failed for %s", path)
+            return None
+
+    def _restore_backup(self, path: Path, backup_path: Optional[Path]) -> bool:
+        """Restore file from backup using atomic rename."""
+        if backup_path is None or not backup_path.exists():
+            return False
+        try:
+            os.replace(str(backup_path), str(path))
+            return True
+        except OSError:
+            logger.warning("_restore_backup failed for %s", path)
+            return False
+
+    def _rewrite_and_validate(
+        self, path: Path, lines: List[str], backup_path: Optional[Path]
+    ) -> bool:
+        """Atomically rewrite file and validate. Restore backup on failure."""
+        content = "\n".join(lines) + "\n"
+        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd = -1
+            os.replace(tmp_path, str(path))
+        except OSError:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            self._restore_backup(path, backup_path)
+            return False
+
+        # Validate: re-read and parse new-format lines
+        try:
+            written = path.read_text(encoding="utf-8")
+            parse_failures = 0
+            for wl in written.splitlines():
+                stripped = wl.strip()
+                if stripped.startswith("- ["):
+                    if self._parse_line(stripped, 0) is None:
+                        parse_failures += 1
+            if parse_failures > 0:
+                logger.warning(
+                    "rewrite_and_validate: %d parse failures, restoring backup",
+                    parse_failures,
+                )
+                self._restore_backup(path, backup_path)
+                return False
+        except OSError:
+            self._restore_backup(path, backup_path)
+            return False
+
+        # Clean up backup on success
+        if backup_path and backup_path.exists():
+            try:
+                backup_path.unlink()
+            except OSError:
+                pass
+        return True

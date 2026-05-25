@@ -54,6 +54,7 @@ class MaintenanceService:
         connection: Any = None,
         memory_judgment_queue: Any = None,
         notebook_manager: Any = None,
+        nightly_cleanup_runner: Any = None,
     ) -> None:
         cfg = config or {}
         self.curator = curator
@@ -71,6 +72,7 @@ class MaintenanceService:
         self.connection = connection
         self.memory_judgment_queue = memory_judgment_queue
         self.notebook_manager = notebook_manager
+        self.nightly_cleanup_runner = nightly_cleanup_runner
         self.min_interval_seconds = cfg.get("maintenance_min_interval_seconds", 300)
         self.max_items_per_tick = cfg.get("maintenance_max_items_per_tick", 8)
         self.daily_summary_trigger_hour = cfg.get("daily_summary_trigger_hour", 6)
@@ -117,6 +119,16 @@ class MaintenanceService:
         except Exception:
             logger.warning("Curator batch failed", exc_info=True)
             result["curator_error"] = 1
+
+        # Priority 1.3: Nightly cleanup (V1.3, once per day)
+        try:
+            if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run():
+                cleanup_result = self.nightly_cleanup_runner.run()
+                if cleanup_result:
+                    result.update({"cleanup_%s" % k: v for k, v in cleanup_result.items()})
+                    return result
+        except Exception:
+            logger.warning("Nightly cleanup failed", exc_info=True)
 
         # Priority 1.5: Process memory judgment queue (V1.3)
         try:

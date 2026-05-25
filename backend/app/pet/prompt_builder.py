@@ -320,3 +320,52 @@ def build_memory_judgment_messages(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+
+
+NIGHTLY_CLEANUP_SCHEMA = {
+    "add": [
+        {"target": "user.md 或 memory.md", "category": "identity/preference/relationship/project/temporary", "content": "新内容"}
+    ],
+    "update": [
+        {"target": "user.md 或 memory.md", "old": "原始行全文（含 - [timestamp][category]）", "new_category": "新分类", "new_content": "新内容"}
+    ],
+    "delete": [
+        {"target": "user.md 或 memory.md", "old": "原始行全文（含 - [timestamp][category]）", "reason": "删除原因"}
+    ],
+}
+
+
+def build_nightly_cleanup_messages(
+    user_content: str,
+    memory_content: str,
+    event_lines: list,
+    current_time: str,
+) -> list:
+    """Build prompt for nightly memory cleanup."""
+    system_prompt = (
+        "你是豆豆的小本本整理器。每晚整理一次记忆文件。\n"
+        "老化规则：\n"
+        "1. identity（身份）：保留，除非有更新的明确修正。\n"
+        "2. preference（偏好）：长期保留，合并重复。\n"
+        "3. relationship（关系）：保留重要项，合并相似项。\n"
+        "4. project（项目）：3 天后将相关原始记忆总结为一行。\n"
+        "5. temporary（临时）：3 天后删除，除非已升级为 project/relationship/preference。\n"
+        "操作规则：\n"
+        "- add: 添加新记忆。\n"
+        "- update: 替换旧行。old 必须是完整行（含 - [timestamp][category]）。\n"
+        "- delete: 删除旧行。old 必须是完整行。不能删除 identity 类。\n"
+        "- 只输出 JSON，不要解释。\n"
+        "- 如果不需要任何操作，输出 {\"add\":[], \"update\":[], \"delete\":[]}"
+    )
+    events_text = "\n".join(event_lines[:50]) if event_lines else "（今天没有对话）"
+    payload = {
+        "current_time": current_time,
+        "user_md": user_content or "（空）",
+        "memory_md": memory_content or "（空）",
+        "today_conversation": events_text,
+        "output_schema": NIGHTLY_CLEANUP_SCHEMA,
+    }
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]

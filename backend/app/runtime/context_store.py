@@ -347,6 +347,25 @@ class EventLogStore:
             for row in rows
         ]
 
+    def recent_events_bounded(
+        self, limit: int = 200, max_bytes: int = 20480
+    ) -> List[Dict[str, Any]]:
+        """Read recent events with bounded serialized size (Nubia constraint)."""
+        raw = self.recent_events(limit=limit)
+        result = []
+        total = 0
+        for evt in raw:
+            # Estimate size of user_text + pet_reply + mood
+            size = 0
+            for key in ("user_text", "pet_reply", "mood_after"):
+                val = evt.get(key) or ""
+                size += len(val.encode("utf-8"))
+            if total + size > max_bytes:
+                break
+            result.append(evt)
+            total += size
+        return result
+
     def recall_events(
         self,
         *,
