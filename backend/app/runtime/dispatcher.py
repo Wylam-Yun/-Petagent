@@ -23,6 +23,7 @@ from app.runtime.events import normalize_event
 from app.runtime.registry import SkillRegistry
 from app.runtime.concurrency import ProviderBusyError, ProviderGate
 from app.runtime.route_policy import decide_route
+from app.runtime.memory_triggers import detect_memory_triggers
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +36,6 @@ _PROFILE_TO_GATE = {
 def _profile_to_gate_type(provider_profile: str) -> str:
     return _PROFILE_TO_GATE.get(provider_profile, "llm_slow")
 
-
-_EXPLICIT_MEMORY_KEYWORDS = [
-    "\u8bb0\u4f4f",       # 记住
-    "\u4ee5\u540e\u53eb\u6211",  # 以后叫我
-    "\u6211\u559c\u6b22",       # 我喜欢
-    "\u6211\u4e0d\u559c\u6b22", # 我不喜欢
-    "\u4ee5\u540e\u4e0d\u8981", # 以后不要
-    "\u522b\u518d",             # 别再
-]
 
 
 class RuntimeDispatcher:
@@ -72,6 +64,8 @@ class RuntimeDispatcher:
         maintenance_worker=None,
         provider_gate=None,
         incident_store=None,
+        memory_judgment_queue=None,
+        notebook_manager=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -96,6 +90,8 @@ class RuntimeDispatcher:
         self.maintenance_worker = maintenance_worker
         self.provider_gate = provider_gate
         self.incident_store = incident_store
+        self.memory_judgment_queue = memory_judgment_queue
+        self.notebook_manager = notebook_manager
         self._event_lock = threading.RLock()
         # Health counters (lock-free, read by /api/health/watchdog)
         self.event_loop_tick: float = perf_counter()
@@ -204,6 +200,7 @@ class RuntimeDispatcher:
                 daily_summary_store=self.daily_summary_store,
                 context_profile=decision.context_profile if decision else None,
                 memory_card_manager=self.memory_card_manager,
+                notebook_manager=self.notebook_manager,
             )
             if run:
                 run.record("context_built", {
@@ -264,6 +261,7 @@ class RuntimeDispatcher:
                 daily_summary_store=self.daily_summary_store,
                 context_profile=decision.context_profile if decision else None,
                 memory_card_manager=self.memory_card_manager,
+                notebook_manager=self.notebook_manager,
             )
         if run and skill_results:
             run.record("skill_finished", {"count": len(skill_results)})
@@ -477,6 +475,19 @@ class RuntimeDispatcher:
         if not is_fast_reply:
             self._collect_memory_candidates(event, action, episode_id)
 
+        # V1.3: Memory trigger detection (both fast reply and thinking)
+        memory_ack = None
+        if user_text:
+            try:
+                trigger_categories = detect_memory_triggers(user_text)
+                if trigger_categories:
+                    if self.memory_judgment_queue is not None:
+                        self.memory_judgment_queue.enqueue(user_text, trigger_categories)
+                    if "explicit" in trigger_categories:
+                        memory_ack = "我先记到小本本"
+            except Exception:
+                pass
+
         if self.interaction_log is not None:
             if is_fast_reply:
                 self.interaction_log.record(
@@ -533,6 +544,7 @@ class RuntimeDispatcher:
                 behavior_plan=None,
                 action=fast_action.action,
                 route="fast_reply",
+                memory_ack_hint=memory_ack,
             )
         else:
             response = PetResponse(
@@ -566,9 +578,7 @@ class RuntimeDispatcher:
         return response
 
     def _collect_memory_candidates(self, event, action, episode_id: str) -> None:
-        """Route memory_update to candidate store. Also detect explicit commands."""
-        user_text = str(event.payload.get("user_text", ""))
-
+        """Route memory_update to candidate store. V1.3: explicit commands handled by trigger system."""
         # LLM suggestion — only via candidate store (no fallback)
         if self.memory_candidate_store is not None:
             if action.memory_update.should_save and action.memory_update.content:
@@ -582,22 +592,6 @@ class RuntimeDispatcher:
                         candidate_text=text,
                         trigger_reason="llm_suggestion",
                     )
-
-        # Explicit command detection
-        if self.memory_candidate_store is not None and user_text:
-            for keyword in _EXPLICIT_MEMORY_KEYWORDS:
-                if keyword in user_text:
-                    text = user_text
-                    if self.policy_guard is not None:
-                        text = self.policy_guard.filter_memory_candidate(text)
-                    if text:
-                        self.memory_candidate_store.add(
-                            source_event_id=event.id,
-                            episode_id=episode_id,
-                            candidate_text=text,
-                            trigger_reason="explicit_command",
-                        )
-                    break
 
     def _max_reply_chars(self, brain: PetBrain) -> int:
         persona = getattr(getattr(brain, "settings", None), "persona_config", {}) or {}

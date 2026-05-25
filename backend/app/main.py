@@ -179,6 +179,29 @@ def create_app(testing: bool = False) -> FastAPI:
             except Exception:
                 pass
 
+    # V1.3: NotebookManager and MemoryJudgmentQueue
+    from app.runtime.notebook import NotebookManager
+    from app.runtime.memory_judgment import MemoryJudgmentQueue
+
+    notebook_user_path = memory_cards_config.get(
+        "user_preferences_path",
+        str(settings.project_root / "backend/data/memory_cards/user.md"),
+    )
+    notebook_memory_path = memory_cards_config.get(
+        "momo_memories_path",
+        str(settings.project_root / "backend/data/memory_cards/memory.md"),
+    )
+    notebook_manager = NotebookManager(
+        user_path=Path(notebook_user_path),
+        memory_path=Path(notebook_memory_path),
+    )
+    # Run one-time migration on startup (non-testing)
+    if not testing:
+        try:
+            notebook_manager.migrate_if_needed(memory_card_manager)
+        except Exception:
+            logger.warning("Notebook migration failed", exc_info=True)
+
     slow_llm_provider = _select_llm_provider(
         settings,
         testing,
@@ -196,6 +219,11 @@ def create_app(testing: bool = False) -> FastAPI:
     brain = PetBrain(settings, slow_llm_provider)
     fast_brain = PetBrain(settings, fast_llm_provider)
     proactive_brain = PetBrain(settings, ProactiveRuleProvider())
+
+    memory_judgment_queue = MemoryJudgmentQueue(
+        provider=slow_llm_provider,
+        provider_gate=None,  # wired after provider_gate is created
+    )
 
     memory_curator = MemoryCurator(
         brain_provider=slow_llm_provider,
@@ -229,6 +257,8 @@ def create_app(testing: bool = False) -> FastAPI:
         memory_card_manager=memory_card_manager,
         backup_manager=backup_manager,
         connection=state_store.connection,
+        memory_judgment_queue=memory_judgment_queue,
+        notebook_manager=notebook_manager,
     )
 
     audio_provider = _select_audio_provider(settings, testing)
@@ -245,6 +275,8 @@ def create_app(testing: bool = False) -> FastAPI:
             run.record(f"audio_{status}", {"job_id": job_id, "error": error})
 
     provider_gate = ProviderGate()
+    # Wire provider_gate into judgment queue now that it exists
+    memory_judgment_queue._provider_gate = provider_gate
     audio_job_store = AudioJobStore(state_store.connection)
     audio_job_manager = AudioJobManager(
         tts_provider,
@@ -291,6 +323,8 @@ def create_app(testing: bool = False) -> FastAPI:
         maintenance_worker=maintenance_worker,
         provider_gate=provider_gate,
         incident_store=incident_store,
+        memory_judgment_queue=memory_judgment_queue,
+        notebook_manager=notebook_manager,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,

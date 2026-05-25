@@ -33,6 +33,7 @@ class ContextManager:
         daily_summary_store: Any = None,
         context_profile: Optional[str] = None,
         memory_card_manager: Any = None,
+        notebook_manager: Any = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
         # Profile-specific budget overrides
@@ -146,6 +147,18 @@ class ContextManager:
                 }
             except Exception:
                 memory_cards = {"user_preferences": [], "momo_memories": []}
+
+        # V1.3: NotebookManager card selection for fast_reply/thinking
+        selected_card_items = None
+        if notebook_manager is not None and profile in ("fast_reply", "thinking"):
+            try:
+                if profile == "fast_reply":
+                    selected_card_items = notebook_manager.select_for_fast_reply()
+                else:
+                    selected_card_items = notebook_manager.select_for_thinking()
+            except Exception:
+                selected_card_items = None
+
         elif memory_manager is not None:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")
             try:
@@ -195,6 +208,7 @@ class ContextManager:
             "daily_digest": daily_digest,
             "relevant_memories": relevant_memories,
             "memory_cards": memory_cards,
+            "selected_card_items": selected_card_items,
             "important_quotes": important_quotes,
             "context_budget": {
                 "max_chars": self.max_context_chars,

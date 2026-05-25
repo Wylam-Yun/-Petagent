@@ -163,3 +163,63 @@ def test_fast_reply_prompt_excludes_forbidden_fields():
     ]
     for field in forbidden:
         assert field not in user_payload, f"Forbidden field '{field}' found in fast reply payload"
+
+
+def test_fast_reply_prompt_uses_selected_card_items():
+    """Fast reply prompt uses selected_card_items when available."""
+    from app.config import load_settings
+    from app.pet.prompt_builder import build_fast_reply_messages
+    from app.runtime.context import build_runtime_context
+    from app.runtime.events import normalize_event
+    import json
+
+    settings = load_settings()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "你好"},
+    })
+    context = build_runtime_context(
+        event,
+        {"mood": "happy", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "fast_reply",
+            "recent_exact_events": [],
+            "memory_cards": {"user_preferences": ["旧数据"], "momo_memories": []},
+            "selected_card_items": ("我是小明", "今天去了公园"),
+        },
+    )
+
+    messages = build_fast_reply_messages(settings, event, context)
+    user_payload = json.loads(messages[1]["content"])
+    hints = user_payload.get("memory_hints", [])
+    assert "我是小明" in hints
+    assert "今天去了公园" in hints
+    # Should NOT fall back to old memory_cards
+    assert "旧数据" not in hints
+
+
+def test_fast_reply_response_has_memory_ack_hint():
+    """Fast reply PetResponse includes memory_ack_hint when explicit trigger detected."""
+    app = create_app(testing=True)
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "记住我喜欢咖啡"},
+        }
+    )
+    assert response.route == "fast_reply"
+    assert response.memory_ack_hint == "我先记到小本本"
+
+
+def test_fast_reply_no_memory_ack_without_trigger():
+    """Fast reply without trigger has no memory_ack_hint."""
+    app = create_app(testing=True)
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "你好"},
+        }
+    )
+    assert response.memory_ack_hint is None

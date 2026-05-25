@@ -133,3 +133,4 @@ class PetResponse(BaseModel):
     behavior_plan: Optional[list] = None
     action: Optional[str] = None
     route: Optional[str] = None
+    memory_ack_hint: Optional[str] = None

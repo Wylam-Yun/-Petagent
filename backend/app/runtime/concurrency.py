@@ -125,6 +125,12 @@ class ProviderGate:
             oldest = min(self._started_at.values())
             return max(0.0, perf_counter() - oldest)
 
+    def is_available(self, provider_type: str) -> bool:
+        """Check if a slot is available for the given provider type."""
+        limit = self._limits.get(provider_type, 1)
+        with self._lock:
+            return self._counters.get(provider_type, 0) < limit
+
     def get_usage(self) -> Dict[str, Dict[str, int]]:
         """Get current usage for all provider types."""
         with self._lock:

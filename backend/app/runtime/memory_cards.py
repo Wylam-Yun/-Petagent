@@ -136,6 +136,14 @@ class MemoryCardManager:
             return self._rebuild_locked(reason)
 
     def _rebuild_locked(self, reason: str) -> Dict[str, int]:
+        # V1.3 guard: skip rebuild if V1.3 notebook format detected (Issue 6/8)
+        for path in self._paths.values():
+            if self._has_v13_format(path):
+                logger.warning(
+                    "Card rebuild skipped: V1.3 notebook format detected in %s", path
+                )
+                return {"items_written": 0, "items_rejected": 0}
+
         all_memories = self.memory_manager.memories_for_cards(limit=200)
 
         groups: Dict[str, List[Dict[str, Any]]] = {
@@ -273,3 +281,16 @@ class MemoryCardManager:
                     "ttl": "",
                 }
         return None
+
+    @staticmethod
+    def _has_v13_format(path: Path) -> bool:
+        """Check if file contains V1.3 notebook format lines (- [YYYY-MM-DD ...)."""
+        if not path.exists():
+            return False
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip().startswith("- ["):
+                    return True
+        except OSError:
+            pass
+        return False

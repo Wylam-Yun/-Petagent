@@ -161,10 +161,17 @@ def build_pet_messages(
         system_prompt += "\n\n回忆模式：用户在问之前的事，尽力回忆并回答，可以稍长。"
 
     # Use serializer instead of raw context.dict()
+    cog = dict(context.cognition_context) if context.cognition_context else {}
+    # V1.3 thinking mode: inject bounded card items if available
+    selected = cog.get("selected_card_items")
+    if selected and isinstance(selected, tuple) and len(selected) == 2:
+        user_items, memory_items = selected
+        cog["notebook_user"] = user_items or []
+        cog["notebook_memory"] = memory_items or []
     payload = serialize_for_prompt(
         event=event,
         pet_state=context.pet_state,
-        cognition_context=context.cognition_context if context.cognition_context else None,
+        cognition_context=cog or None,
         skill_results=context.skill_results or None,
         device_state=context.device_state or None,
     )
@@ -214,13 +221,19 @@ def build_fast_reply_messages(
     memory_cards = cognition.get("memory_cards") or {}
 
     # Select 1 item from each card file
-    user_items = memory_cards.get("user_preferences", [])
-    memory_items = memory_cards.get("momo_memories", [])
-    memory_hints = []
-    if user_items:
-        memory_hints.append(user_items[-1])
-    if memory_items:
-        memory_hints.append(memory_items[-1])
+    # V1.3: prefer selected_card_items from NotebookManager, fall back to old memory_cards
+    selected = cognition.get("selected_card_items")
+    if selected and isinstance(selected, tuple) and len(selected) == 2:
+        user_item, memory_item = selected
+        memory_hints = [x for x in (user_item, memory_item) if x]
+    else:
+        user_items = memory_cards.get("user_preferences", [])
+        memory_items = memory_cards.get("momo_memories", [])
+        memory_hints = []
+        if user_items:
+            memory_hints.append(user_items[-1])
+        if memory_items:
+            memory_hints.append(memory_items[-1])
 
     user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
 
@@ -270,6 +283,39 @@ def build_skill_plan_messages(
     )
     payload["output_schema"] = SKILL_PLAN_SCHEMA
 
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+MEMORY_JUDGMENT_SCHEMA = {
+    "should_write": "true/false — 是否值得记到小本本",
+    "target": "user.md 或 memory.md",
+    "category": "identity/preference/relationship/project/temporary",
+    "content": "要记住的内容，简洁一句话",
+    "reason": "为什么值得记",
+}
+
+
+def build_memory_judgment_messages(
+    user_text: str, trigger_categories: list
+) -> list:
+    """Build prompt for background memory judgment."""
+    system_prompt = (
+        "你是豆豆的记忆判断器。判断用户的这句话是否值得记到小本本里。\n"
+        "规则：\n"
+        "1. 只记有长期价值的信息（身份、偏好、关系、项目）。\n"
+        "2. 不记临时情绪、闲聊、重复信息。\n"
+        "3. content 要简洁，一句话概括核心信息。\n"
+        "4. 选 target：身份/偏好 → user.md，关系/项目/临时 → memory.md。\n"
+        "5. 只输出 JSON，不要解释。"
+    )
+    payload = {
+        "user_text": user_text,
+        "trigger_categories": trigger_categories,
+        "output_schema": MEMORY_JUDGMENT_SCHEMA,
+    }
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

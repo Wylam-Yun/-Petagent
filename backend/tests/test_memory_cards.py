@@ -637,3 +637,45 @@ def test_fast_reply_context_budget_small():
 
     used = context["context_budget"]["used_chars"]
     assert used < 2000, f"fast_reply context too large: {used} chars"
+
+
+def test_legacy_rebuild_skips_when_v13_format_detected():
+    """MemoryCardManager.rebuild() should skip when V1.3 notebook format is present."""
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+
+    # Seed a memory
+    mm.save_curated("user_preference", "喜欢短回复", importance=4)
+
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
+    })
+
+    # Write V1.3 format line to user.md
+    (tmp / "user.md").write_text(
+        "- [2026-05-26 10:00][preference] 主人喜欢短回复\n",
+        encoding="utf-8",
+    )
+
+    # Rebuild should skip — V1.3 format detected
+    result = mcm.rebuild("curator_saved")
+    assert result["items_written"] == 0
+    assert result["items_rejected"] == 0
+
+    # File should be unchanged
+    content = (tmp / "user.md").read_text(encoding="utf-8")
+    assert "[preference]" in content  # V1.3 format preserved
+
+
+def test_legacy_rebuild_runs_when_no_v13_format():
+    """MemoryCardManager.rebuild() should run normally when no V1.3 format present."""
+    mcm, mm = _make_mcm()
+    mm.save_curated("user_preference", "喜欢短回复", importance=4)
+
+    result = mcm.rebuild("manual_debug")
+    assert result["items_written"] >= 1
+
+    items = mcm.read_card("user_preferences")
+    assert "喜欢短回复" in items

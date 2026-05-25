@@ -52,6 +52,8 @@ class MaintenanceService:
         memory_card_manager: Any = None,
         backup_manager: Optional["DatabaseBackupManager"] = None,
         connection: Any = None,
+        memory_judgment_queue: Any = None,
+        notebook_manager: Any = None,
     ) -> None:
         cfg = config or {}
         self.curator = curator
@@ -67,6 +69,8 @@ class MaintenanceService:
         self.memory_card_manager = memory_card_manager
         self.backup_manager = backup_manager
         self.connection = connection
+        self.memory_judgment_queue = memory_judgment_queue
+        self.notebook_manager = notebook_manager
         self.min_interval_seconds = cfg.get("maintenance_min_interval_seconds", 300)
         self.max_items_per_tick = cfg.get("maintenance_max_items_per_tick", 8)
         self.daily_summary_trigger_hour = cfg.get("daily_summary_trigger_hour", 6)
@@ -113,6 +117,18 @@ class MaintenanceService:
         except Exception:
             logger.warning("Curator batch failed", exc_info=True)
             result["curator_error"] = 1
+
+        # Priority 1.5: Process memory judgment queue (V1.3)
+        try:
+            if self.memory_judgment_queue and self.memory_judgment_queue.pending_count() > 0:
+                judgment = self.memory_judgment_queue.process_one()
+                if judgment and judgment.get("should_write") and self.notebook_manager:
+                    self.notebook_manager.append_line(
+                        judgment["target"], judgment["category"], judgment["content"]
+                    )
+                    result["memory_judgment_written"] = 1
+        except Exception:
+            logger.warning("Memory judgment processing failed", exc_info=True)
 
         # Priority 2: Process pending episode summary jobs
         try:
