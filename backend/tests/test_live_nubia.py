@@ -88,7 +88,7 @@ def _status(method: str, path: str, *, json: Optional[Dict[str, Any]] = None) ->
 def test_01_health_light():
     data = _get("/api/health", timeout=5)
     assert data["ok"] is True
-    assert data["name"] == "Momo"
+    assert data["name"] == "豆豆"
     assert "build_hash" in data
 
 
