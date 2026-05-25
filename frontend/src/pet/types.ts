@@ -86,7 +86,7 @@ export type PetState = {
 
 export type BehaviorStep = {
   action: string;
-  target?: string;
+  slot?: string;
   duration_ms?: number;
 };
 

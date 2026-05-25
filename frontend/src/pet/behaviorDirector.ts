@@ -1,4 +1,5 @@
 import type { DoudouAction } from "./doudouSprites";
+import { isValidDoudouAction } from "./doudouSprites";
 import type { Mood, PetUIPhase } from "./types";
 import {
   validateBehaviorPlan,
@@ -127,11 +128,20 @@ export class BehaviorDirector {
     response: {
       behavior_intent?: string | null;
       behavior_plan?: unknown;
+      action?: string | null;
       mood?: Mood;
       reply?: string;
     },
     phase: PetUIPhase,
   ): DirectorOutput {
+    // Fast Reply: single action takes priority
+    if (response.action && isValidDoudouAction(response.action)) {
+      return {
+        visibleAction: response.action as DoudouAction,
+        bubbleText: response.reply ?? null,
+      };
+    }
+
     const plan = validateBehaviorPlan(response.behavior_plan);
     const effectivePlan =
       plan ??
@@ -154,7 +164,15 @@ export class BehaviorDirector {
 
   /** Called when a phase transition occurs. */
   onPhaseChange(phase: PetUIPhase): DirectorOutput {
-    // During protected phases, override to the phase-mapped action
+    // For audio playback phases, preserve the behavior plan queue
+    // so advanceSlot can consume it at the right boundaries.
+    if (phase === "waiting_voice" || phase === "speaking") {
+      return {
+        visibleAction: PHASE_SPRITE_MAP[phase] ?? "idle",
+        bubbleText: null,
+      };
+    }
+    // For other protected/error phases, clear the queue
     if (PROTECTED_PHASES.has(phase) || phase === "audio_error" || phase === "error") {
       this.queuedSteps = [];
       this.currentSlot = null;
@@ -177,7 +195,7 @@ export class BehaviorDirector {
     if (idx === -1) return null;
 
     const step = this.queuedSteps[idx];
-    // Remove consumed step and all before it for this slot
+    // Remove only the consumed step
     this.queuedSteps = this.queuedSteps.filter((_, i) => i !== idx);
     this.currentSlot = slot;
 

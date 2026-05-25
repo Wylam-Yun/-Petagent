@@ -246,8 +246,9 @@ function App() {
     // Feed response to director for behavior plan
     const out = directorRef.current.onBackendResponse(
       {
-        behavior_intent: (response as Record<string, unknown>).behavior_intent as string | undefined,
-        behavior_plan: (response as Record<string, unknown>).behavior_plan,
+        behavior_intent: response.behavior_intent,
+        behavior_plan: response.behavior_plan,
+        action: response.action,
         mood: response.mood,
         reply: response.reply,
       },
@@ -273,18 +274,22 @@ function App() {
       if (response.audio_job_id) {
         setLastAudioJobId(response.audio_job_id);
         setPhase("waiting_voice");
+        const beforeOut = directorRef.current.advanceSlot("before_speech");
+        if (beforeOut) setDoudouAction(beforeOut.visibleAction);
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
           setLastAudioJobId(null);
           setPhase("speaking");
           setBubbleText("豆豆在说…");
-          setDoudouAction("review");
+          const speechOut = directorRef.current.advanceSlot("speech");
+          setDoudouAction(speechOut?.visibleAction ?? "review");
           await playVoice(job.voice_url);
           if (audioRunRef.current === runId) {
             setPhase("idle");
             setBubbleText("豆豆说完啦。");
-            setDoudouAction("idle");
+            const afterOut = directorRef.current.advanceSlot("after_speech");
+            setDoudouAction(afterOut?.visibleAction ?? "idle");
           }
           return;
         }
@@ -294,12 +299,14 @@ function App() {
       if (response.voice_url) {
         setPhase("speaking");
         setBubbleText("豆豆在说…");
-        setDoudouAction("review");
+        const speechOut = directorRef.current.advanceSlot("speech");
+        setDoudouAction(speechOut?.visibleAction ?? "review");
         await playVoice(response.voice_url);
         if (audioRunRef.current === runId) {
           setPhase("idle");
           setBubbleText("豆豆说完啦。");
-          setDoudouAction("idle");
+          const afterOut = directorRef.current.advanceSlot("after_speech");
+          setDoudouAction(afterOut?.visibleAction ?? "idle");
         }
         return;
       }
