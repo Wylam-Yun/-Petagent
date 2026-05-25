@@ -146,20 +146,19 @@ def build_pet_messages(
 
     # Context profile awareness
     profile = (context.cognition_context or {}).get("context_profile", "")
-    if profile == "fast_companion":
+    if profile in ("fast_reply", "fast_companion", "tool"):
         system_prompt += (
             "\n\n快速陪伴模式：回复 1-2 句，自然、轻松，不要长篇大论。"
             "\n如果用户问回忆类问题且记忆卡片中没有足够信息，"
             "自然地说「这个我得认真翻一下记忆，打开思考模式我再帮你回忆」，不要编造。"
+            "\n如果用户问复杂问题或需要详细分析，简短回答并建议打开思考模式。"
         )
+    elif profile in ("thinking", "long_task"):
+        system_prompt += "\n\n深度模式：用户需要详细回答，可以展开，但不输出思考过程。参考小本本里的记忆。"
     elif profile == "proactive":
         system_prompt += "\n\n主动陪伴模式：回复 1 句，轻声问候，不要催促。"
     elif profile == "recall":
         system_prompt += "\n\n回忆模式：用户在问之前的事，尽力回忆并回答，可以稍长。"
-    elif profile == "tool":
-        system_prompt += "\n\n工具模式：用户需要事实信息，先给出事实，再用豆豆的语气包装。"
-    elif profile == "long_task":
-        system_prompt += "\n\n深度模式：用户需要详细回答，可以展开，但不输出思考过程。"
 
     # Use serializer instead of raw context.dict()
     payload = serialize_for_prompt(
@@ -172,6 +171,71 @@ def build_pet_messages(
     if reply_policy:
         payload["response_policy"] = reply_policy
     payload["output_schema"] = OUTPUT_SCHEMA_HINT
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False),
+        },
+    ]
+
+
+FAST_REPLY_SCHEMA = {
+    "reply": "自然简短的回复，不超过 80 字",
+    "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
+    "action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right",
+}
+
+
+def build_fast_reply_messages(
+    settings: Settings, event: PetEvent, context: RuntimeContext
+) -> List[Dict[str, str]]:
+    """Build minimal prompt for fast reply mode. Only includes essential context."""
+    system_prompt = settings.persona_config.get("system_prompt", "")
+
+    system_prompt += (
+        "\n\n快速回复模式："
+        "\n1. 用 1-2 句简短自然的话回复，不超过 80 字。"
+        "\n2. 输出一个 action 表示豆豆的动作/表情。"
+        "\n3. 不要输出 state_delta、memory_update、behavior_plan 等字段。"
+        "\n4. 不要输出思考过程。"
+        "\n5. 保持豆豆的语气，温柔、可爱、自然。"
+    )
+
+    if event.type == "voice_message":
+        system_prompt += (
+            "\n6. 如果识别置信度低，可以说刚刚有点没听清。"
+        )
+
+    # Build minimal payload — only essential fields
+    cognition = context.cognition_context or {}
+    recent_events = cognition.get("recent_exact_events", [])[-1:]  # latest 1 turn only
+    memory_cards = cognition.get("memory_cards") or {}
+
+    # Select 1 item from each card file
+    user_items = memory_cards.get("user_preferences", [])
+    memory_items = memory_cards.get("momo_memories", [])
+    memory_hints = []
+    if user_items:
+        memory_hints.append(user_items[-1])
+    if memory_items:
+        memory_hints.append(memory_items[-1])
+
+    user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
+
+    payload = {
+        "user_input": user_text,
+        "recent_dialogue": recent_events,
+        "pet_state": {
+            "mood": context.pet_state.get("mood", "idle"),
+            "energy": context.pet_state.get("energy", 50),
+            "intimacy": context.pet_state.get("intimacy", 0),
+            "sleepiness": context.pet_state.get("sleepiness", 0),
+        },
+        "memory_hints": memory_hints,
+        "response_schema": FAST_REPLY_SCHEMA,
+    }
 
     return [
         {"role": "system", "content": system_prompt},

@@ -16,6 +16,7 @@ from app.runtime.actions import (
     ALLOWED_VIBRATIONS,
     ALLOWED_VOICE_STYLES,
     MOOD_ANIMATION_MAP,
+    FastReplyAction,
     PetAction,
     StateAffect,
 )
@@ -39,6 +40,7 @@ EVENT_STATE_DELTA_LIMITS = {
 }
 
 DEFAULT_MAX_REPLY_CHARS = 500
+FAST_REPLY_MAX_REPLY_CHARS = 80
 
 MAX_BEHAVIOR_STEPS = 4
 MAX_BEHAVIOR_TOTAL_MS = 8000
@@ -115,6 +117,13 @@ FALLBACK_ACTION = {
         "sleepiness": 0,
     },
     "memory_update": {"should_save": False, "content": ""},
+}
+
+FAST_REPLY_FALLBACK = {
+    "reply": "嗯嗯，豆豆在这儿。",
+    "mood": "happy",
+    "action": "idle",
+    "voice_style": "soft",
 }
 
 
@@ -254,4 +263,39 @@ def guard_action(
         memory_update=data.get("memory_update") or {"should_save": False, "content": ""},
         behavior_intent=_sanitize_behavior_intent(data.get("behavior_intent")),
         behavior_plan=_sanitize_behavior_plan(data.get("behavior_plan")),
+    )
+
+
+def guard_fast_reply_action(
+    raw: Any,
+    max_reply_chars: int = FAST_REPLY_MAX_REPLY_CHARS,
+) -> FastReplyAction:
+    """Guard a fast reply LLM output into a validated FastReplyAction."""
+    data = _parse_action(raw)
+    if not data.get("reply"):
+        data = dict(FAST_REPLY_FALLBACK)
+
+    mood = data.get("mood")
+    if mood and mood not in ALLOWED_MOODS:
+        mood = None
+
+    action = data.get("action")
+    if action and action not in ALLOWED_BEHAVIOR_ACTIONS:
+        action = None
+
+    voice_style = data.get("voice_style", "soft")
+    if voice_style not in ALLOWED_VOICE_STYLES:
+        voice_style = "soft"
+
+    reply = _strip_reasoning(str(data.get("reply", "")).strip())
+    reply = _sanitize_prompt_leak(reply)
+    if not reply:
+        reply = FAST_REPLY_FALLBACK["reply"]
+    reply = _trim_reply(reply, max_reply_chars)
+
+    return FastReplyAction(
+        reply=reply,
+        mood=mood,
+        action=action,
+        voice_style=voice_style,
     )

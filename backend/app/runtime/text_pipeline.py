@@ -72,10 +72,11 @@ class TextPipeline:
         provider_name = (
             self.slow_brain_provider_name if decision.brain == "slow" else self.fast_brain_provider_name
         )
+        is_thinking = selected == "thinking"
+        source = "text_thinking" if is_thinking else "text_fast_reply"
         activation_event = _classify_activation(user_text, self.activation_manager)
         activation_info = None
         if activation_event is not None:
-            source = "text_slow" if selected == "slow" else "text_fast"
             activation_event["source"] = source
             activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
@@ -84,7 +85,7 @@ class TextPipeline:
             response = self.dispatcher.handle_event(
                 {
                     "type": "text_message",
-                    "source": "text_slow" if selected == "slow" else "text_fast",
+                    "source": source,
                     "payload": {"user_text": user_text, "thinking_mode": thinking_mode},
                 },
                 brain=brain,

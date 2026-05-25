@@ -15,7 +15,7 @@ def test_text_chat_uses_fast_route_by_default():
     assert response.status_code == 200
     body = response.json()
     assert body["user_text"] == "我今天有点累"
-    assert body["text_route"]["selected"] == "fast"
+    assert body["text_route"]["selected"] == "fast_reply"
     assert body["text_route"]["thinking_mode"] is False
     assert body["text_route"]["brain_provider"] == "mock_fast_llm"
     assert body["voice_url"] is None
@@ -33,7 +33,7 @@ def test_text_chat_uses_slow_route_when_thinking_mode_is_enabled():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["text_route"]["selected"] == "slow"
+    assert body["text_route"]["selected"] == "thinking"
     assert body["text_route"]["thinking_mode"] is True
     assert body["text_route"]["brain_provider"] == "mock_slow_llm"
 
@@ -86,7 +86,8 @@ def test_text_message_can_trigger_skill_planner():
     response = client.post("/api/text/chat", json={"text": "今天适合出门吗"})
 
     assert response.status_code == 200
-    assert "weather.current" in response.json()["runtime"]["skills_used"]
+    # V1.3: tool keywords route to fast_reply with no tools
+    assert response.json()["runtime"]["skills_used"] == []
 
 
 def test_text_prompt_mentions_state_affect_and_contextual_buttons():

@@ -1,12 +1,12 @@
-"""Integration tests verifying LLM-planned skills actually execute through the agent loop."""
+"""Integration tests verifying LLM-planned skills behavior in V1.3."""
 
 from __future__ import annotations
 
 from app.main import create_app
 
 
-def test_llm_planned_weather_skill_executes():
-    """LLM skill plan with weather.current must actually run, not get dropped by guard."""
+def test_v13_fast_reply_does_not_execute_skills():
+    """V1.3: fast reply mode does not execute skills (tools disabled)."""
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     original = provider.complete_json
@@ -22,7 +22,6 @@ def test_llm_planned_weather_skill_executes():
 
     def plan_with_weather(messages):
         result = original(messages)
-        # LLMs may omit optional location; weather.current should default to current.
         result["skill_requests"] = [
             {"skill_id": "weather.current", "payload": {}}
         ]
@@ -37,12 +36,13 @@ def test_llm_planned_weather_skill_executes():
         }
     )
 
-    assert "weather.current" in skill_called
-    assert "weather.current" in response.runtime.get("skills_used", [])
+    # V1.3: skills disabled in fast_reply mode
+    assert "weather.current" not in skill_called
+    assert response.runtime.get("skills_used", []) == []
 
 
-def test_llm_planned_device_info_executes():
-    """LLM skill plan with device.info must actually run."""
+def test_v13_thinking_mode_does_not_execute_skills():
+    """V1.3: even thinking mode has tools disabled."""
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     original = provider.complete_json
@@ -68,12 +68,12 @@ def test_llm_planned_device_info_executes():
         {
             "type": "text_message",
             "source": "runtime",
-            "payload": {"user_text": "电量多少"},
+            "payload": {"user_text": "电量多少", "thinking_mode": True},
         }
     )
 
-    assert "device.info" in skill_called
-    assert "device.info" in response.runtime.get("skills_used", [])
+    # V1.3: tools disabled even in thinking mode
+    assert "device.info" not in skill_called
 
 
 def test_unknown_skill_id_filtered_by_guard():

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from time import perf_counter
 
 from app.pet.brain import PetBrain
-from app.pet.guard import guard_action
+from app.pet.guard import guard_action, guard_fast_reply_action
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
@@ -276,6 +276,7 @@ class RuntimeDispatcher:
         )
 
         # Generate action (LLM call — the slowest part, gated by provider concurrency)
+        is_fast_reply = decision and decision.route == "fast_reply"
         provider_type = _profile_to_gate_type(decision.provider_profile if decision else "slow_llm")
         llm_start = perf_counter()
         raw_action = None
@@ -285,7 +286,10 @@ class RuntimeDispatcher:
                 self.provider_gate.acquire(provider_type)
                 gate_acquired = True
             try:
-                raw_action = active_brain.generate_action(event, context)
+                if is_fast_reply:
+                    raw_action = active_brain.generate_fast_reply_action(event, context)
+                else:
+                    raw_action = active_brain.generate_action(event, context)
             except Exception:
                 raw_action = None
         except ProviderBusyError:
@@ -313,42 +317,59 @@ class RuntimeDispatcher:
             run.error = "LLM provider exception"
         if run and run.status not in {"failed", "superseded"}:
             run.set_status("action_generated")
-        action = guard_action(
-            raw_action,
-            max_reply_chars=self._max_reply_chars(active_brain),
-            event_type=event.type,
-        )
-        if run:
-            run.final_action = {
-                "reply": action.reply[:200],
-                "mood": action.mood,
-                "face_type": action.face_type,
-                "animation": action.animation,
-                "voice_style": action.voice_style,
-            }
 
-        # Compute state delta (deterministic, can be recomputed on CAS retry)
-        sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
-        if "energy" in action.state_delta:
-            logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
-        final_state = apply_state_delta(ruled_state, sanitized_delta)
-        pre_llm_energy = int(ruled_state.get("energy", 0))
-        effort = action.state_affect.pet_effort
-        if effort == "medium":
-            final_state["energy"] = min(
-                int(final_state.get("energy", 0)) - 2,
-                pre_llm_energy - 2,
+        fast_action = None
+        if is_fast_reply:
+            fast_action = guard_fast_reply_action(raw_action)
+            if run:
+                run.final_action = {
+                    "reply": fast_action.reply[:200],
+                    "mood": fast_action.mood or "idle",
+                    "action": fast_action.action or "",
+                    "voice_style": fast_action.voice_style,
+                }
+            # Minimal state update: mood + last_interaction_at only
+            final_state = dict(ruled_state)
+            if fast_action.mood:
+                final_state["mood"] = fast_action.mood
+            final_state["mode"] = "idle"
+            final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+        else:
+            action = guard_action(
+                raw_action,
+                max_reply_chars=self._max_reply_chars(active_brain),
+                event_type=event.type,
             )
-        elif effort == "high":
-            final_state["energy"] = min(
-                int(final_state.get("energy", 0)) - 5,
-                pre_llm_energy - 4,
-            )
-            final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
-        final_state = clamp_state(final_state)
-        final_state["mood"] = action.mood
-        final_state["mode"] = "idle"
-        final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+            if run:
+                run.final_action = {
+                    "reply": action.reply[:200],
+                    "mood": action.mood,
+                    "face_type": action.face_type,
+                    "animation": action.animation,
+                    "voice_style": action.voice_style,
+                }
+            # Compute state delta (deterministic, can be recomputed on CAS retry)
+            sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
+            if "energy" in action.state_delta:
+                logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
+            final_state = apply_state_delta(ruled_state, sanitized_delta)
+            pre_llm_energy = int(ruled_state.get("energy", 0))
+            effort = action.state_affect.pet_effort
+            if effort == "medium":
+                final_state["energy"] = min(
+                    int(final_state.get("energy", 0)) - 2,
+                    pre_llm_energy - 2,
+                )
+            elif effort == "high":
+                final_state["energy"] = min(
+                    int(final_state.get("energy", 0)) - 5,
+                    pre_llm_energy - 4,
+                )
+                final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
+            final_state = clamp_state(final_state)
+            final_state["mood"] = action.mood
+            final_state["mode"] = "idle"
+            final_state["last_interaction_at"] = datetime.utcnow().isoformat()
 
         # ===== PHASE 3: LOCKED COMMIT =====
         with self._event_lock:
@@ -360,39 +381,61 @@ class RuntimeDispatcher:
                 current_state = self.state_store.get_state()
                 state_before = dict(current_state)
                 ruled_state = apply_event_rules(current_state, event.type)
-                final_state = apply_state_delta(ruled_state, sanitized_delta)
-                if effort == "medium":
-                    final_state["energy"] = min(
-                        int(final_state.get("energy", 0)) - 2,
-                        int(ruled_state.get("energy", 0)) - 2,
-                    )
-                elif effort == "high":
-                    final_state["energy"] = min(
-                        int(final_state.get("energy", 0)) - 5,
-                        int(ruled_state.get("energy", 0)) - 4,
-                    )
-                    final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
-                final_state = clamp_state(final_state)
-                final_state["mood"] = action.mood
-                final_state["mode"] = "idle"
-                final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+                if is_fast_reply:
+                    final_state = dict(ruled_state)
+                    if fast_action and fast_action.mood:
+                        final_state["mood"] = fast_action.mood
+                    final_state["mode"] = "idle"
+                    final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+                else:
+                    final_state = apply_state_delta(ruled_state, sanitized_delta)
+                    if effort == "medium":
+                        final_state["energy"] = min(
+                            int(final_state.get("energy", 0)) - 2,
+                            int(ruled_state.get("energy", 0)) - 2,
+                        )
+                    elif effort == "high":
+                        final_state["energy"] = min(
+                            int(final_state.get("energy", 0)) - 5,
+                            int(ruled_state.get("energy", 0)) - 4,
+                        )
+                        final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
+                    final_state = clamp_state(final_state)
+                    final_state["mood"] = action.mood
+                    final_state["mode"] = "idle"
+                    final_state["last_interaction_at"] = datetime.utcnow().isoformat()
                 saved_state = self.state_store.save_state(final_state)
 
             # Record in event_log
             if self.event_log_store is not None and episode_id:
-                self.event_log_store.record(
-                    event_id=event.id,
-                    episode_id=episode_id,
-                    event_type=event.type,
-                    source=event.source,
-                    user_text=str(event.payload.get("user_text", "")),
-                    pet_reply=action.reply,
-                    skill_results=skill_results or None,
-                    state_before=state_before,
-                    state_after=saved_state,
-                    mood_after=action.mood,
-                    state_affect=action.state_affect.dict(),
-                )
+                if is_fast_reply:
+                    self.event_log_store.record(
+                        event_id=event.id,
+                        episode_id=episode_id,
+                        event_type=event.type,
+                        source=event.source,
+                        user_text=str(event.payload.get("user_text", "")),
+                        pet_reply=fast_action.reply,
+                        skill_results=None,
+                        state_before=state_before,
+                        state_after=saved_state,
+                        mood_after=fast_action.mood or "idle",
+                        state_affect=None,
+                    )
+                else:
+                    self.event_log_store.record(
+                        event_id=event.id,
+                        episode_id=episode_id,
+                        event_type=event.type,
+                        source=event.source,
+                        user_text=str(event.payload.get("user_text", "")),
+                        pet_reply=action.reply,
+                        skill_results=skill_results or None,
+                        state_before=state_before,
+                        state_after=saved_state,
+                        mood_after=action.mood,
+                        state_affect=action.state_affect.dict(),
+                    )
             if run and run.status not in {"failed", "superseded"}:
                 run.set_status("committed")
 
@@ -411,10 +454,12 @@ class RuntimeDispatcher:
             voice_url = None
             audio_job_id = None
             if synthesize_voice:
+                tts_text = fast_action.reply if is_fast_reply else action.reply
+                tts_style = fast_action.voice_style if is_fast_reply else action.voice_style
                 if self.audio_job_manager is not None:
                     audio_job_id = self.audio_job_manager.enqueue(
-                        action.reply,
-                        action.voice_style,
+                        tts_text,
+                        tts_style,
                         run_id=run.run_id if run else "",
                         event_id=event.id,
                         session_id=episode_id,
@@ -424,20 +469,29 @@ class RuntimeDispatcher:
                         run.record("audio_enqueued", {"job_id": audio_job_id})
                 else:
                     try:
-                        voice_url = self.tts_provider.synthesize(action.reply, action.voice_style)
+                        voice_url = self.tts_provider.synthesize(tts_text, tts_style)
                     except Exception:
                         voice_url = None
 
         # Post-commit work (outside lock)
-        self._collect_memory_candidates(event, action, episode_id)
+        if not is_fast_reply:
+            self._collect_memory_candidates(event, action, episode_id)
 
         if self.interaction_log is not None:
-            self.interaction_log.record(
-                event.type,
-                action.reply,
-                action.mood,
-                user_text=str(event.payload.get("user_text", "")),
-            )
+            if is_fast_reply:
+                self.interaction_log.record(
+                    event.type,
+                    fast_action.reply,
+                    fast_action.mood or "idle",
+                    user_text=str(event.payload.get("user_text", "")),
+                )
+            else:
+                self.interaction_log.record(
+                    event.type,
+                    action.reply,
+                    action.mood,
+                    user_text=str(event.payload.get("user_text", "")),
+                )
 
         if self.event_log_store is not None:
             max_rows = self.context_manager.raw_max_rows if self.context_manager else 3000
@@ -457,24 +511,49 @@ class RuntimeDispatcher:
             if self.agent_run_registry is not None:
                 self.agent_run_registry.persist_if_terminal(run)
 
-        response = PetResponse(
-            reply=action.reply,
-            mood=action.mood,
-            face_type=action.face_type,
-            animation=action.animation,
-            vibration=action.vibration,
-            voice_url=voice_url,
-            pet_state=saved_state,
-            runtime={
-                "event_id": event.id,
-                "skills_used": [item.get("skill_id") for item in skill_results],
-                "episode_id": episode_id,
-            },
-            audio_job_id=audio_job_id,
-            state_affect=action.state_affect.dict(),
-            behavior_intent=action.behavior_intent,
-            behavior_plan=action.behavior_plan,
-        )
+        if is_fast_reply:
+            from app.runtime.actions import MOOD_ANIMATION_MAP
+            resp_mood = fast_action.mood or "idle"
+            response = PetResponse(
+                reply=fast_action.reply,
+                mood=resp_mood,
+                face_type=resp_mood,
+                animation=MOOD_ANIMATION_MAP.get(resp_mood, "breathing"),
+                vibration="none",
+                voice_url=voice_url,
+                pet_state=saved_state,
+                runtime={
+                    "event_id": event.id,
+                    "skills_used": [],
+                    "episode_id": episode_id,
+                },
+                audio_job_id=audio_job_id,
+                state_affect=None,
+                behavior_intent=None,
+                behavior_plan=None,
+                action=fast_action.action,
+                route="fast_reply",
+            )
+        else:
+            response = PetResponse(
+                reply=action.reply,
+                mood=action.mood,
+                face_type=action.face_type,
+                animation=action.animation,
+                vibration=action.vibration,
+                voice_url=voice_url,
+                pet_state=saved_state,
+                runtime={
+                    "event_id": event.id,
+                    "skills_used": [item.get("skill_id") for item in skill_results],
+                    "episode_id": episode_id,
+                },
+                audio_job_id=audio_job_id,
+                state_affect=action.state_affect.dict(),
+                behavior_intent=action.behavior_intent,
+                behavior_plan=action.behavior_plan,
+                route="thinking",
+            )
         if run:
             response.runtime["run_id"] = run.run_id
             if decision:

@@ -10,6 +10,7 @@ from app.providers.audio_omni import (
     FALLBACK_AUDIO_UNDERSTANDING,
 )
 from app.providers.errors import ProviderError
+from app.runtime.actions import PetResponse
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
@@ -55,8 +56,8 @@ class VoicePipeline:
         requested_route: str = "auto",
         thinking_mode: bool = False,
     ) -> VoicePipelineResult:
-        requested = requested_route if requested_route in {"auto", "fast", "slow"} else "auto"
-        if thinking_mode or requested == "slow":
+        requested = requested_route if requested_route in {"auto", "fast_reply", "thinking"} else "auto"
+        if thinking_mode or requested == "thinking":
             return self._run_audio_understanding_route(
                 audio_path,
                 content_type,
@@ -67,7 +68,7 @@ class VoicePipeline:
             audio_path,
             content_type,
             requested=requested,
-            selected="fast",
+            selected="fast_reply",
             thinking_mode=thinking_mode,
             brain=self.fast_brain,
             brain_provider_name=self.fast_brain_provider_name,
@@ -110,7 +111,7 @@ class VoicePipeline:
             fallback_reason = "asr_low_confidence"
 
         if fallback_reason:
-            if self.slow_fallback_enabled:
+            if thinking_mode and self.slow_fallback_enabled:
                 result = self._run_audio_fallback(
                     audio_path,
                     content_type,
@@ -141,6 +142,38 @@ class VoicePipeline:
                     fallback_reason=fallback_reason,
                 )
                 return result
+            elif not thinking_mode:
+                # Fast reply: ASR failed, return local recovery instead of heavy fallback
+                timings["total"] = _now_ms(started)
+                fallback_response = PetResponse(
+                    reply="没听清，再说一次嘛~",
+                    mood="idle",
+                    face_type="idle",
+                    animation="breathing",
+                    vibration="none",
+                    pet_state={},
+                    runtime={"error_class": "asr_failed"},
+                    route="fast_reply",
+                )
+                return VoicePipelineResult(
+                    user_text="",
+                    audio_understanding=FALLBACK_AUDIO_UNDERSTANDING,
+                    response=fallback_response,
+                    route_info=VoiceRouteInfo(
+                        requested=requested,
+                        selected="fast_reply",
+                        thinking_mode=False,
+                        asr_provider=transcript.provider,
+                        asr_error_code=transcript.error_code,
+                        asr_error_message=transcript.error_message,
+                        brain_provider=self.fast_brain_provider_name,
+                        fallback_reason=fallback_reason,
+                        emotion_source="none",
+                        asr_failed_hint="没听清",
+                        timings_ms=timings,
+                    ),
+                    fallback_reason=fallback_reason,
+                )
             understanding = FALLBACK_AUDIO_UNDERSTANDING
         else:
             understanding = AudioUnderstanding(
@@ -278,7 +311,7 @@ class VoicePipeline:
             response = self.dispatcher.handle_event(
                 {
                     "type": "voice_message",
-                    "source": "voice_slow",
+                    "source": "voice_thinking",
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
@@ -295,7 +328,7 @@ class VoicePipeline:
             response=response,
             route_info=VoiceRouteInfo(
                 requested=requested,
-                selected="slow",
+                selected="thinking",
                 thinking_mode=thinking_mode,
                 asr_provider=getattr(transcript, "provider", "") if transcript else "",
                 brain_provider=self.slow_brain_provider_name,
@@ -345,7 +378,7 @@ class VoicePipeline:
             response = self.dispatcher.handle_event(
                 {
                     "type": "voice_message",
-                    "source": "voice_slow",
+                    "source": "voice_thinking",
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
@@ -362,7 +395,7 @@ class VoicePipeline:
             response=response,
             route_info=VoiceRouteInfo(
                 requested=requested,
-                selected="slow",
+                selected="thinking",
                 thinking_mode=thinking_mode,
                 asr_provider="",
                 brain_provider=self.slow_brain_provider_name,

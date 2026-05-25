@@ -17,6 +17,7 @@ def test_pet_event_writes_interaction_log():
 
 
 def test_voice_chat_can_persist_memory_update_from_brain():
+    """V1.3: memory_update only processed in thinking mode (fast reply skips it)."""
     app = create_app(testing=True)
 
     class MemoryLLM:
@@ -37,7 +38,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
                 },
             }
 
-    app.state.voice_pipeline.fast_brain.provider = MemoryLLM()
+    app.state.voice_pipeline.slow_brain.provider = MemoryLLM()
 
     # Disable maintenance tick so candidates aren't processed mid-test
     app.state.dispatcher.maintenance_service = None
@@ -45,6 +46,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
 
     response = client.post(
         "/api/voice/chat",
+        data={"thinking_mode": "true"},
         files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
 
@@ -55,7 +57,8 @@ def test_voice_chat_can_persist_memory_update_from_brain():
     assert "用户今天很累，需要温柔陪伴。" in texts
 
 
-def test_voice_weather_question_uses_skill_plan_before_final_reply():
+def test_voice_weather_question_fast_reply_no_skills():
+    """V1.3: fast reply voice does not execute skills."""
     app = create_app(testing=True)
     app.state.asr_provider.text = "今天适合出门吗"
 
@@ -72,14 +75,8 @@ def test_voice_weather_question_uses_skill_plan_before_final_reply():
                     "reason": "用户询问出门天气",
                 }
             return {
-                "reply": "天气刚刚没问稳，但出门前可以看一眼窗外哦。",
+                "reply": "天气刚刚没问到，但出门前可以看一眼窗外哦。",
                 "mood": "concerned",
-                "face_type": "concerned",
-                "animation": "tilt",
-                "voice_style": "soft",
-                "vibration": "light",
-                "state_delta": {"loneliness": -1},
-                "memory_update": {"should_save": False, "content": ""},
             }
 
     app.state.voice_pipeline.fast_brain.provider = PlanningLLM()
@@ -92,5 +89,5 @@ def test_voice_weather_question_uses_skill_plan_before_final_reply():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["skills_used"] == ["weather.current"]
-    assert "API" not in body["reply"]
+    # V1.3: fast reply does not execute skills
+    assert body["runtime"]["skills_used"] == []

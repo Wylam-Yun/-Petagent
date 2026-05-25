@@ -132,7 +132,7 @@ def test_button_event_fast_companion_profile():
     response = client.post("/api/pet/event", json={"event": "hug", "payload": {}})
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["context_profile"] == "fast_companion"
+    assert body["runtime"]["context_profile"] == "fast_reply"
 
 
 def test_recall_question_profile():
@@ -141,7 +141,7 @@ def test_recall_question_profile():
     response = client.post("/api/text/chat", json={"text": "昨天我们聊了啥"})
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["context_profile"] == "fast_companion"
+    assert body["runtime"]["context_profile"] == "fast_reply"
 
 
 def test_weather_question_profile():
@@ -150,7 +150,7 @@ def test_weather_question_profile():
     response = client.post("/api/text/chat", json={"text": "今天适合出门吗"})
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["context_profile"] == "tool"
+    assert body["runtime"]["context_profile"] == "fast_reply"
 
 
 def test_thinking_mode_slow_route():
@@ -159,8 +159,8 @@ def test_thinking_mode_slow_route():
     response = client.post("/api/text/chat", json={"text": "你好", "thinking_mode": True})
     assert response.status_code == 200
     body = response.json()
-    assert body["runtime"]["context_profile"] == "long_task"
-    assert body["text_route"]["selected"] == "slow"
+    assert body["runtime"]["context_profile"] == "thinking"
+    assert body["text_route"]["selected"] == "thinking"
 
 
 def test_context_profile_none_preserves_default():

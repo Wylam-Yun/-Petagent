@@ -21,8 +21,8 @@ def _make_run_dict(**overrides) -> dict:
         "run_id": "run-test123",
         "event_id": "evt-abc",
         "episode_id": "ep-1",
-        "route": "fast",
-        "context_profile": "fast_companion",
+        "route": "fast_reply",
+        "context_profile": "fast_reply",
         "provider": "fast_llm",
         "status": "completed",
         "timings_ms": {"llm": 150, "total": 200},
@@ -44,7 +44,7 @@ def test_save_and_get():
     result = store.get("run-test123")
     assert result is not None
     assert result["run_id"] == "run-test123"
-    assert result["route"] == "fast"
+    assert result["route"] == "fast_reply"
     assert result["timings_ms"] == {"llm": 150, "total": 200}
     assert result["requested_tools"] == ["weather"]
     assert result["final_action"]["reply"] == "hello"

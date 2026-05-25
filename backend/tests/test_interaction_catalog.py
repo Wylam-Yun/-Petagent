@@ -113,7 +113,7 @@ def test_prompt_injects_button_semantics():
     context = build_runtime_context(
         event=event,
         pet_state={"mood": "idle", "energy": 50},
-        cognition_context={"context_profile": "fast_companion"},
+        cognition_context={"context_profile": "fast_reply"},
     )
     messages = build_pet_messages(settings, event, context)
     system_content = messages[0]["content"]
@@ -132,7 +132,7 @@ def test_text_event_no_button_semantics():
     context = build_runtime_context(
         event=event,
         pet_state={"mood": "idle", "energy": 50},
-        cognition_context={"context_profile": "fast_companion"},
+        cognition_context={"context_profile": "fast_reply"},
     )
     messages = build_pet_messages(settings, event, context)
     system_content = messages[0]["content"]

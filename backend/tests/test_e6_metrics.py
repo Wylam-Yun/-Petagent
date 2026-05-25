@@ -75,7 +75,7 @@ def test_run_endpoint_shows_timings():
     assert "timings_ms" in run
     assert "total" in run["timings_ms"]
     assert "llm" in run["timings_ms"]
-    assert run["route"] in {"fast", "slow"}
+    assert run["route"] in {"fast_reply", "thinking"}
     assert isinstance(run["provider"], str)
     assert run["status"] in {"completed", "failed"}
 

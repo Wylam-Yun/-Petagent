@@ -1,0 +1,165 @@
+"""Tests for V1.3 Fast Reply Contract."""
+
+from __future__ import annotations
+
+from app.main import create_app
+from app.pet.guard import guard_fast_reply_action
+from app.runtime.actions import ALLOWED_BEHAVIOR_ACTIONS, ALLOWED_MOODS, FastReplyAction
+
+
+def test_fast_reply_guard_sanitizes():
+    """guard_fast_reply_action strips reasoning, enforces whitelists, trims."""
+    raw = {
+        "reply": "<think>让我想想...</think>\n早呀，豆豆醒着呢。" + "很长" * 50,
+        "mood": "happy",
+        "action": "waving",
+        "voice_style": "soft",
+    }
+    result = guard_fast_reply_action(raw)
+    assert isinstance(result, FastReplyAction)
+    assert "<think>" not in result.reply
+    assert result.mood == "happy"
+    assert result.action == "waving"
+    assert result.voice_style == "soft"
+    assert len(result.reply) <= 80
+
+
+def test_fast_reply_guard_fallback_on_empty():
+    """Empty/invalid LLM output returns safe fallback."""
+    result = guard_fast_reply_action({})
+    assert isinstance(result, FastReplyAction)
+    assert result.reply == "嗯嗯，豆豆在这儿。"
+    assert result.mood == "happy"
+    assert result.action == "idle"
+    assert result.voice_style == "soft"
+
+
+def test_fast_reply_guard_invalid_mood():
+    """Invalid mood is cleared, not fallback to idle."""
+    result = guard_fast_reply_action({"reply": "早", "mood": "furious"})
+    assert result.mood is None
+
+
+def test_fast_reply_guard_invalid_action():
+    """Invalid action is cleared."""
+    result = guard_fast_reply_action({"reply": "早", "action": "dancing"})
+    assert result.action is None
+
+
+def test_fast_reply_guard_prompt_leak():
+    """Lines containing internal field names are stripped."""
+    raw = {
+        "reply": "早呀\nstate_delta: {energy: 5}\n豆豆在这儿。",
+    }
+    result = guard_fast_reply_action(raw)
+    assert "state_delta" not in result.reply
+    assert "豆豆在这儿" in result.reply
+
+
+def test_fast_reply_response_has_route_and_action():
+    """Fast reply PetResponse includes route and action fields."""
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+    original = provider.complete_json
+
+    def patched(messages):
+        result = original(messages)
+        result["action"] = "waving"
+        result["mood"] = "happy"
+        return result
+
+    provider.complete_json = patched
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "你好"},
+        }
+    )
+    assert response.route == "fast_reply"
+    assert response.action == "waving"
+    assert response.state_affect is None
+    assert response.behavior_intent is None
+    assert response.behavior_plan is None
+
+
+def test_thinking_response_has_route():
+    """Thinking mode PetResponse includes route='thinking'."""
+    app = create_app(testing=True)
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "你好", "thinking_mode": True},
+        }
+    )
+    assert response.route == "thinking"
+
+
+def test_fast_reply_skips_state_delta():
+    """Fast reply does not apply state_delta from LLM."""
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+    original = provider.complete_json
+
+    def patched(messages):
+        result = original(messages)
+        # LLM tries to output state_delta (should be ignored in fast reply)
+        result["state_delta"] = {"energy": -100, "intimacy": 100}
+        return result
+
+    provider.complete_json = patched
+
+    state_before = app.state.dispatcher.state_store.get_state()
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "你好"},
+        }
+    )
+    # Energy should not have changed by -100
+    assert response.pet_state["energy"] >= state_before.get("energy", 0) - 10
+
+
+def test_fast_reply_prompt_excludes_forbidden_fields():
+    """Fast reply prompt payload should not contain forbidden fields."""
+    from app.config import load_settings
+    from app.pet.prompt_builder import build_fast_reply_messages
+    from app.runtime.context import build_runtime_context
+    from app.runtime.events import normalize_event
+    import json
+
+    settings = load_settings()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "你好"},
+    })
+    context = build_runtime_context(
+        event,
+        {"mood": "happy", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "fast_reply",
+            "recent_exact_events": [{"user": "你好", "pet": "早呀"}],
+            "memory_cards": {"user_preferences": ["喜欢咖啡"], "momo_memories": []},
+        },
+    )
+
+    messages = build_fast_reply_messages(settings, event, context)
+    user_payload = json.loads(messages[1]["content"])
+
+    # Must have these
+    assert "user_input" in user_payload
+    assert "pet_state" in user_payload
+    assert "response_schema" in user_payload
+
+    # Must NOT have these
+    forbidden = [
+        "current_time", "device_state", "skill_results",
+        "temporal_recall_events", "episode_summaries", "daily_digest",
+        "relevant_memories", "important_quotes",
+        "state_delta", "state_affect", "memory_update",
+        "behavior_plan", "output_schema",
+    ]
+    for field in forbidden:
+        assert field not in user_payload, f"Forbidden field '{field}' found in fast reply payload"

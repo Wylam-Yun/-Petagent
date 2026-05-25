@@ -110,6 +110,13 @@ class PetAction(BaseModel):
     behavior_plan: Optional[list] = None
 
 
+class FastReplyAction(BaseModel):
+    reply: str
+    mood: Optional[str] = None
+    action: Optional[str] = None
+    voice_style: str = "soft"
+
+
 class PetResponse(BaseModel):
     schema_version: str = "0.1"
     reply: str
@@ -124,3 +131,5 @@ class PetResponse(BaseModel):
     state_affect: Optional[Dict[str, Any]] = None
     behavior_intent: Optional[str] = None
     behavior_plan: Optional[list] = None
+    action: Optional[str] = None
+    route: Optional[str] = None

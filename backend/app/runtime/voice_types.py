@@ -38,6 +38,7 @@ class VoiceRouteInfo:
     emotion_source: str = ""
     wake_source: str = ""
     provider_failure: Optional[Dict[str, Any]] = None
+    asr_failed_hint: Optional[str] = None
     timings_ms: Dict[str, int] = field(default_factory=dict)
 
     def dict(self) -> Dict[str, Any]:
@@ -56,6 +57,8 @@ class VoiceRouteInfo:
         }
         if self.provider_failure:
             body["provider_failure"] = self.provider_failure
+        if self.asr_failed_hint:
+            body["asr_failed_hint"] = self.asr_failed_hint
         return body
 
 

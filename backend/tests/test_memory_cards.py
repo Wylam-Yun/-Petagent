@@ -160,7 +160,7 @@ def test_fast_path_uses_cards():
         episode=ep,
         event_log_store=event_log,
         memory_manager=mm,
-        context_profile="fast_companion",
+        context_profile="fast_reply",
         memory_card_manager=mcm,
     )
 
@@ -190,7 +190,7 @@ def test_fast_path_no_daily_summary():
         event_log_store=event_log,
         memory_manager=mm,
         daily_summary_store=dss,
-        context_profile="fast_companion",
+        context_profile="fast_reply",
     )
 
     assert context["daily_digest"] is None
@@ -448,8 +448,8 @@ def test_old_path_fallback():
     assert "喜欢短回复" in items
 
 
-def test_fast_companion_no_temporal_recall():
-    """fast_companion with recall keyword should NOT load temporal recall events."""
+def test_fast_reply_no_temporal_recall():
+    """fast_reply with recall keyword should NOT load temporal recall events."""
     from app.runtime.events import normalize_event
 
     tmp = Path(mkdtemp())
@@ -481,7 +481,7 @@ def test_fast_companion_no_temporal_recall():
         episode=ep,
         event_log_store=event_log,
         memory_manager=mm,
-        context_profile="fast_companion",
+        context_profile="fast_reply",
         memory_card_manager=mcm,
     )
 
@@ -521,7 +521,7 @@ def test_tool_profile_no_deep_memory():
         episode=ep,
         event_log_store=event_log,
         memory_manager=mm,
-        context_profile="tool",
+        context_profile="fast_reply",
         memory_card_manager=mcm,
     )
 
@@ -559,8 +559,8 @@ def test_seed_realistic_content():
     assert any("记忆方案" in item for item in mem_items)
 
 
-def test_thinking_mode_includes_deep_context():
-    """Thinking mode (long_task) should include scored memories and episode summaries."""
+def test_thinking_mode_card_only_no_scored_memories():
+    """V1.3: thinking mode uses card-only memory, no scored memories or summaries."""
     from app.runtime.memory_store import EpisodeSummaryStore
     from app.runtime.events import normalize_event
 
@@ -589,15 +589,17 @@ def test_thinking_mode_includes_deep_context():
         event_log_store=event_log,
         memory_manager=mm,
         episode_summary_store=ess,
-        context_profile="long_task",
+        context_profile="thinking",
     )
 
-    # long_task should include deep context
-    assert len(context["relevant_memories"]) > 0 or len(context["important_quotes"]) > 0
-    assert len(context["episode_summaries"]) > 0
+    # V1.3 thinking: card-only, no scored memories, no episode summaries, no important quotes
+    assert context["relevant_memories"] == []
+    assert context["important_quotes"] == []
+    assert context["episode_summaries"] == []
+    assert context["daily_digest"] is None
 
 
-def test_fast_companion_context_budget_small():
+def test_fast_reply_context_budget_small():
     """Fast companion context should be well under max budget."""
     from app.runtime.events import normalize_event
 
@@ -629,9 +631,9 @@ def test_fast_companion_context_budget_small():
         episode=ep,
         event_log_store=event_log,
         memory_manager=mm,
-        context_profile="fast_companion",
+        context_profile="fast_reply",
         memory_card_manager=mcm,
     )
 
     used = context["context_budget"]["used_chars"]
-    assert used < 2000, f"fast_companion context too large: {used} chars"
+    assert used < 2000, f"fast_reply context too large: {used} chars"

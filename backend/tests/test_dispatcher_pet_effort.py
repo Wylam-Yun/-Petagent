@@ -19,11 +19,12 @@ def _dispatch_with_effort(effort: str):
         return result
 
     provider.complete_json = patched
+    # Use thinking_mode=True to exercise full PetAction path with effort/state_delta
     response = app.state.dispatcher.handle_event(
         {
             "type": "text_message",
             "source": "runtime",
-            "payload": {"user_text": "你好"},
+            "payload": {"user_text": "你好", "thinking_mode": True},
         }
     )
     return response, app
@@ -76,7 +77,7 @@ def test_high_effort_overrides_positive_energy_delta():
         {
             "type": "text_message",
             "source": "runtime",
-            "payload": {"user_text": "帮我写代码"},
+            "payload": {"user_text": "帮我写代码", "thinking_mode": True},
         }
     )
     # Energy must be lower than baseline despite LLM's +8
@@ -103,7 +104,7 @@ def test_event_log_stores_state_affect():
         {
             "type": "text_message",
             "source": "runtime",
-            "payload": {"user_text": "你好"},
+            "payload": {"user_text": "你好", "thinking_mode": True},
         }
     )
 

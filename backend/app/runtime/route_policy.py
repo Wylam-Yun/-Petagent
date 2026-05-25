@@ -41,18 +41,18 @@ def decide_route(
 ) -> RouteDecision:
     if thinking_mode:
         return RouteDecision(
-            route="slow",
-            context_profile="long_task",
+            route="thinking",
+            context_profile="thinking",
             provider_profile="slow_llm",
             brain="slow",
-            allow_tools=True,
-            max_tool_calls=2,
+            allow_tools=False,
+            max_tool_calls=0,
             reason="thinking_mode enabled",
         )
 
     if event_source == "proactive" or event_type in PROACTIVE_EVENT_TYPES:
         return RouteDecision(
-            route="fast",
+            route="fast_reply",
             context_profile="proactive",
             provider_profile="fast_llm",
             brain="fast",
@@ -63,8 +63,8 @@ def decide_route(
 
     if event_type in BUTTON_EVENT_TYPES:
         return RouteDecision(
-            route="fast",
-            context_profile="fast_companion",
+            route="fast_reply",
+            context_profile="fast_reply",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -74,8 +74,8 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in RECALL_KEYWORDS):
         return RouteDecision(
-            route="fast",
-            context_profile="fast_companion",
+            route="fast_reply",
+            context_profile="fast_reply",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -85,29 +85,29 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in TOOL_KEYWORDS):
         return RouteDecision(
-            route="fast",
-            context_profile="tool",
+            route="fast_reply",
+            context_profile="fast_reply",
             provider_profile="fast_llm",
             brain="fast",
-            allow_tools=True,
-            max_tool_calls=2,
-            reason="external fact request",
+            allow_tools=False,
+            max_tool_calls=0,
+            reason="tool keywords routed to fast_reply (tools disabled in V1.3)",
         )
 
     if user_text and any(kw in user_text for kw in LONG_TASK_KEYWORDS):
         return RouteDecision(
-            route="slow",
-            context_profile="long_task",
-            provider_profile="slow_llm",
-            brain="slow",
-            allow_tools=True,
-            max_tool_calls=2,
-            reason="complex task detected",
+            route="fast_reply",
+            context_profile="fast_reply",
+            provider_profile="fast_llm",
+            brain="fast",
+            allow_tools=False,
+            max_tool_calls=0,
+            reason="complex keywords routed to fast_reply (suggest Thinking Mode in prompt)",
         )
 
     return RouteDecision(
-        route="fast",
-        context_profile="fast_companion",
+        route="fast_reply",
+        context_profile="fast_reply",
         provider_profile="fast_llm",
         brain="fast",
         allow_tools=False,
