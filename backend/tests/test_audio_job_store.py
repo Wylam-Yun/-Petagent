@@ -300,7 +300,7 @@ def test_manager_mark_shutdown_failed():
 
 
 def test_structured_404_for_restart_failed_job():
-    """When frontend polls a restart-failed job, API should return 404 with reason."""
+    """Restart-failed jobs are now visible (with error_class) so retry is reachable."""
     from fastapi.testclient import TestClient
     from app.main import create_app
 
@@ -313,6 +313,7 @@ def test_structured_404_for_restart_failed_job():
         "text": "lost message",
         "voice_style": "soft",
         "failure_reason": "runtime_restarted",
+        "error_class": "infrastructure",
         "created_at": "2026-01-01T00:00:00",
         "updated_at": "2026-01-01T00:00:01",
         "completed_at": "2026-01-01T00:00:01",
@@ -320,9 +321,10 @@ def test_structured_404_for_restart_failed_job():
 
     client = TestClient(app)
     resp = client.get("/api/audio/jobs/aud-restart-lost")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["detail"]["reason"] == "runtime_restarted"
+    assert body["status"] == "failed_runtime_restart"
+    assert body["error_class"] == "infrastructure"
 
 
 def test_structured_404_for_shutdown_failed_job():

@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 AUDIO_JOB_TERMINAL = {"ready", "failed", "expired", "superseded",
                        "failed_runtime_restart", "failed_shutdown"}
 
+# Map ProviderError subclass error_class to audio error_class
+_PROVIDER_ERROR_TO_AUDIO_CLASS: Dict[str, str] = {
+    "provider_network_error": "network",
+    "provider_timeout": "timeout",
+    "provider_auth_failed": "auth_config",
+    "provider_quota": "auth_config",
+}
+
 
 @dataclass
 class AudioJob:
@@ -34,6 +42,7 @@ class AudioJob:
     provider: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
     failure_reason: str = ""
+    error_class: str = ""
 
     def dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +52,7 @@ class AudioJob:
             "status": self.status,
             "voice_url": self.voice_url,
             "error": self.error,
+            "error_class": self.error_class or None,
             "provider": self.provider,
             "timings_ms": dict(self.timings_ms),
             "created_at": self.created_at,
@@ -87,6 +97,7 @@ class AudioJobManager:
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._pending_count = 0
+        self._retry_cache: Dict[str, tuple] = {}  # old_job_id -> (new_job_id, timestamp)
 
     def enqueue(
         self,
@@ -173,6 +184,7 @@ class AudioJobManager:
                 if job.status == "pending" and self._is_expired(job):
                     job.status = "expired"
                     job.error = "audio job expired"
+                    job.error_class = "timeout"
                     job.updated_at = datetime.utcnow().isoformat()
                     self._adjust_pending_locked(-1)
                 return AudioJob(**job.__dict__)
@@ -195,8 +207,39 @@ class AudioJobManager:
                     error=row.get("error"),
                     provider=row.get("provider", ""),
                     timings_ms=row.get("timings_ms", {}),
+                    error_class=row.get("error_class", ""),
                 )
         return None
+
+    def retry(self, job_id: str) -> Optional[str]:
+        """Create a new job from a terminal failed/expired job.
+
+        Returns new job_id, or None if the job is not retryable.
+        Idempotent: returns cached new job_id if same old job retried within 5s.
+        """
+        now_mono = datetime.utcnow().timestamp()
+
+        # Idempotency check
+        cached = self._retry_cache.get(job_id)
+        if cached:
+            cached_id, cached_ts = cached
+            if now_mono - cached_ts < 5.0:
+                return cached_id
+
+        old = self.get(job_id)
+        if old is None:
+            return None
+        if old.status not in ("failed", "expired",
+                               "failed_runtime_restart", "failed_shutdown"):
+            return None
+
+        new_id = self.enqueue(
+            text=old.text,
+            voice_style=old.voice_style,
+            session_id=old.session_id,
+        )
+        self._retry_cache[job_id] = (new_id, now_mono)
+        return new_id
 
     def _run_job(self, job_id: str) -> None:
         with self._lock:
@@ -222,6 +265,7 @@ class AudioJobManager:
             voice_url = None
             tts_ms = int((datetime.utcnow() - tts_start).total_seconds() * 1000)
             sanitized = _sanitize_error(exc)
+            audio_err_class = _map_error_class(exc)
 
             with self._lock:
                 current = self._jobs.get(job_id)
@@ -230,6 +274,7 @@ class AudioJobManager:
                 current.status = "failed"
                 current.voice_url = None
                 current.error = sanitized
+                current.error_class = audio_err_class
                 current.timings_ms["tts"] = tts_ms
                 current.timings_ms["audio_queue"] = queue_ms
                 current.updated_at = datetime.utcnow().isoformat()
@@ -269,6 +314,7 @@ class AudioJobManager:
                 current.status = "failed"
                 current.voice_url = None
                 current.error = "tts returned empty"
+                current.error_class = "auth_config"
             self._adjust_pending_locked(-1)
 
             if self._store:
@@ -312,6 +358,7 @@ class AudioJobManager:
                     self._adjust_pending_locked(-1)
                 old_job.status = "expired"
                 old_job.error = "expired: queue full"
+                old_job.error_class = "timeout"
                 old_job.updated_at = datetime.utcnow().isoformat()
                 self._order.pop(0)
                 self._jobs.pop(old_id, None)
@@ -330,37 +377,48 @@ class AudioJobManager:
         self._pending_count = max(0, self._pending_count + delta)
 
     def mark_restart_failed(self) -> int:
-        """Mark all pending/running jobs as failed_runtime_restart in SQLite."""
+        """Mark all pending/running jobs as failed_runtime_restart."""
         if self._store:
-            count = self._store.mark_restart_failed()
-            # Also update in-memory cache
-            with self._lock:
-                for job in self._jobs.values():
-                    if job.status in ("pending", "running"):
-                        if job.status == "pending":
-                            self._adjust_pending_locked(-1)
-                        job.status = "failed_runtime_restart"
-                        job.failure_reason = "runtime_restarted"
-                        job.error = "runtime restarted while job was in-flight"
-                        job.updated_at = datetime.utcnow().isoformat()
-            return count
-        return 0
+            self._store.mark_restart_failed()
+        count = 0
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status in ("pending", "running"):
+                    if job.status == "pending":
+                        self._adjust_pending_locked(-1)
+                    job.status = "failed_runtime_restart"
+                    job.failure_reason = "runtime_restarted"
+                    job.error = "runtime restarted while job was in-flight"
+                    job.error_class = "infrastructure"
+                    job.updated_at = datetime.utcnow().isoformat()
+                    count += 1
+        return count
 
     def mark_shutdown_failed(self) -> int:
-        """Mark all pending/running jobs as failed_shutdown in SQLite."""
+        """Mark all pending/running jobs as failed_shutdown."""
         if self._store:
-            count = self._store.mark_shutdown_failed()
-            with self._lock:
-                for job in self._jobs.values():
-                    if job.status in ("pending", "running"):
-                        if job.status == "pending":
-                            self._adjust_pending_locked(-1)
-                        job.status = "failed_shutdown"
-                        job.failure_reason = "process_shutdown"
-                        job.error = "process shutdown while job was in-flight"
-                        job.updated_at = datetime.utcnow().isoformat()
-            return count
-        return 0
+            self._store.mark_shutdown_failed()
+        count = 0
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status in ("pending", "running"):
+                    if job.status == "pending":
+                        self._adjust_pending_locked(-1)
+                    job.status = "failed_shutdown"
+                    job.failure_reason = "process_shutdown"
+                    job.error = "process shutdown while job was in-flight"
+                    job.error_class = "infrastructure"
+                    job.updated_at = datetime.utcnow().isoformat()
+                    count += 1
+        return count
+
+
+def _map_error_class(exc: Exception) -> str:
+    """Map an exception to an audio error_class string."""
+    error_class = getattr(exc, "error_class", None)
+    if error_class and error_class in _PROVIDER_ERROR_TO_AUDIO_CLASS:
+        return _PROVIDER_ERROR_TO_AUDIO_CLASS[error_class]
+    return "unknown"
 
 
 def _sanitize_error(exc: Exception) -> str:

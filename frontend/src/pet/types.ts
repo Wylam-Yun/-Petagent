@@ -84,6 +84,12 @@ export type PetState = {
   updated_at?: string;
 };
 
+export type BehaviorStep = {
+  action: string;
+  target?: string;
+  duration_ms?: number;
+};
+
 export type PetResponse = {
   schema_version?: string;
   reply: string;
@@ -99,13 +105,20 @@ export type PetResponse = {
     event_id: string;
     skills_used: unknown[];
   };
+  action?: string;
+  route?: string;
+  memory_ack_hint?: string;
+  behavior_intent?: string;
+  behavior_plan?: BehaviorStep[];
+  voice_style?: string;
 };
 
 export type AudioJob = {
   job_id: string;
-  status: "pending" | "ready" | "failed" | "expired" | "superseded";
+  status: "pending" | "ready" | "failed" | "expired" | "superseded" | "failed_runtime_restart" | "failed_shutdown";
   voice_url: string | null;
   error: string | null;
+  error_class?: string | null;
   created_at: string;
   updated_at: string;
 };

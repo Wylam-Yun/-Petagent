@@ -13,6 +13,7 @@ import {
   getInteractions,
   getPetState,
   getProactiveCheck,
+  postAudioRetry,
   postPetEvent,
   refreshContext,
   reportDeviceState,
@@ -200,8 +201,6 @@ function App() {
     const out = directorRef.current.onTap(Date.now(), phase);
     setDoudouAction(out.visibleAction);
     if (out.bubbleText) setBubbleText(out.bubbleText);
-    // Fire-and-forget backend sync for deliberate tap (no LLM/TTS)
-    void postPetEvent("pet_head").catch(() => undefined);
   }, [phase]);
 
   const handleOneShotComplete = useCallback((action: DoudouAction) => {
@@ -360,8 +359,12 @@ function App() {
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
     try {
-      const job = await getAudioJob(lastAudioJobId);
+      const { new_job_id } = await postAudioRetry(lastAudioJobId);
       if (audioRunRef.current !== runId) return;
+      setLastAudioJobId(new_job_id);
+      // Poll the new job
+      const job = await waitForReadyAudio(new_job_id, runId);
+      if (!job || audioRunRef.current !== runId) return;
       if (job.voice_url) {
         setLastAudioJobId(null);
         setPhase("speaking");
@@ -373,13 +376,12 @@ function App() {
           setBubbleText("豆豆说完啦。");
           setDoudouAction("idle");
         }
-      } else if (job.status === "failed" || job.status === "expired") {
+      } else {
+        const errBubble = getErrorBubble(job.error_class);
         setPhase("audio_error");
-        setBubbleText("声音没出来，可能需要重新说一遍。");
+        setBubbleText(errBubble.text);
         setDoudouAction("failed");
         setLastAudioJobId(null);
-      } else {
-        setBubbleText("声音还在准备，再等一下…");
       }
     } catch {
       if (audioRunRef.current !== runId) return;

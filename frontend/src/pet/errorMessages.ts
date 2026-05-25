@@ -36,6 +36,23 @@ const ERROR_BUBBLE_MAP: Record<string, { text: string; mood: "tired" | "concerne
     text: "豆豆要休息一下，等会儿再来找我。",
     mood: "tired",
   },
+  // Audio error classes
+  network: {
+    text: "网络刚刚没连上，豆豆发不出声音。",
+    mood: "concerned",
+  },
+  timeout: {
+    text: "声音生成太慢了，等一下再试。",
+    mood: "tired",
+  },
+  auth_config: {
+    text: "发声服务配置可能有问题。",
+    mood: "concerned",
+  },
+  infrastructure: {
+    text: "系统刚刚重启了，声音没发出来。",
+    mood: "tired",
+  },
 };
 
 const DEFAULT_ERROR = {

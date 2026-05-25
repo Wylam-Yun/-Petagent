@@ -16,8 +16,12 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const timeoutMs = 8_000;
   let lastError: Error | undefined;
 
+  const method = (init?.method ?? "GET").toUpperCase();
+  const canRetry = method === "GET";
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
+      if (!canRetry) break;
       await new Promise((r) => window.setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
     }
     try {
@@ -28,7 +32,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       return response.json() as Promise<T>;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      if (attempt === maxRetries) throw lastError;
+      if (attempt === maxRetries || !canRetry) throw lastError;
     }
   }
   throw lastError ?? new Error("request failed");
@@ -124,6 +128,13 @@ export function getPetState(): Promise<PetState> {
 
 export function getAudioJob(jobId: string): Promise<AudioJob> {
   return requestJson<AudioJob>(`/api/audio/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export function postAudioRetry(jobId: string): Promise<{ new_job_id: string }> {
+  return requestJson<{ new_job_id: string }>(`/api/audio/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: { "content-type": "application/json" }
+  });
 }
 
 export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceStatePayload> {
