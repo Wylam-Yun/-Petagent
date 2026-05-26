@@ -218,22 +218,14 @@ def build_fast_reply_messages(
     # Build minimal payload — only essential fields
     cognition = context.cognition_context or {}
     recent_events = cognition.get("recent_exact_events", [])[-1:]  # latest 1 turn only
-    memory_cards = cognition.get("memory_cards") or {}
-
-    # Select 1 item from each card file
-    # V1.3: prefer selected_card_items from NotebookManager, fall back to old memory_cards
+    # Select 1 item from each canonical notebook file.
+    # V1.3 does not fall back to legacy memory_cards projection.
     selected = cognition.get("selected_card_items")
     if selected and isinstance(selected, tuple) and len(selected) == 2:
         user_item, memory_item = selected
         memory_hints = [x for x in (user_item, memory_item) if x]
     else:
-        user_items = memory_cards.get("user_preferences", [])
-        memory_items = memory_cards.get("momo_memories", [])
         memory_hints = []
-        if user_items:
-            memory_hints.append(user_items[-1])
-        if memory_items:
-            memory_hints.append(memory_items[-1])
 
     user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
 
@@ -256,6 +248,85 @@ def build_fast_reply_messages(
             "role": "user",
             "content": json.dumps(payload, ensure_ascii=False),
         },
+    ]
+
+
+THINKING_RESPONSE_SCHEMA = {
+    "reply": "完整但简洁的自然回复；不输出思考过程",
+    "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
+    "face_type": "同 mood 枚举",
+    "animation": "breathing/bounce/droop/slowBlink/shake/wiggle/blink/tilt/jump/small",
+    "voice_style": "soft/normal/happy/sleepy/shy",
+    "vibration": "none/light/medium",
+    "behavior_intent": "soft_comfort/clingy_happy/clingy_wronged_happy/lazy_busy/quiet_sleepy/playful_proud/confused_wronged/neutral_companion",
+    "behavior_plan": [
+        {"action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right", "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600}
+    ],
+    "state_delta": {
+        "energy": 0,
+        "intimacy": 0,
+        "hunger": 0,
+        "cleanliness": 0,
+        "loneliness": 0,
+        "sleepiness": 0,
+    },
+    "state_affect": {
+        "interaction_tone": "affectionate/playful/comforting/encouraging/demanding/tiring/quiet/caregiving/neutral",
+        "pet_effort": "none/low/medium/high",
+        "emotional_effect": "happy/comforted/encouraged/pressured/annoyed/sleepy/calm/lonely_relieved/uncertain",
+        "reason": "一句话说明为什么这样影响豆豆状态",
+    },
+}
+
+
+def build_thinking_messages(
+    settings: Settings, event: PetEvent, context: RuntimeContext
+) -> List[Dict[str, str]]:
+    """Build V1.3 Thinking Mode prompt with bounded notebook-only context."""
+    system_prompt = settings.persona_config.get("system_prompt", "")
+    system_prompt += (
+        "\n\n思考模式："
+        "\n1. 用户显式打开了思考模式，可以比快速回复更完整，但仍要简洁。"
+        "\n2. 只参考小本本里的 notebook_user 和 notebook_memory。"
+        "\n3. 不调用工具，不回答设备事实或天气事实，不输出思考过程。"
+        "\n4. 不输出 memory_update；记忆写入由后台触发器和夜间整理负责。"
+    )
+    if event.type == "voice_message":
+        system_prompt += "\n5. 语音输入可能不完整，低置信内容要温柔确认。"
+
+    cognition = context.cognition_context or {}
+    selected = cognition.get("selected_card_items")
+    notebook_user: List[str] = []
+    notebook_memory: List[str] = []
+    if selected and isinstance(selected, tuple) and len(selected) == 2:
+        raw_user, raw_memory = selected
+        if isinstance(raw_user, list):
+            notebook_user = [str(item) for item in raw_user[:8] if item]
+        elif raw_user:
+            notebook_user = [str(raw_user)]
+        if isinstance(raw_memory, list):
+            notebook_memory = [str(item) for item in raw_memory[:12] if item]
+        elif raw_memory:
+            notebook_memory = [str(raw_memory)]
+
+    user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
+    payload = {
+        "user_input": user_text,
+        "recent_dialogue": cognition.get("recent_exact_events", [])[-6:],
+        "pet_state": {
+            "mood": context.pet_state.get("mood", "idle"),
+            "energy": context.pet_state.get("energy", 50),
+            "intimacy": context.pet_state.get("intimacy", 0),
+            "sleepiness": context.pet_state.get("sleepiness", 0),
+        },
+        "notebook_user": notebook_user,
+        "notebook_memory": notebook_memory,
+        "response_schema": THINKING_RESPONSE_SCHEMA,
+    }
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
 
 

@@ -14,6 +14,7 @@ class InteractionDef:
     description: str
     aliases: Tuple[str, ...] = ()
     state_semantics: Dict[str, str] = field(default_factory=dict)
+    requires_model: bool = False
 
 
 INTERACTION_CATALOG: Dict[str, InteractionDef] = {

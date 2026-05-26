@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +30,8 @@ class NightlyCleanupRunner:
         maintenance_state,
         provider_gate=None,
         dispatcher=None,
+        cleanup_window_start: time = time(0, 0),
+        cleanup_window_end: time = time(1, 0),
     ) -> None:
         self._notebook = notebook_manager
         self._provider = provider
@@ -37,9 +39,14 @@ class NightlyCleanupRunner:
         self._maintenance_state = maintenance_state
         self._provider_gate = provider_gate
         self._dispatcher = dispatcher
+        self._cleanup_window_start = cleanup_window_start
+        self._cleanup_window_end = cleanup_window_end
 
-    def should_run(self) -> bool:
+    def should_run(self, force: bool = False) -> bool:
         """Check all safety gates. Returns True if cleanup should proceed."""
+        if not force and not self._is_in_cleanup_window():
+            return False
+
         # Gate 1: once per local day
         last = self._maintenance_state.get("last_cleanup_date")
         today = self._today_local()
@@ -69,12 +76,12 @@ class NightlyCleanupRunner:
 
         return True
 
-    def run(self) -> Dict[str, int]:
+    def run(self, force: bool = False) -> Dict[str, int]:
         """Execute one cleanup cycle with 60s timeout.
 
         LLM call happens BEFORE notebook lock (apply_cleanup_operations acquires lock).
         """
-        if not self.should_run():
+        if not self.should_run(force=force):
             return {}
 
         cancel_flag = threading.Event()
@@ -112,8 +119,7 @@ class NightlyCleanupRunner:
 
         # Step 3: Build prompt and call LLM
         from app.pet.prompt_builder import build_nightly_cleanup_messages
-        tz_offset = self._get_tz_offset()
-        now_local = datetime.utcnow() + tz_offset
+        now_local = self._get_local_now()
         current_time = now_local.strftime("%Y-%m-%d %H:%M %A")
 
         # Format recent events for prompt
@@ -195,9 +201,18 @@ class NightlyCleanupRunner:
         return ops if has_any else None
 
     def _today_local(self) -> str:
-        tz_offset = self._get_tz_offset()
-        now_local = datetime.utcnow() + tz_offset
-        return now_local.strftime("%Y-%m-%d")
+        return self._get_local_now().strftime("%Y-%m-%d")
+
+    def _get_local_now(self) -> datetime:
+        return datetime.utcnow() + self._get_tz_offset()
+
+    def _is_in_cleanup_window(self) -> bool:
+        local_time = self._get_local_now().time()
+        start = self._cleanup_window_start
+        end = self._cleanup_window_end
+        if start <= end:
+            return start <= local_time < end
+        return local_time >= start or local_time < end
 
     def _get_tz_offset(self) -> timedelta:
         tz_name = "Asia/Shanghai"

@@ -50,6 +50,7 @@ export type InteractionDefinition = {
   default_mood: Mood;
   default_animation: AnimationName;
   state_semantics: Record<string, string>;
+  requires_model?: boolean;
 };
 
 export type StateAffect = {

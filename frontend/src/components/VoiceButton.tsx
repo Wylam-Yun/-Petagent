@@ -1,4 +1,4 @@
-import { Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -18,28 +18,28 @@ type VoiceButtonProps = {
   pressToRecordDelayMs?: number;
   recorderFactory?: () => Promise<VoiceRecordingSession>;
   uploadVoice?: (blob: Blob, options?: UploadVoiceOptions) => Promise<VoiceChatResponse>;
+  onInterrupt?: () => void;
   onPhaseChange: (phase: PetUIPhase) => void;
   onVoiceResponse: (response: VoiceChatResponse) => void;
   onError: (message: string) => void;
 };
 
-const DEFAULT_PRESS_TO_RECORD_DELAY_MS = 240;
-
 export function VoiceButton({
   disabled,
   phase,
   thinkingMode = false,
-  pressToRecordDelayMs = DEFAULT_PRESS_TO_RECORD_DELAY_MS,
   recorderFactory = createVoiceRecordingSession,
   uploadVoice = defaultUploadVoice,
+  onInterrupt,
   onPhaseChange,
   onVoiceResponse,
   onError
 }: VoiceButtonProps) {
   const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [localPhase, setLocalPhase] = useState<PetUIPhase>(phase);
   const sessionRef = useRef<VoiceRecordingSession | null>(null);
-  const armTimerRef = useRef<number | null>(null);
+  const uploadRunRef = useRef(0);
 
   useEffect(() => {
     if (!busy) {
@@ -49,53 +49,58 @@ export function VoiceButton({
 
   const effectivePhase = localPhase;
   const label = labelForPhase(effectivePhase);
-  const isBlocked = disabled || busy || armTimerRef.current !== null;
+  const isBlocked = disabled || starting;
 
   useEffect(() => {
     return () => {
-      clearArmTimer();
+      uploadRunRef.current += 1;
       sessionRef.current?.cancel();
     };
   }, []);
 
-  function armRecording() {
-    if (isBlocked || sessionRef.current) return;
-    if (pressToRecordDelayMs <= 0) {
-      void startRecording();
+  function handleTap() {
+    if (disabled || starting) return;
+    if (sessionRef.current || effectivePhase === "listening") {
+      void stopRecordingAndUpload();
       return;
     }
-    armTimerRef.current = window.setTimeout(() => {
-      armTimerRef.current = null;
-      void startRecording();
-    }, pressToRecordDelayMs);
+    if (busy || effectivePhase === "thinking") {
+      cancelPendingUpload();
+      return;
+    }
+    if (effectivePhase === "waiting_voice" || effectivePhase === "speaking" || effectivePhase === "audio_error") {
+      onInterrupt?.();
+    }
+    void startRecording();
   }
 
   async function startRecording() {
     if (isBlocked || sessionRef.current) return;
-    setBusy(true);
+    setStarting(true);
     try {
       sessionRef.current = await recorderFactory();
       changePhase("listening");
     } catch (error) {
       sessionRef.current = null;
-      setBusy(false);
       changePhase("error");
       onError(messageForMicrophoneError(error));
+    } finally {
+      setStarting(false);
     }
   }
 
   async function stopRecordingAndUpload() {
-    if (clearArmTimer()) {
-      onError("按住久一点，豆豆才听得到。");
-      return;
-    }
     const session = sessionRef.current;
     if (!session) return;
     sessionRef.current = null;
     changePhase("thinking");
+    const uploadRun = uploadRunRef.current + 1;
+    uploadRunRef.current = uploadRun;
+    setBusy(true);
     try {
       const blob = await session.stop();
       const response = await uploadVoice(blob, { thinkingMode });
+      if (uploadRunRef.current !== uploadRun) return;
       onVoiceResponse(response);
       const fallbackReason = response.voice_route?.fallback_reason;
       if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
@@ -107,6 +112,7 @@ export function VoiceButton({
       }
       changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
+      if (uploadRunRef.current !== uploadRun) return;
       changePhase("error");
       if (error instanceof RecordingTooShortError) {
         onError("豆豆刚刚只听到一点点。");
@@ -116,14 +122,21 @@ export function VoiceButton({
         onError("呜，刚刚没接住。");
       }
     } finally {
-      setBusy(false);
+      if (uploadRunRef.current === uploadRun) {
+        setBusy(false);
+      }
     }
   }
 
   function cancelRecording() {
-    clearArmTimer();
     sessionRef.current?.cancel();
     sessionRef.current = null;
+    setBusy(false);
+    changePhase("idle");
+  }
+
+  function cancelPendingUpload() {
+    uploadRunRef.current += 1;
     setBusy(false);
     changePhase("idle");
   }
@@ -133,51 +146,49 @@ export function VoiceButton({
     onPhaseChange(nextPhase);
   }
 
-  function clearArmTimer(): boolean {
-    if (armTimerRef.current === null) return false;
-    window.clearTimeout(armTimerRef.current);
-    armTimerRef.current = null;
-    return true;
-  }
-
   return (
-    <button
-      aria-label={label}
-      className={`voice-button voice-${effectivePhase}`}
-      disabled={disabled}
-      type="button"
-      onMouseDown={armRecording}
-      onMouseLeave={stopRecordingAndUpload}
-      onMouseUp={stopRecordingAndUpload}
-      onTouchCancel={cancelRecording}
-      onTouchEnd={stopRecordingAndUpload}
-      onTouchStart={(event) => {
-        event.preventDefault();
-        armRecording();
-      }}
-    >
-      {effectivePhase === "error" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
-      <span>{label}</span>
-    </button>
+    <div className="voice-control">
+      <button
+        aria-label={label}
+        className={`voice-button voice-${effectivePhase}`}
+        disabled={disabled || starting}
+        type="button"
+        onClick={handleTap}
+      >
+        {effectivePhase === "error" ? <MicOff aria-hidden="true" /> : <Mic aria-hidden="true" />}
+        <span>{label}</span>
+      </button>
+      {effectivePhase === "listening" && (
+        <button
+          aria-label="取消录音"
+          className="voice-cancel-button"
+          disabled={disabled}
+          type="button"
+          onClick={cancelRecording}
+        >
+          <X aria-hidden="true" />
+        </button>
+      )}
+    </div>
   );
 }
 
 function labelForPhase(phase: PetUIPhase): string {
   switch (phase) {
     case "listening":
-      return "松开回应";
+      return "点一下发送";
     case "thinking":
-      return "让我想想";
+      return "取消发送";
     case "waiting_voice":
-      return "准备开口";
+      return "打断并说话";
     case "speaking":
-      return "豆豆在说";
+      return "打断并说话";
     case "audio_error":
-      return "声音没出来";
+      return "点一下重说";
     case "error":
       return "再试一次";
     default:
-      return "长按说话";
+      return "点一下说话";
   }
 }
 

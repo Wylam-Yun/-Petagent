@@ -53,6 +53,14 @@ const ERROR_BUBBLE_MAP: Record<string, { text: string; mood: "tired" | "concerne
     text: "系统刚刚重启了，声音没发出来。",
     mood: "tired",
   },
+  playback: {
+    text: "声音生成了，但浏览器没播出来。",
+    mood: "concerned",
+  },
+  unknown: {
+    text: "声音刚刚没出来。",
+    mood: "concerned",
+  },
 };
 
 const DEFAULT_ERROR = {

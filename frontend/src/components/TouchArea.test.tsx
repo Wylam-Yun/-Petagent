@@ -41,7 +41,9 @@ describe("TouchArea", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "喂豆豆一口" }));
 
-    expect(onPetEvent).toHaveBeenCalledWith("feed_momo");
+    expect(onPetEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event_id: "feed_momo", label: "喂豆豆一口" })
+    );
     expect(screen.queryByRole("button", { name: "投喂" })).not.toBeInTheDocument();
   });
 
@@ -53,9 +55,9 @@ describe("TouchArea", () => {
     fireEvent.click(screen.getByRole("button", { name: "抱一下" }));
     fireEvent.click(screen.getByRole("button", { name: "陪我一下" }));
 
-    expect(onPetEvent).toHaveBeenCalledWith("pet_head");
-    expect(onPetEvent).toHaveBeenCalledWith("hug");
-    expect(onPetEvent).toHaveBeenCalledWith("stay_with_me");
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "pet_head" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "hug" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "stay_with_me" }));
   });
 
   test("emits more interaction events", () => {
@@ -66,16 +68,16 @@ describe("TouchArea", () => {
       fireEvent.click(screen.getByRole("button", { name }));
     }
 
-    expect(onPetEvent).toHaveBeenCalledWith("pet_pat");
-    expect(onPetEvent).toHaveBeenCalledWith("praise_momo");
-    expect(onPetEvent).toHaveBeenCalledWith("feed_momo");
-    expect(onPetEvent).toHaveBeenCalledWith("comfort_me");
-    expect(onPetEvent).toHaveBeenCalledWith("encourage_me");
-    expect(onPetEvent).toHaveBeenCalledWith("listen_to_me");
-    expect(onPetEvent).toHaveBeenCalledWith("tuck_in");
-    expect(onPetEvent).toHaveBeenCalledWith("clean_face");
-    expect(onPetEvent).toHaveBeenCalledWith("quiet_company");
-    expect(onPetEvent).toHaveBeenCalledWith("take_a_break");
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "pet_pat" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "praise_momo" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "feed_momo" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "comfort_me" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "encourage_me" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "listen_to_me" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "tuck_in" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "clean_face" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "quiet_company" }));
+    expect(onPetEvent).toHaveBeenCalledWith(expect.objectContaining({ event_id: "take_a_break" }));
   });
 
   test("disables controls while busy", () => {

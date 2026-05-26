@@ -18,6 +18,8 @@ from app.providers.errors import (
     ProviderTimeoutError,
 )
 from app.providers.tts_mimo import MockTTSProvider
+from app.db import PetStateStore
+from app.runtime.audio_job_store import AudioJobStore
 from app.runtime.audio_jobs import AudioJobManager, _map_error_class
 
 
@@ -221,6 +223,36 @@ def test_failed_runtime_restart_visible():
     assert job.error_class == "infrastructure"
     tts.unblock()
     mgr.shutdown()
+
+
+def test_persisted_restart_and_shutdown_jobs_have_infrastructure_error_class():
+    store = AudioJobStore(PetStateStore(None).connection)
+    now = "2026-05-26T00:00:00"
+    store.save({
+        "job_id": "aud-restart",
+        "status": "pending",
+        "text": "hello",
+        "voice_style": "soft",
+        "created_at": now,
+        "updated_at": now,
+    })
+    assert store.mark_restart_failed() == 1
+    restarted = store.get("aud-restart")
+    assert restarted["status"] == "failed_runtime_restart"
+    assert restarted["error_class"] == "infrastructure"
+
+    store.save({
+        "job_id": "aud-shutdown",
+        "status": "pending",
+        "text": "hello",
+        "voice_style": "soft",
+        "created_at": now,
+        "updated_at": now,
+    })
+    assert store.mark_shutdown_failed() == 1
+    shutdown = store.get("aud-shutdown")
+    assert shutdown["status"] == "failed_shutdown"
+    assert shutdown["error_class"] == "infrastructure"
 
 
 def test_map_error_class_provider_network():

@@ -88,6 +88,37 @@ def test_clear_produces_empty_cards():
     assert len(mcm.read_card("momo_memories")) == 0
 
 
+def test_canonical_rebuild_skips_even_when_file_empty_or_malformed():
+    tmp = Path(mkdtemp())
+    mcm, mm = _make_mcm(str(tmp), protect_canonical_notebook=True)
+    mm.save_curated("user_preference", "喜欢短回复", importance=4)
+    user_path = mcm._paths["user_preferences"]
+    mem_path = mcm._paths["momo_memories"]
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+    user_path.write_text("", encoding="utf-8")
+    mem_path.write_text("not valid\n", encoding="utf-8")
+
+    result = mcm.rebuild("manual_debug")
+
+    assert result["items_written"] == 0
+    assert user_path.read_text(encoding="utf-8") == ""
+    assert mem_path.read_text(encoding="utf-8") == "not valid\n"
+
+
+def test_canonical_clear_does_not_write_legacy_headers():
+    tmp = Path(mkdtemp())
+    mcm, mm = _make_mcm(str(tmp), protect_canonical_notebook=True)
+    user_path = mcm._paths["user_preferences"]
+    mem_path = mcm._paths["momo_memories"]
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+    user_path.write_text("<!-- owner note -->\n", encoding="utf-8")
+
+    mcm.clear()
+
+    assert "memory_cards:" not in user_path.read_text(encoding="utf-8")
+    assert not mem_path.exists() or "memory_cards:" not in mem_path.read_text(encoding="utf-8")
+
+
 def test_dedup_removes_similar_items():
     mcm, mm = _make_mcm()
     mm.save_curated("user_preference", "用户喜欢猫", importance=4)
@@ -167,6 +198,42 @@ def test_fast_path_uses_cards():
     assert context["memory_cards"] is not None
     assert "喜欢短回复" in context["memory_cards"]["user_preferences"]
     assert context["relevant_memories"] == []
+
+
+def test_v13_profiles_use_notebook_selection_without_legacy_cards():
+    from app.runtime.events import normalize_event
+    from app.runtime.notebook import NotebookManager
+
+    tmp = Path(mkdtemp())
+    state_store = PetStateStore(None)
+    mm = MemoryManager(state_store.connection)
+    episodes = EpisodeStore(state_store.connection)
+    event_log = EventLogStore(state_store.connection)
+    mcm = MemoryCardManager(mm, {
+        "user_preferences_path": str(tmp / "user.md"),
+        "momo_memories_path": str(tmp / "memory.md"),
+    })
+    notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
+    (tmp / "user.md").write_text("- [2026-05-26 10:00][identity] 我叫小明\n", encoding="utf-8")
+    (tmp / "memory.md").write_text("- [2026-05-26 10:00][project] 正在修 V1.3\n", encoding="utf-8")
+
+    ep, _ = episodes.get_or_create_current()
+    event = normalize_event({"type": "text_message", "source": "text", "payload": {"user_text": "你好"}})
+    cm = ContextManager({})
+
+    for profile in ("fast_reply", "thinking"):
+        context = cm.build(
+            event=event,
+            pet_state=state_store.get_state(),
+            episode=ep,
+            event_log_store=event_log,
+            memory_manager=mm,
+            context_profile=profile,
+            memory_card_manager=mcm,
+            notebook_manager=notebook,
+        )
+        assert context["memory_cards"] is None
+        assert context["selected_card_items"]
 
 
 def test_fast_path_no_daily_summary():
@@ -380,7 +447,6 @@ def test_runtime_reset_clears_cards():
 
     mm.save_curated("user_preference", "喜欢短回复", importance=4)
     mcm.rebuild("manual_debug")
-    assert len(mcm.read_card("user_preferences")) > 0
 
     # Reset
     response = client.post(
@@ -391,9 +457,16 @@ def test_runtime_reset_clears_cards():
     assert response.status_code == 200
     assert response.json()["ok"] is True
 
-    # Cards should be empty
-    assert len(mcm.read_card("user_preferences")) == 0
-    assert len(mcm.read_card("momo_memories")) == 0
+    if mcm._protects_canonical():
+        # V1.3 canonical notebooks are protected; reset must not rewrite them as
+        # legacy projection cards.
+        for path in mcm._paths.values():
+            if path.exists():
+                assert "memory_cards:" not in path.read_text(encoding="utf-8")
+    else:
+        # Legacy projection mode still clears generated card files.
+        assert len(mcm.read_card("user_preferences")) == 0
+        assert len(mcm.read_card("momo_memories")) == 0
 
 
 def test_full_app_fast_path_uses_cards():

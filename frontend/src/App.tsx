@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { DoudouSprite } from "./components/DoudouSprite";
 import { PetBubble } from "./components/PetBubble";
@@ -33,6 +33,7 @@ import { useNetworkState } from "./hooks/useNetworkState";
 import type { DoudouAction } from "./pet/doudouSprites";
 import type {
   ActivationResponse,
+  AudioJob,
   AnimationName,
   InteractionDefinition,
   Mood,
@@ -57,6 +58,26 @@ const fallbackState: PetState = {
   mode: "idle"
 };
 
+class AudioJobError extends Error {
+  constructor(
+    message: string,
+    readonly errorClass: string = "unknown",
+    readonly status?: AudioJob["status"],
+    readonly jobId?: string,
+  ) {
+    super(message);
+    this.name = "AudioJobError";
+  }
+}
+
+const terminalAudioStatuses = new Set<AudioJob["status"]>([
+  "failed",
+  "expired",
+  "superseded",
+  "failed_runtime_restart",
+  "failed_shutdown",
+]);
+
 function App() {
   const [petState, setPetState] = useState<PetState>(fallbackState);
   const [faceType, setFaceType] = useState<Mood>("idle");
@@ -71,6 +92,8 @@ function App() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
   const audioRunRef = useRef(0);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentPlaybackRef = useRef<PlaybackController | null>(null);
   const directorRef = useRef(new BehaviorDirector());
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
@@ -212,7 +235,8 @@ function App() {
     }
   }, [phase]);
 
-  async function handlePetEvent(event: PetEventType) {
+  async function handlePetEvent(interaction: InteractionDefinition) {
+    const event = interaction.event_id;
     const preview = interactionPreview[event] ?? {
       mood: "thinking" as Mood,
       animation: "blink" as AnimationName,
@@ -222,6 +246,11 @@ function App() {
     setAnimation(preview.animation);
     setBubbleText(preview.text);
     setDoudouAction("review");
+
+    if (interaction.requires_model !== true) {
+      return;
+    }
+
     setBusy(true);
 
     try {
@@ -284,7 +313,7 @@ function App() {
           setBubbleText("豆豆在说…");
           const speechOut = directorRef.current.advanceSlot("speech");
           setDoudouAction(speechOut?.visibleAction ?? "review");
-          await playVoice(job.voice_url);
+          await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
             setPhase("idle");
             setBubbleText("豆豆说完啦。");
@@ -293,7 +322,7 @@ function App() {
           }
           return;
         }
-        throw new Error(job.error ?? "audio job failed");
+        throw audioJobError(job);
       }
 
       if (response.voice_url) {
@@ -301,7 +330,7 @@ function App() {
         setBubbleText("豆豆在说…");
         const speechOut = directorRef.current.advanceSlot("speech");
         setDoudouAction(speechOut?.visibleAction ?? "review");
-        await playVoice(response.voice_url);
+        await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPhase("idle");
           setBubbleText("豆豆说完啦。");
@@ -312,10 +341,13 @@ function App() {
       }
 
       setPhase("idle");
-    } catch {
+    } catch (error) {
       if (audioRunRef.current !== runId) return;
+      const errBubble = getErrorBubble(errorClassForAudioError(error));
       setPhase("audio_error");
-      setBubbleText("声音刚刚没出来。");
+      setFaceType(errBubble.mood);
+      setAnimation("tilt");
+      setBubbleText(errBubble.text);
       setDoudouAction("failed");
     } finally {
       if (audioRunRef.current === runId) {
@@ -349,12 +381,12 @@ function App() {
 
       const job = await getAudioJob(jobId);
       if (job.status === "ready") return job;
-      if (job.status === "failed" || job.status === "expired" || job.status === "superseded") {
-        throw new Error(job.error ?? "audio job " + job.status);
+      if (terminalAudioStatuses.has(job.status)) {
+        throw audioJobError(job);
       }
       await sleep(500);
     }
-    throw new Error("audio job timed out");
+    throw new AudioJobError("audio job timed out", "timeout", undefined, jobId);
   }
 
   async function handleRetryAudio() {
@@ -377,7 +409,7 @@ function App() {
         setPhase("speaking");
         setBubbleText("豆豆在说…");
         setDoudouAction("review");
-        await playVoice(job.voice_url);
+        await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPhase("idle");
           setBubbleText("豆豆说完啦。");
@@ -390,12 +422,17 @@ function App() {
         setDoudouAction("failed");
         setLastAudioJobId(null);
       }
-    } catch {
+    } catch (error) {
       if (audioRunRef.current !== runId) return;
+      const errBubble = getErrorBubble(errorClassForAudioError(error));
       setPhase("audio_error");
-      setBubbleText("重试也失败了。");
+      setFaceType(errBubble.mood);
+      setAnimation("tilt");
+      setBubbleText(errBubble.text);
       setDoudouAction("failed");
-      setLastAudioJobId(null);
+      if (error instanceof AudioJobError && error.status === "superseded") {
+        setLastAudioJobId(null);
+      }
     } finally {
       if (audioRunRef.current === runId) {
         setBusy(false);
@@ -481,6 +518,24 @@ function App() {
     }
   }
 
+  function interruptVoiceRun() {
+    audioRunRef.current += 1;
+    const audio = currentAudioRef.current;
+    if (audio) {
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause();
+      if (typeof audio.removeAttribute === "function") {
+        audio.removeAttribute("src");
+      }
+      currentAudioRef.current = null;
+    }
+    currentPlaybackRef.current?.stop();
+    currentPlaybackRef.current = null;
+    setBusy(false);
+    setLastAudioJobId(null);
+  }
+
   async function handleRefreshContext() {
     if (busy) return;
     setBusy(true);
@@ -553,7 +608,9 @@ function App() {
     }
   }
 
-  const isVoiceDisabled = busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice";
+  const isTextDisabled = busy || phase === "thinking" || phase === "speaking" || phase === "waiting_voice";
+  const isVoiceInterruptAllowed = phase === "waiting_voice" || phase === "speaking" || phase === "audio_error";
+  const isVoiceDisabled = busy && !isVoiceInterruptAllowed;
 
   return (
     <main className={`app-shell ${activeSession ? "is-active-session" : ""}`}>
@@ -573,13 +630,14 @@ function App() {
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
-        <TextInputBar disabled={isVoiceDisabled} onSubmit={handleTextSubmit} />
+        <TextInputBar disabled={isTextDisabled} onSubmit={handleTextSubmit} />
         <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
           disabled={isVoiceDisabled}
           phase={phase}
           thinkingMode={thinkingMode}
           onError={(message) => setBubbleText(message)}
+          onInterrupt={interruptVoiceRun}
           onPhaseChange={handleVoicePhase}
           onVoiceResponse={handleVoiceResponse}
         />
@@ -593,7 +651,7 @@ function App() {
         </button>
         {showMoreMenu && (
           <TouchArea
-            disabled={isVoiceDisabled || interactions.length === 0}
+            disabled={isTextDisabled || interactions.length === 0}
             interactions={interactions}
             onPetEvent={handlePetEvent}
           />
@@ -628,9 +686,41 @@ function App() {
   );
 }
 
-function playVoice(voiceUrl: string, timeoutMs = 20_000): Promise<void> {
+type PlaybackController = {
+  stop: () => void;
+};
+
+function audioJobError(job: AudioJob): AudioJobError {
+  return new AudioJobError(
+    job.error ?? "audio job " + job.status,
+    job.error_class ?? "unknown",
+    job.status,
+    job.job_id,
+  );
+}
+
+function errorClassForAudioError(error: unknown): string {
+  if (error instanceof AudioJobError) {
+    return error.errorClass;
+  }
+  if (error instanceof Error) {
+    if (error.message.includes("playback")) return "playback";
+    if (error.message.includes("timed out")) return "timeout";
+  }
+  return "unknown";
+}
+
+function playVoice(
+  voiceUrl: string,
+  audioRef?: MutableRefObject<HTMLAudioElement | null>,
+  playbackRef?: MutableRefObject<PlaybackController | null>,
+  timeoutMs = 20_000,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-  const audio = new Audio(voiceUrl);
+    const audio = new Audio(voiceUrl);
+    if (audioRef) {
+      audioRef.current = audio;
+    }
     let settled = false;
     const timer = window.setTimeout(() => finish(false), timeoutMs);
 
@@ -640,7 +730,23 @@ function playVoice(voiceUrl: string, timeoutMs = 20_000): Promise<void> {
       window.clearTimeout(timer);
       audio.onended = null;
       audio.onerror = null;
+      if (audioRef?.current === audio) {
+        audioRef.current = null;
+      }
+      if (playbackRef?.current === controller) {
+        playbackRef.current = null;
+      }
       ok ? resolve() : reject(new Error("audio playback failed"));
+    }
+
+    const controller: PlaybackController = {
+      stop: () => {
+        audio.pause();
+        finish(true);
+      },
+    };
+    if (playbackRef) {
+      playbackRef.current = controller;
     }
 
     audio.onended = () => finish(true);

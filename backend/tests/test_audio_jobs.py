@@ -113,6 +113,7 @@ def test_audio_job_supersede_same_session():
     # If job1 was still pending when job2 enqueued, it got superseded
     if j1.status == "superseded":
         assert j1.error == "superseded by newer job"
+        assert j1.error_class == "infrastructure"
         assert j2.status in {"pending", "ready", "failed"}
     else:
         # job1 already completed before job2 — both should be terminal

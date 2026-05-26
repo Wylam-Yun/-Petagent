@@ -17,6 +17,7 @@ def list_interactions():
             "default_mood": d.default_mood,
             "default_animation": d.default_animation,
             "state_semantics": d.state_semantics,
+            "requires_model": d.requires_model,
         }
         for d in INTERACTION_CATALOG.values()
         if d.group != "debug"

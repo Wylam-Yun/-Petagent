@@ -43,7 +43,7 @@ function recorderFactory(blob = new Blob(["voice"], { type: "audio/webm" })) {
 }
 
 describe("VoiceButton", () => {
-  test("moves through listening thinking and waiting voice phases", async () => {
+  test("tap starts recording, second tap uploads, then waits for voice", async () => {
     const onPhaseChange = vi.fn();
     const onVoiceResponse = vi.fn();
     const uploadVoice = vi.fn().mockResolvedValue(voiceResponse);
@@ -52,7 +52,6 @@ describe("VoiceButton", () => {
       <VoiceButton
         disabled={false}
         phase="idle"
-        pressToRecordDelayMs={0}
         recorderFactory={recorderFactory()}
         thinkingMode={false}
         uploadVoice={uploadVoice}
@@ -62,10 +61,10 @@ describe("VoiceButton", () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "长按说话" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("listening"));
 
-    fireEvent.mouseUp(screen.getByRole("button", { name: "松开回应" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
 
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
@@ -74,7 +73,7 @@ describe("VoiceButton", () => {
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
-  test("does not start a second upload while busy", async () => {
+  test("tap during upload locally cancels the pending response without posting again", async () => {
     let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
     const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {
       resolveUpload = resolve;
@@ -86,7 +85,6 @@ describe("VoiceButton", () => {
       <VoiceButton
         disabled={false}
         phase="idle"
-        pressToRecordDelayMs={0}
         recorderFactory={createRecorder}
         thinkingMode={true}
         uploadVoice={uploadVoice}
@@ -96,45 +94,79 @@ describe("VoiceButton", () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "长按说话" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
     await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
-    fireEvent.mouseUp(screen.getByRole("button", { name: "松开回应" }));
-    fireEvent.mouseDown(screen.getByRole("button", { name: "让我想想" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
+    await waitFor(() => expect(uploadVoice).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "取消发送" }));
+    resolveUpload(voiceResponse);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(createRecorder).toHaveBeenCalledTimes(1);
-    resolveUpload(voiceResponse);
+    expect(uploadVoice).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "点一下说话" })).toBeInTheDocument();
   });
 
-  test("ignores accidental short taps before opening the microphone", async () => {
-    vi.useFakeTimers();
-    const createRecorder = recorderFactory();
+  test("cancel button discards active recording", async () => {
+    const session = {
+      stop: vi.fn().mockResolvedValue(new Blob(["voice"], { type: "audio/webm" })),
+      cancel: vi.fn(),
+      finished: Promise.resolve(new Blob(["voice"], { type: "audio/webm" }))
+    };
+    const createRecorder = vi.fn().mockResolvedValue(session);
     const uploadVoice = vi.fn();
     const onError = vi.fn();
+    const onPhaseChange = vi.fn();
 
     render(
       <VoiceButton
         disabled={false}
         phase="idle"
-        pressToRecordDelayMs={250}
         recorderFactory={createRecorder}
         thinkingMode={false}
         uploadVoice={uploadVoice}
         onError={onError}
-        onPhaseChange={vi.fn()}
+        onPhaseChange={onPhaseChange}
         onVoiceResponse={vi.fn()}
       />
     );
 
-    fireEvent.touchStart(screen.getByRole("button", { name: "长按说话" }));
-    fireEvent.touchEnd(screen.getByRole("button", { name: "长按说话" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+    await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("listening"));
+    fireEvent.click(screen.getByRole("button", { name: "取消录音" }));
 
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    expect(createRecorder).not.toHaveBeenCalled();
     expect(uploadVoice).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith("按住久一点，豆豆才听得到。");
-    vi.useRealTimers();
+    expect(session.cancel).toHaveBeenCalled();
+    expect(onPhaseChange).toHaveBeenCalledWith("idle");
+  });
+
+  test("tap during playback phases interrupts before recording", async () => {
+    const onInterrupt = vi.fn();
+    const onPhaseChange = vi.fn();
+    const createRecorder = recorderFactory();
+
+    render(
+      <VoiceButton
+        disabled={false}
+        phase="speaking"
+        recorderFactory={createRecorder}
+        thinkingMode={false}
+        uploadVoice={vi.fn()}
+        onError={vi.fn()}
+        onInterrupt={onInterrupt}
+        onPhaseChange={onPhaseChange}
+        onVoiceResponse={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打断并说话" }));
+
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
+    expect(onPhaseChange).toHaveBeenCalledWith("listening");
   });
 });

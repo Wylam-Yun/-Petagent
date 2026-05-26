@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from unittest.mock import MagicMock
@@ -52,6 +53,7 @@ def _make_runner(**overrides):
         provider_gate=gate,
         dispatcher=dispatcher,
     )
+    runner._get_local_now = MagicMock(return_value=datetime(2026, 5, 26, 0, 30))
     return runner, nm, provider, ms, gate, dispatcher
 
 
@@ -212,10 +214,30 @@ def test_should_run_once_per_day():
     ms.get.return_value = None
     assert runner.should_run() is True
     # Simulate: cleanup ran today
-    from datetime import datetime, timedelta
-    today = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d")
-    ms.get.return_value = today
+    ms.get.return_value = runner._today_local()
     assert runner.should_run() is False
+
+
+def test_should_run_only_inside_midnight_window():
+    runner, _, provider, ms, _, _ = _make_runner()
+    ms.get.return_value = None
+    runner._get_local_now = MagicMock(return_value=datetime(2026, 5, 26, 12, 0))
+
+    assert runner.should_run() is False
+    assert runner.run() == {}
+    provider.complete_json.assert_not_called()
+
+    runner._get_local_now = MagicMock(return_value=datetime(2026, 5, 26, 0, 30))
+    assert runner.should_run() is True
+
+
+def test_force_bypasses_midnight_window():
+    runner, _, _, ms, _, _ = _make_runner()
+    ms.get.return_value = None
+    runner._get_local_now = MagicMock(return_value=datetime(2026, 5, 26, 12, 0))
+
+    assert runner.should_run() is False
+    assert runner.should_run(force=True) is True
 
 
 def test_should_run_skips_during_active_response():

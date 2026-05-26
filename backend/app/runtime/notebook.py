@@ -12,6 +12,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -39,6 +40,9 @@ _OLD_TYPE_TO_CATEGORY = {
 }
 
 _TARGET_WHITELIST = {"user.md", "memory.md"}
+_LOCAL_OFFSET = timedelta(hours=8)
+_MAX_CONTENT_CJK = 120
+_MAX_CONTENT_CHARS = 240
 
 _CJK_RANGE = ("一", "鿿")
 
@@ -59,6 +63,14 @@ def _normalize_text(text: str) -> str:
 def _is_sensitive(text: str) -> bool:
     lowered = text.lower()
     return any(marker in lowered for marker in SENSITIVE_MARKERS)
+
+
+def _local_timestamp() -> str:
+    return (datetime.utcnow() + _LOCAL_OFFSET).strftime("%Y-%m-%d %H:%M")
+
+
+def _is_too_long(text: str) -> bool:
+    return _cjk_len(text) > _MAX_CONTENT_CJK or len(text) > _MAX_CONTENT_CHARS
 
 
 @dataclass
@@ -94,16 +106,15 @@ class NotebookManager:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
-        # Cap to latest 200 parseable lines
-        count = 0
-        for i, raw_line in enumerate(lines, 1):
-            if count >= 200:
-                break
+        # Cap to latest 200 parseable lines, preserving file order in the result.
+        collected: List[NotebookEntry] = []
+        for i, raw_line in reversed(list(enumerate(lines, 1))):
             entry = self._parse_line(raw_line, i)
             if entry is not None:
-                entries.append(entry)
-                count += 1
-        return entries
+                collected.append(entry)
+                if len(collected) >= 200:
+                    break
+        return list(reversed(collected))
 
     def _parse_line(self, raw: str, line_number: int) -> Optional[NotebookEntry]:
         raw = raw.strip()
@@ -183,6 +194,9 @@ class NotebookManager:
         content = content.strip()
         if not content:
             return False
+        if _is_too_long(content):
+            logger.warning("append_line: content too long")
+            return False
         if _is_sensitive(content):
             logger.warning("append_line: sensitive content rejected")
             return False
@@ -191,7 +205,7 @@ class NotebookManager:
             logger.warning("append_line: content starts with timestamp (model error)")
             return False
 
-        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        ts = _local_timestamp()
         line = f"- [{ts}][{category}] {content}\n"
 
         path = self._user_path if target == "user.md" else self._memory_path
@@ -309,7 +323,7 @@ class NotebookManager:
             if m:
                 content, old_type = m.group(1), m.group(2)
                 cat = _OLD_TYPE_TO_CATEGORY.get(old_type, "temporary")
-                ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                ts = _local_timestamp()
                 new_lines.append(f"- [{ts}][{cat}] {content}")
                 changed = True
             elif stripped.startswith("- "):
@@ -366,7 +380,7 @@ class NotebookManager:
 
     def _write_imported(self, path: Path, default_category: str, items: List[str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        ts = _local_timestamp()
         lines = ["<!-- v1.3_migrated -->"]
         for item in items:
             lines.append(f"- [{ts}][{default_category}] {item}")
@@ -445,11 +459,14 @@ class NotebookManager:
                     if not old or new_cat not in _CATEGORY_WHITELIST or not new_content:
                         stats["errors"] += 1
                         continue
+                    if _is_too_long(new_content) or _is_sensitive(new_content):
+                        stats["errors"] += 1
+                        continue
                     found_idx = self._find_line_prefix(new_lines, old)
                     if found_idx is None:
                         stats["errors"] += 1
                         continue
-                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    ts = _local_timestamp()
                     new_lines[found_idx] = f"- [{ts}][{new_cat}] {new_content}"
                     stats["updates"] += 1
 
@@ -460,10 +477,10 @@ class NotebookManager:
                     if cat not in _CATEGORY_WHITELIST or not content:
                         stats["errors"] += 1
                         continue
-                    if _is_sensitive(content):
+                    if _is_sensitive(content) or _is_too_long(content):
                         stats["errors"] += 1
                         continue
-                    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    ts = _local_timestamp()
                     new_lines.append(f"- [{ts}][{cat}] {content}")
                     stats["adds"] += 1
 

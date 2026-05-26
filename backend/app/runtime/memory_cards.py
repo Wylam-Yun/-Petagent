@@ -118,6 +118,7 @@ class MemoryCardManager:
         self.max_item_cjk_chars = int(cfg.get("max_item_cjk_chars", 20))
         self.max_items_per_card = int(cfg.get("max_items_per_card", 10))
         self.min_importance = int(cfg.get("min_importance", 2))
+        self.protect_canonical_notebook = bool(cfg.get("protect_canonical_notebook", False))
         base = Path(cfg.get("card_base_dir", "backend/data/memory_cards"))
         self._paths = {
             "user_preferences": Path(cfg.get("user_preferences_path", base / "user.md")),
@@ -136,6 +137,9 @@ class MemoryCardManager:
             return self._rebuild_locked(reason)
 
     def _rebuild_locked(self, reason: str) -> Dict[str, int]:
+        if self._protects_canonical():
+            logger.warning("Card rebuild skipped: canonical V1.3 notebook is protected")
+            return {"items_written": 0, "items_rejected": 0}
         # V1.3 guard: skip rebuild if V1.3 notebook format detected (Issue 6/8)
         for path in self._paths.values():
             if self._has_v13_format(path):
@@ -169,6 +173,17 @@ class MemoryCardManager:
     def clear(self) -> None:
         """Write empty card files. Used during runtime reset."""
         with self._lock:
+            if self._protects_canonical():
+                for path in self._paths.values():
+                    if not path.exists():
+                        continue
+                    try:
+                        text = path.read_text(encoding="utf-8")
+                    except OSError:
+                        continue
+                    if "memory_cards:" in text:
+                        path.write_text("<!-- v1.3 canonical notebook protected -->\n", encoding="utf-8")
+                return
             for card_name in ("user_preferences", "momo_memories"):
                 self._write_card(self._paths[card_name], [], card_name, "runtime_reset")
 
@@ -294,3 +309,10 @@ class MemoryCardManager:
         except OSError:
             pass
         return False
+
+    def _protects_canonical(self) -> bool:
+        if self.protect_canonical_notebook:
+            return True
+        names = {path.name for path in self._paths.values()}
+        parent_names = {path.parent.name for path in self._paths.values()}
+        return names == {"user.md", "memory.md"} and "memory_cards" in parent_names

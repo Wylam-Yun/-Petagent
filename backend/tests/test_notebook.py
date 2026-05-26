@@ -73,6 +73,22 @@ def test_parse_malformed_lines_ignored():
     assert "有效行" in entries[0].content
 
 
+def test_parse_file_uses_latest_200_parseable_lines():
+    nm, user, _ = _make_nm()
+    lines = [
+        f"- [2026-05-25 10:{i % 60:02d}][preference] 偏好{i}\n"
+        for i in range(250)
+    ]
+    user.write_text("".join(lines), encoding="utf-8")
+
+    entries = nm.parse_user()
+
+    assert len(entries) == 200
+    assert entries[0].content == "偏好50"
+    assert entries[-1].content == "偏好249"
+    assert all(e.content != "偏好0" for e in entries)
+
+
 def test_select_fast_reply():
     nm, user, memory = _make_nm()
     user.write_text(
@@ -119,6 +135,27 @@ def test_append_line_adds_timestamp():
     assert "- [2026-" in content
     assert "[preference]" in content
     assert "喜欢短回复" in content
+
+
+def test_append_line_uses_local_timestamp(monkeypatch):
+    import app.runtime.notebook as notebook
+
+    class FixedDateTime:
+        @classmethod
+        def utcnow(cls):
+            from datetime import datetime
+            return datetime(2026, 5, 25, 16, 30)
+
+    monkeypatch.setattr(notebook, "datetime", FixedDateTime)
+    nm, user, _ = _make_nm()
+    assert nm.append_line("user.md", "preference", "喜欢短回复") is True
+    assert "- [2026-05-26 00:30][preference]" in user.read_text(encoding="utf-8")
+
+
+def test_append_line_rejects_overlong_content():
+    nm, user, _ = _make_nm()
+    assert nm.append_line("user.md", "preference", "很长" * 80) is False
+    assert not user.exists()
 
 
 def test_append_line_rejects_model_timestamp():

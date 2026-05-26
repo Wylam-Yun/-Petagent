@@ -3,11 +3,13 @@ import { describe, expect, test, vi } from "vitest";
 import {
   getAudioJob,
   getProactiveCheck,
+  postAudioRetry,
   reportDeviceState,
   sendHeartbeat,
   sendTextChat,
   uploadVoice
 } from "./api";
+import { getErrorBubble } from "./errorMessages";
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -40,6 +42,20 @@ describe("stage 3 API helpers", () => {
 
     const [url] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/audio/jobs/aud-1");
+  });
+
+  test("posts audio retry endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ new_job_id: "aud-2" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(postAudioRetry("aud-1")).resolves.toEqual({ new_job_id: "aud-2" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/audio/jobs/aud-1/retry");
+    expect(init.method).toBe("POST");
   });
 
   test("reports device state as JSON", async () => {
@@ -89,6 +105,13 @@ describe("stage 3 API helpers", () => {
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ "content-type": "application/json" });
     expect(JSON.parse(init.body as string)).toHaveProperty("user_agent");
+  });
+});
+
+describe("audio error copy", () => {
+  test("maps playback and unknown audio errors", () => {
+    expect(getErrorBubble("playback").text).toBe("声音生成了，但浏览器没播出来。");
+    expect(getErrorBubble("unknown").text).toBe("声音刚刚没出来。");
   });
 });
 

@@ -132,6 +132,7 @@ class AudioJobManager:
                     ):
                         existing.status = "superseded"
                         existing.error = "superseded by newer job"
+                        existing.error_class = "infrastructure"
                         existing.updated_at = datetime.utcnow().isoformat()
                         self._adjust_pending_locked(-1)
 
@@ -152,6 +153,7 @@ class AudioJobManager:
                     if oldest:
                         oldest.status = "superseded"
                         oldest.error = "pending limit exceeded"
+                        oldest.error_class = "infrastructure"
                         oldest.updated_at = datetime.utcnow().isoformat()
                         self._adjust_pending_locked(-1)
 

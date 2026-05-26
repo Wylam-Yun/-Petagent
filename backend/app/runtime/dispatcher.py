@@ -286,6 +286,8 @@ class RuntimeDispatcher:
             try:
                 if is_fast_reply:
                     raw_action = active_brain.generate_fast_reply_action(event, context)
+                elif decision and decision.route == "thinking":
+                    raw_action = active_brain.generate_thinking_action(event, context)
                 else:
                     raw_action = active_brain.generate_action(event, context)
             except Exception:

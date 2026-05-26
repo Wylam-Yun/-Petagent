@@ -137,7 +137,12 @@ class ContextManager:
         # Scored memories OR memory cards
         relevant_memories: List[Dict[str, Any]] = []
         memory_cards: Optional[Dict[str, List[str]]] = None
-        use_cards = profile in ("fast_reply", "fast_companion", "proactive", "tool", "thinking", "long_task") and memory_card_manager is not None
+        v13_notebook_profile = profile in ("fast_reply", "thinking") and notebook_manager is not None
+        use_cards = (
+            profile in ("fast_reply", "fast_companion", "proactive", "tool", "thinking", "long_task")
+            and memory_card_manager is not None
+            and not v13_notebook_profile
+        )
 
         if use_cards:
             try:
@@ -157,7 +162,7 @@ class ContextManager:
                 else:
                     selected_card_items = notebook_manager.select_for_thinking()
             except Exception:
-                selected_card_items = None
+                selected_card_items = (None, None) if profile == "fast_reply" else ([], [])
 
         elif memory_manager is not None:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")

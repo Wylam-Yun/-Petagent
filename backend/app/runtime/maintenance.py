@@ -122,8 +122,8 @@ class MaintenanceService:
 
         # Priority 1.3: Nightly cleanup (V1.3, once per day)
         try:
-            if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run():
-                cleanup_result = self.nightly_cleanup_runner.run()
+            if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run(force=force):
+                cleanup_result = self.nightly_cleanup_runner.run(force=force)
                 if cleanup_result:
                     result.update({"cleanup_%s" % k: v for k, v in cleanup_result.items()})
                     return result

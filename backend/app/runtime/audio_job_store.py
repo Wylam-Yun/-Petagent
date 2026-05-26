@@ -135,6 +135,7 @@ class AudioJobStore:
                 SET status = 'failed_runtime_restart',
                     failure_reason = 'runtime_restarted',
                     error = 'runtime restarted while job was in-flight',
+                    error_class = 'infrastructure',
                     updated_at = ?,
                     completed_at = ?
                 WHERE status IN ('pending', 'running')
@@ -159,6 +160,7 @@ class AudioJobStore:
                 SET status = 'failed_shutdown',
                     failure_reason = 'process_shutdown',
                     error = 'process shutdown while job was in-flight',
+                    error_class = 'infrastructure',
                     updated_at = ?,
                     completed_at = ?
                 WHERE status IN ('pending', 'running')

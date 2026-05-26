@@ -39,7 +39,7 @@ const iconMap: Partial<Record<PetEventType, React.ElementType>> = {
 type TouchAreaProps = {
   disabled: boolean;
   interactions: InteractionDefinition[];
-  onPetEvent: (event: PetEventType) => void;
+  onPetEvent: (interaction: InteractionDefinition) => void;
 };
 
 export function TouchArea({ disabled, interactions, onPetEvent }: TouchAreaProps) {
@@ -64,7 +64,7 @@ export function TouchArea({ disabled, interactions, onPetEvent }: TouchAreaProps
                   className="touch-button"
                   disabled={disabled}
                   type="button"
-                  onClick={() => onPetEvent(item.event_id)}
+                  onClick={() => onPetEvent(item)}
                 >
                   <Icon aria-hidden="true" />
                   <span>{item.label}</span>
@@ -87,7 +87,7 @@ export function TouchArea({ disabled, interactions, onPetEvent }: TouchAreaProps
                   className="touch-button"
                   disabled={disabled}
                   type="button"
-                  onClick={() => onPetEvent(item.event_id)}
+                  onClick={() => onPetEvent(item)}
                 >
                   <Icon aria-hidden="true" />
                   <span>{item.label}</span>
@@ -109,7 +109,7 @@ export function TouchArea({ disabled, interactions, onPetEvent }: TouchAreaProps
                   className="touch-button compact"
                   disabled={disabled}
                   type="button"
-                  onClick={() => onPetEvent(item.event_id)}
+                  onClick={() => onPetEvent(item)}
                 >
                   <Icon aria-hidden="true" />
                   <span>{item.label}</span>

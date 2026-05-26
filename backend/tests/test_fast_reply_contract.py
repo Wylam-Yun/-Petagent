@@ -198,6 +198,34 @@ def test_fast_reply_prompt_uses_selected_card_items():
     assert "旧数据" not in hints
 
 
+def test_fast_reply_prompt_does_not_fallback_to_legacy_memory_cards():
+    """V1.3 fast reply must not use legacy memory_cards projection."""
+    from app.config import load_settings
+    from app.pet.prompt_builder import build_fast_reply_messages
+    from app.runtime.context import build_runtime_context
+    from app.runtime.events import normalize_event
+    import json
+
+    settings = load_settings()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "你好"},
+    })
+    context = build_runtime_context(
+        event,
+        {"mood": "happy", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "fast_reply",
+            "recent_exact_events": [],
+            "memory_cards": {"user_preferences": ["旧数据"], "momo_memories": ["旧记忆"]},
+        },
+    )
+
+    messages = build_fast_reply_messages(settings, event, context)
+    user_payload = json.loads(messages[1]["content"])
+    assert user_payload.get("memory_hints") == []
+
+
 def test_fast_reply_response_has_memory_ack_hint():
     """Fast reply PetResponse includes memory_ack_hint when explicit trigger detected."""
     app = create_app(testing=True)

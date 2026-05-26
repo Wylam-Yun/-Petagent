@@ -208,3 +208,11 @@ def test_api_interactions_endpoint():
         assert "default_mood" in item
         assert "default_animation" in item
         assert "state_semantics" in item
+        assert item["requires_model"] is False
+
+
+def test_catalog_interactions_default_to_local_only():
+    for item in INTERACTION_CATALOG.values():
+        if item.group == "debug":
+            continue
+        assert item.requires_model is False
