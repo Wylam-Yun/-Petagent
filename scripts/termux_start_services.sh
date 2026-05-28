@@ -23,6 +23,27 @@ process_exists() {
     [ -n "$pid" ] && [ -d "/proc/$pid" ]
 }
 
+process_uid() {
+    pid="$1"
+    awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || true
+}
+
+process_cmdline() {
+    pid="$1"
+    tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
+is_manager_process() {
+    pid="$1"
+    cmdline="$(process_cmdline "$pid")"
+    case "$cmdline" in
+        *"termux_service_manager.sh"*|*".service_manager.sh"*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 repair_android_context() {
     [ "${PETAGENT_RESTORECON:-1}" = "0" ] && return 0
     command -v su >/dev/null 2>&1 || return 0
@@ -33,6 +54,10 @@ remove_lock_dir() {
     rm -rf "$LOCK_DIR" 2>/dev/null && return 0
     repair_android_context
     rm -rf "$LOCK_DIR" 2>/dev/null || true
+    [ ! -e "$LOCK_DIR" ] && return 0
+    if command -v su >/dev/null 2>&1; then
+        su -c "rm -rf '$LOCK_DIR' 2>/dev/null" >/dev/null 2>&1 || true
+    fi
 }
 
 install_legacy_manager_shim() {
@@ -140,7 +165,29 @@ start_sshd_if_needed() {
 
 manager_is_running() {
     pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
-    process_exists "$pid"
+    process_exists "$pid" || return 1
+
+    current_uid="$(id -u 2>/dev/null || echo "")"
+    pid_uid="$(process_uid "$pid")"
+    if [ -n "$current_uid" ] && [ "$pid_uid" = "$current_uid" ]; then
+        return 0
+    fi
+
+    if is_manager_process "$pid"; then
+        log "start_services: stopping foreign service manager process $pid owned by uid ${pid_uid:-unknown}"
+        kill "$pid" 2>/dev/null || {
+            command -v su >/dev/null 2>&1 && su -c "kill -9 '$pid' 2>/dev/null" >/dev/null 2>&1 || true
+        }
+    else
+        log "start_services: manager lock points to non-manager pid $pid owned by uid ${pid_uid:-unknown}"
+    fi
+    return 1
+}
+
+manager_lock_is_root_owned() {
+    [ -e "$LOCK_DIR" ] || return 1
+    owner_uid="$(stat -c %u "$LOCK_DIR" 2>/dev/null || echo "")"
+    [ "$owner_uid" = "0" ]
 }
 
 start_manager_if_needed() {
@@ -150,6 +197,10 @@ start_manager_if_needed() {
 
     if [ -d "$LOCK_DIR" ]; then
         remove_lock_dir
+        if [ -d "$LOCK_DIR" ] && manager_lock_is_root_owned; then
+            log "start_services: ERROR root-owned stale manager lock blocks startup: $LOCK_DIR"
+            return 1
+        fi
     fi
 
     MANAGER_SCRIPT="$HOME_DIR/Petagent/scripts/termux_service_manager.sh"

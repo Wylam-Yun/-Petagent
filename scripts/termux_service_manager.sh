@@ -21,7 +21,7 @@ PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
 PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
 FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"
 STUCK_MAX="${STUCK_MAX:-3}"
-MANAGER_VERSION="watchdog-relaunch-20260522"
+MANAGER_VERSION="stale-lock-recovery-20260528"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -45,6 +45,27 @@ refuse_root_manager() {
 process_exists() {
     pid="$1"
     [ -n "$pid" ] && [ -d "/proc/$pid" ]
+}
+
+process_uid() {
+    pid="$1"
+    awk '/^Uid:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || true
+}
+
+process_cmdline() {
+    pid="$1"
+    tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
+is_manager_process() {
+    pid="$1"
+    cmdline="$(process_cmdline "$pid")"
+    case "$cmdline" in
+        *"termux_service_manager.sh"*|*".service_manager.sh"*)
+            return 0
+            ;;
+    esac
+    return 1
 }
 
 repair_android_context() {
@@ -71,6 +92,14 @@ cleanup_lock() {
     }
 }
 
+remove_stale_lock() {
+    rm -rf "$LOCK_DIR" 2>/dev/null && return 0
+    repair_android_context
+    rm -rf "$LOCK_DIR" 2>/dev/null && return 0
+    command -v su >/dev/null 2>&1 || return 1
+    su -c "rm -rf '$LOCK_DIR' 2>/dev/null" >/dev/null 2>&1
+}
+
 cleanup_and_exit() {
     cleanup_lock
     exit 0
@@ -86,13 +115,22 @@ take_lock() {
 
     old_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
     if process_exists "$old_pid"; then
-        exit 0
+        current_uid="$(id -u 2>/dev/null || echo "")"
+        old_uid="$(process_uid "$old_pid")"
+        if [ "$old_uid" = "$current_uid" ] && is_manager_process "$old_pid"; then
+            exit 0
+        fi
+        if is_manager_process "$old_pid"; then
+            log "Stopping foreign service manager process $old_pid owned by uid ${old_uid:-unknown}"
+            kill "$old_pid" 2>/dev/null || {
+                command -v su >/dev/null 2>&1 && su -c "kill -9 '$old_pid' 2>/dev/null" >/dev/null 2>&1 || true
+            }
+        else
+            log "Manager lock points to non-manager pid $old_pid owned by uid ${old_uid:-unknown}; clearing lock"
+        fi
     fi
 
-    rm -rf "$LOCK_DIR" 2>/dev/null || {
-        repair_android_context
-        rm -rf "$LOCK_DIR" 2>/dev/null || true
-    }
+    remove_stale_lock || true
     if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo "$$" > "$LOCK_DIR/pid"
         trap cleanup_lock EXIT
