@@ -99,6 +99,40 @@ stop_legacy_manager_processes() {
     done
 }
 
+stop_duplicate_repo_managers() {
+    current_uid="$(id -u 2>/dev/null || echo "")"
+    kept_pid=""
+    for cmdline in /proc/[0-9]*/cmdline; do
+        [ -r "$cmdline" ] || continue
+        if ! tr '\000' ' ' < "$cmdline" 2>/dev/null | grep -q "$HOME_DIR/Petagent/scripts/termux_service_manager.sh"; then
+            continue
+        fi
+        pid="${cmdline%/cmdline}"
+        pid="${pid##*/}"
+        [ "$pid" = "$$" ] && continue
+        pid_uid="$(process_uid "$pid")"
+        if [ -n "$current_uid" ] && [ "$pid_uid" != "$current_uid" ]; then
+            log "start_services: stopping foreign repo manager process $pid owned by uid ${pid_uid:-unknown}"
+            kill "$pid" 2>/dev/null || {
+                command -v su >/dev/null 2>&1 && su -c "kill -9 '$pid' 2>/dev/null" >/dev/null 2>&1 || true
+            }
+            continue
+        fi
+        if [ -z "$kept_pid" ]; then
+            kept_pid="$pid"
+            continue
+        fi
+        log "start_services: stopped duplicate repo manager process $pid (keeping $kept_pid)"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
+    done
+    if [ -n "$kept_pid" ]; then
+        mkdir -p "$LOCK_DIR" 2>/dev/null || true
+        echo "$kept_pid" > "$LOCK_DIR/pid" 2>/dev/null || true
+    fi
+}
+
 wait_for_network() {
     waited=0
     while [ "$waited" -lt "$NETWORK_WAIT_SECONDS" ]; do
@@ -227,5 +261,6 @@ start_manager_if_needed() {
 repair_android_context
 install_legacy_manager_shim
 stop_legacy_manager_processes
+stop_duplicate_repo_managers
 start_sshd_if_needed
 start_manager_if_needed

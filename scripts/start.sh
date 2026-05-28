@@ -170,6 +170,20 @@ if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
 fi
 
 cd "$PROJECT_DIR/backend"
+if [ "${PETAGENT_FOREGROUND:-0}" = "1" ]; then
+  echo "$$" > "$PID_FILE" 2>/dev/null || {
+    repair_android_context
+    echo "$$" > "$PID_FILE"
+  }
+  echo "PetAgent runtime foreground on $HOST:$PORT ..."
+  exec env PYTHONPATH="$PROJECT_DIR/backend" "$PYTHON_BIN" -m uvicorn app.main:app \
+    --host "$HOST" --port "$PORT" \
+    --timeout-keep-alive 15 \
+    --timeout-graceful-shutdown 10 \
+    --backlog 32 \
+    --limit-max-requests 2000
+fi
+
 PYTHONPATH="$PROJECT_DIR/backend" nohup "$PYTHON_BIN" -m uvicorn app.main:app \
   --host "$HOST" --port "$PORT" \
   --timeout-keep-alive 15 \

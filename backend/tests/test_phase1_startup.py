@@ -74,16 +74,31 @@ def test_termux_start_services_can_clear_root_stale_lock():
     assert "root-owned stale manager lock blocks startup" in text
     assert "stopping foreign service manager process" in text
     assert "manager lock points to non-manager pid" in text
+    assert "stop_duplicate_repo_managers() {" in text
+    assert "stopped duplicate repo manager process" in text
+    assert "stopping foreign repo manager process" in text
+    assert "keeping $kept_pid" in text
 
 
 def test_termux_manager_can_clear_root_stale_lock():
     script = Path(__file__).resolve().parents[2] / "scripts" / "termux_service_manager.sh"
     text = script.read_text()
+    assert 'CHECK_INTERVAL="${CHECK_INTERVAL:-30}"' in text
+    assert 'PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-45}"' in text
+    assert "PETAGENT_FOREGROUND=1 sh scripts/start.sh" in text
     assert "remove_stale_lock() {" in text
     assert "su -c \"rm -rf '$LOCK_DIR' 2>/dev/null\"" in text
     assert "remove_stale_lock || true" in text
     assert "Stopping foreign service manager process" in text
     assert "Manager lock points to non-manager pid" in text
+
+
+def test_start_script_supports_foreground_runtime_mode():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "start.sh"
+    text = script.read_text()
+    assert 'if [ "${PETAGENT_FOREGROUND:-0}" = "1" ]; then' in text
+    assert "PetAgent runtime foreground on $HOST:$PORT" in text
+    assert "exec env PYTHONPATH=\"$PROJECT_DIR/backend\" \"$PYTHON_BIN\" -m uvicorn app.main:app" in text
 
 
 def test_nubia_deploy_excludes_heavy_runtime_artifacts():
