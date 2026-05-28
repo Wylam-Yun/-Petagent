@@ -215,6 +215,14 @@ def _sanitize_prompt_leak(reply: str) -> str:
     return result or FALLBACK_ACTION["reply"]
 
 
+_LEGACY_PET_NAME_PATTERN = re.compile(r"\bMomo\b|\bmomo\b")
+
+
+def _sanitize_pet_name(reply: str) -> str:
+    """Keep compatibility aliases out of user-visible pet replies."""
+    return _LEGACY_PET_NAME_PATTERN.sub("豆豆", reply)
+
+
 def guard_action(
     raw: Any,
     max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS,
@@ -245,6 +253,7 @@ def guard_action(
 
     reply = _strip_reasoning(str(data.get("reply", "")).strip())
     reply = _sanitize_prompt_leak(reply)
+    reply = _sanitize_pet_name(reply)
     if not reply:
         reply = FALLBACK_ACTION["reply"]
     reply = _trim_reply(reply, max_reply_chars)
@@ -289,6 +298,7 @@ def guard_fast_reply_action(
 
     reply = _strip_reasoning(str(data.get("reply", "")).strip())
     reply = _sanitize_prompt_leak(reply)
+    reply = _sanitize_pet_name(reply)
     if not reply:
         reply = FAST_REPLY_FALLBACK["reply"]
     reply = _trim_reply(reply, max_reply_chars)

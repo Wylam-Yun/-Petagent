@@ -59,6 +59,14 @@ def test_guard_strips_reasoning_from_reply():
     assert action.reply == "昨天我们主要聊了记忆测试。"
 
 
+def test_guard_replaces_legacy_pet_name_in_visible_reply():
+    action = guard_action({"reply": "早呀，Momo 在这里。momo 刚醒。", "mood": "happy"})
+
+    assert "Momo" not in action.reply
+    assert "momo" not in action.reply
+    assert action.reply == "早呀，豆豆 在这里。豆豆 刚醒。"
+
+
 def test_guard_allows_large_feed_momo_hunger_delta():
     action = guard_action(
         {"reply": "吃饱啦~", "mood": "happy", "state_delta": {"hunger": -10}},

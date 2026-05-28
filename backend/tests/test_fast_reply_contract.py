@@ -56,6 +56,14 @@ def test_fast_reply_guard_prompt_leak():
     assert "豆豆在这儿" in result.reply
 
 
+def test_fast_reply_guard_replaces_legacy_pet_name():
+    result = guard_fast_reply_action({"reply": "早呀，Momo 刚醒。momo 在听。"})
+
+    assert "Momo" not in result.reply
+    assert "momo" not in result.reply
+    assert result.reply == "早呀，豆豆 刚醒。豆豆 在听。"
+
+
 def test_fast_reply_response_has_route_and_action():
     """Fast reply PetResponse includes route and action fields."""
     app = create_app(testing=True)
