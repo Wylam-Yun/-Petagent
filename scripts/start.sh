@@ -16,6 +16,11 @@ repair_android_context() {
   su -c "restorecon -R '$PROJECT_DIR/backend/data' '$PROJECT_DIR/backend/static' '$PROJECT_DIR/frontend/dist' 2>/dev/null" >/dev/null 2>&1 || true
 }
 
+process_cmdline() {
+  pid="$1"
+  tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+}
+
 remove_pid_file() {
   rm -f "$PID_FILE" 2>/dev/null && return 0
   repair_android_context
@@ -25,6 +30,49 @@ remove_pid_file() {
 process_exists() {
   pid="$1"
   [ -n "$pid" ] && [ -d "/proc/$pid" ]
+}
+
+is_project_runtime() {
+  pid="$1"
+  cmdline="$(process_cmdline "$pid")"
+  case "$cmdline" in
+    *"$PROJECT_DIR/.venv/bin/python"*" -m uvicorn app.main:app "*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+terminate_process() {
+  pid="$1"
+  kill "$pid" 2>/dev/null || true
+  sleep 1
+  process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
+}
+
+cleanup_duplicate_runtimes() {
+  keep_pid="${1:-}"
+  for proc in /proc/[0-9]*; do
+    pid="${proc#/proc/}"
+    [ "$pid" = "$keep_pid" ] && continue
+    is_project_runtime "$pid" || continue
+    echo "Stopping duplicate PetAgent runtime: $pid"
+    terminate_process "$pid"
+  done
+  command -v su >/dev/null 2>&1 || return 0
+  su -c "for proc in /proc/[0-9]*; do
+    pid=\"\${proc#/proc/}\"
+    [ \"\$pid\" = \"$keep_pid\" ] && continue
+    cmdline=\$(tr '\000' ' ' < \"/proc/\$pid/cmdline\" 2>/dev/null || true)
+    case \"\$cmdline\" in
+      *\"$PROJECT_DIR/.venv/bin/python\"*\" -m uvicorn app.main:app \"*)
+        echo \"Stopping duplicate PetAgent runtime as root: \$pid\"
+        kill \"\$pid\" 2>/dev/null || true
+        sleep 1
+        [ -d \"/proc/\$pid\" ] && kill -9 \"\$pid\" 2>/dev/null || true
+        ;;
+    esac
+  done" || true
 }
 
 START_LOCK="$PROJECT_DIR/backend/data/start.lock"
@@ -91,6 +139,7 @@ STARTUP_GRACE=120
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if process_exists "$OLD_PID"; then
+    cleanup_duplicate_runtimes "$OLD_PID"
     if health_ok; then
       echo "PetAgent runtime already healthy: $OLD_PID"
       exit 0
@@ -111,6 +160,8 @@ if [ -f "$PID_FILE" ]; then
   fi
   remove_pid_file
 fi
+
+cleanup_duplicate_runtimes ""
 
 PYTHON_BIN="${PYTHON:-python}"
 if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then

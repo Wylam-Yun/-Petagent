@@ -86,10 +86,12 @@ def test_wal_checkpoint_runs():
     svc.wal_checkpoint_interval_seconds = 1800
     svc._write_count = 0
     svc._last_wal_checkpoint_at = None
+    svc._wal_checkpoint_retry_after = None
 
     # First call should run (no previous checkpoint)
     assert svc.wal_checkpoint_if_due() is True
     assert svc._last_wal_checkpoint_at is not None
+    assert svc._wal_checkpoint_retry_after is None
     assert svc._write_count == 0
 
 
@@ -100,6 +102,7 @@ def test_wal_checkpoint_skips_when_not_due():
     svc.wal_checkpoint_interval_seconds = 1800
     svc._write_count = 0
     svc._last_wal_checkpoint_at = datetime.utcnow()
+    svc._wal_checkpoint_retry_after = None
 
     # Just ran — should skip
     assert svc.wal_checkpoint_if_due() is False
@@ -112,10 +115,44 @@ def test_wal_checkpoint_runs_on_write_count():
     svc.wal_checkpoint_interval_seconds = 1800
     svc._write_count = 100
     svc._last_wal_checkpoint_at = datetime.utcnow()
+    svc._wal_checkpoint_retry_after = None
 
     # 100 writes threshold met
     assert svc.wal_checkpoint_if_due() is True
     assert svc._write_count == 0
+
+
+def test_wal_checkpoint_backs_off_after_lock_error():
+    class FailingConnection:
+        calls = 0
+
+        def locked(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, _sql):
+            self.calls += 1
+            raise sqlite3.OperationalError("database table is locked")
+
+    conn = FailingConnection()
+    svc = MaintenanceService.__new__(MaintenanceService)
+    svc.connection = conn
+    svc.wal_checkpoint_interval_seconds = 1800
+    svc._write_count = 100
+    svc._last_wal_checkpoint_at = datetime.utcnow() - timedelta(hours=1)
+    svc._wal_checkpoint_retry_after = None
+
+    assert svc.wal_checkpoint_if_due() is False
+    assert conn.calls == 1
+    assert svc._wal_checkpoint_retry_after is not None
+
+    assert svc.wal_checkpoint_if_due() is False
+    assert conn.calls == 1
 
 
 def test_daily_backup_if_due(tmp_path):

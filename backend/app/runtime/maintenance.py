@@ -83,6 +83,7 @@ class MaintenanceService:
         self._running_lock = threading.Lock()
         self._write_count = 0
         self._last_wal_checkpoint_at: Optional[datetime] = None
+        self._wal_checkpoint_retry_after: Optional[datetime] = None
         self._last_backup_date: Optional[str] = None
 
     def tick(self, force: bool = False) -> Dict[str, int]:
@@ -348,6 +349,10 @@ class MaintenanceService:
         Returns True if checkpoint was run.
         """
         now = datetime.utcnow()
+        retry_after = getattr(self, "_wal_checkpoint_retry_after", None)
+        if retry_after is not None and now < retry_after:
+            return False
+
         time_due = False
         if self._last_wal_checkpoint_at is None:
             time_due = True
@@ -369,11 +374,13 @@ class MaintenanceService:
                 wal_row = raw.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
                 wal_bytes = int(wal_row[1]) if wal_row and len(wal_row) > 1 else 0
             self._last_wal_checkpoint_at = now
+            self._wal_checkpoint_retry_after = None
             self._write_count = 0
             if wal_bytes > 0:
                 logger.info("WAL checkpoint: %d bytes", wal_bytes)
             return True
         except Exception:
+            self._wal_checkpoint_retry_after = now + timedelta(minutes=5)
             logger.warning("WAL checkpoint failed", exc_info=True)
             return False
 
