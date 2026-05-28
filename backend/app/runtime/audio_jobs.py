@@ -281,12 +281,9 @@ class AudioJobManager:
                 current.timings_ms["audio_queue"] = queue_ms
                 current.updated_at = datetime.utcnow().isoformat()
                 self._adjust_pending_locked(-1)
+                snapshot = dict(current.__dict__)
 
-                if self._store:
-                    try:
-                        self._store.save(current.__dict__)
-                    except Exception:
-                        logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
+            self._save_job_snapshot(job_id, snapshot)
 
             if self.on_complete:
                 try:
@@ -318,12 +315,9 @@ class AudioJobManager:
                 current.error = "tts returned empty"
                 current.error_class = "auth_config"
             self._adjust_pending_locked(-1)
+            snapshot = dict(current.__dict__)
 
-            if self._store:
-                try:
-                    self._store.save(current.__dict__)
-                except Exception:
-                    logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
+        self._save_job_snapshot(job_id, snapshot)
 
         if self.on_complete:
             try:
@@ -374,6 +368,14 @@ class AudioJobManager:
     def pending_count(self) -> int:
         """Count of pending jobs (lock-free read for watchdog health)."""
         return max(0, int(self._pending_count))
+
+    def _save_job_snapshot(self, job_id: str, snapshot: Dict[str, Any]) -> None:
+        if not self._store:
+            return
+        try:
+            self._store.save(snapshot)
+        except Exception:
+            logger.warning("audio_job_store.save failed for %s", job_id, exc_info=True)
 
     def _adjust_pending_locked(self, delta: int) -> None:
         self._pending_count = max(0, self._pending_count + delta)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -76,6 +77,51 @@ def test_audio_job_manager_gates_tts_provider():
     gate.release.assert_called_once_with("tts")
     assert mgr.pending_count() == 0
     mgr.shutdown()
+
+
+def test_audio_job_get_does_not_wait_for_slow_store_save():
+    """Nubia SQLite stalls should not block polling in-memory job status."""
+    from app.runtime.audio_jobs import AudioJobManager
+
+    class SlowStore:
+        def __init__(self) -> None:
+            self.first_save_done = threading.Event()
+            self.release_second_save = threading.Event()
+            self.calls = 0
+
+        def save(self, job):
+            self.calls += 1
+            if self.calls == 1:
+                self.first_save_done.set()
+                return
+            self.release_second_save.wait(timeout=2)
+
+        def get(self, job_id):
+            return None
+
+    tts = MagicMock()
+    tts.name = "mock_tts"
+    tts.synthesize.return_value = "/static/audio/reply.mp3"
+    store = SlowStore()
+    mgr = AudioJobManager(tts, store=store, max_workers=1, ttl_seconds=60)
+
+    job_id = mgr.enqueue("hello")
+    assert store.first_save_done.wait(timeout=1)
+
+    deadline = time.time() + 1
+    job = None
+    while time.time() < deadline:
+        job = mgr.get(job_id)
+        if job and job.status == "ready":
+            break
+        time.sleep(0.01)
+
+    store.release_second_save.set()
+    mgr.shutdown()
+
+    assert job is not None
+    assert job.status == "ready"
+    assert job.voice_url == "/static/audio/reply.mp3"
 
 
 def test_proactive_low_cost_does_not_create_audio_job():
