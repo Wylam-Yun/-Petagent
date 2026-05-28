@@ -196,14 +196,71 @@ _PROMPT_LEAK_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+_STRONG_REASONING_LABELS = (
+    r"思考过程|推理过程|内部分析|模型思考|我的思考|"
+    r"reasoning|analysis|chain[- ]?of[- ]?thought|"
+    r"scratchpad|step[- ]by[- ]step|thinking"
+)
+_WEAK_REASONING_LABELS = r"思考|推理|分析"
+_FINAL_REPLY_LABELS = (
+    r"最终回复|最终回答|最终答案|最后回复|正式回复|回复|回答|"
+    r"final answer|final response|final|answer|response"
+)
+_STRUCTURED_REASONING_RE = re.compile(
+    rf"(?is)(?:^|\n)\s*(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?"
+    rf"(?P<label>{_STRONG_REASONING_LABELS}|{_WEAK_REASONING_LABELS})"
+    rf"(?:\*\*)?\s*[:：]\s*(?:\*\*)?"
+)
+_FINAL_REPLY_RE = re.compile(
+    rf"(?is)(?:^|\n)\s*(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?"
+    rf"(?:{_FINAL_REPLY_LABELS})(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*"
+)
+_THINK_BLOCK_RE = re.compile(
+    r"(?is)<(?:think|thinking|analysis|reasoning)\b[^>]*>.*?</(?:think|thinking|analysis|reasoning)>"
+)
+_OPEN_THINK_TAG_RE = re.compile(r"(?is)<(?:think|thinking|analysis|reasoning)\b[^>]*>")
+_INTERNAL_REASONING_BODY_RE = re.compile(
+    r"(?is)(?:用户(?:在|想|需要|希望|问|说|输入|表达|请求|提到|正在)|"
+    r"the user|模型|model|assistant|prompt|system|工具|字段|schema|"
+    r"内部|推理过程|思考过程|回复(?:要|应|应该|需要)|需要.*(?:回应|回复))"
+)
+
+
+def _is_weak_reasoning_label(label: str) -> bool:
+    return bool(re.fullmatch(_WEAK_REASONING_LABELS, str(label or ""), flags=re.I))
+
 
 def _strip_reasoning(reply: str) -> str:
     """Remove model thinking traces that accidentally landed in reply."""
-    cleaned = re.sub(r"<think>.*?</think>", "", reply, flags=re.S | re.I).strip()
-    cleaned = re.sub(r"(?is)^思考过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
-    cleaned = re.sub(r"(?is)^推理过程[:：].*?(?:最终回复[:：]|回答[:：])", "", cleaned).strip()
-    cleaned = re.sub(r"(?is)^(?:let me think|here'?s? (?:my )?reasoning|step[- ]by[- ]step)[:\s].*?(?=\n\n|\Z)", "", cleaned).strip()
-    cleaned = re.sub(r"(?i)\*\*(?:thinking|reasoning|step[- ]by[- ]step)\*\*[:\s].*?(?=\n\n|\Z)", "", cleaned, flags=re.S).strip()
+    cleaned = str(reply or "").replace("\r\n", "\n").strip()
+    if not cleaned:
+        return FALLBACK_ACTION["reply"]
+
+    cleaned = _THINK_BLOCK_RE.sub("", cleaned).strip()
+
+    open_tag = _OPEN_THINK_TAG_RE.search(cleaned)
+    if open_tag:
+        after_tag = cleaned[open_tag.end():]
+        final_marker = _FINAL_REPLY_RE.search(after_tag)
+        if final_marker:
+            cleaned = after_tag[final_marker.end():].strip()
+        else:
+            cleaned = cleaned[: open_tag.start()].strip()
+
+    reasoning_marker = _STRUCTURED_REASONING_RE.search(cleaned)
+    if reasoning_marker:
+        final_marker = _FINAL_REPLY_RE.search(cleaned, reasoning_marker.end())
+        if final_marker:
+            cleaned = cleaned[final_marker.end():].strip()
+        elif reasoning_marker.start() == 0 and (
+            not _is_weak_reasoning_label(reasoning_marker.group("label"))
+            or _INTERNAL_REASONING_BODY_RE.search(cleaned[reasoning_marker.end():])
+        ):
+            cleaned = ""
+        elif reasoning_marker.start() > 0:
+            cleaned = cleaned[: reasoning_marker.start()].strip()
+
+    cleaned = _FINAL_REPLY_RE.sub("", cleaned, count=1).strip()
     return cleaned or FALLBACK_ACTION["reply"]
 
 

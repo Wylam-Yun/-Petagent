@@ -56,6 +56,26 @@ def test_fast_reply_guard_prompt_leak():
     assert "豆豆在这儿" in result.reply
 
 
+def test_fast_reply_guard_strips_structured_reasoning():
+    raw = {
+        "reply": "分析：这是早安问候，回复要短。\n最终回复：早呀主人，豆豆醒啦～",
+        "mood": "happy",
+        "action": "waving",
+    }
+
+    result = guard_fast_reply_action(raw)
+
+    assert "分析" not in result.reply
+    assert "早安问候" not in result.reply
+    assert result.reply == "早呀主人，豆豆醒啦～"
+
+
+def test_fast_reply_guard_fallbacks_on_reasoning_only():
+    result = guard_fast_reply_action({"reply": "<think>只输出了内部推理"})
+
+    assert result.reply == "嗯嗯，豆豆在这儿。"
+
+
 def test_fast_reply_guard_replaces_legacy_pet_name():
     result = guard_fast_reply_action({"reply": "早呀，Momo 刚醒。momo 在听。"})
 
