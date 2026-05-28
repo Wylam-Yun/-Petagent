@@ -33,6 +33,15 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
+refuse_root_manager() {
+    uid="$(id -u 2>/dev/null || echo "")"
+    if [ "$uid" = "0" ]; then
+        log "ERROR: refusing to run service manager as root; start it as Termux app user"
+        cleanup_lock
+        exit 1
+    fi
+}
+
 process_exists() {
     pid="$1"
     [ -n "$pid" ] && [ -d "/proc/$pid" ]
@@ -336,6 +345,7 @@ ensure_petagent() {
 
 main() {
     take_lock
+    refuse_root_manager
     repair_android_context
     log "Service manager started with PID $$ ($MANAGER_VERSION)"
     acquire_wake_lock
@@ -429,7 +439,12 @@ main() {
                     age="$(petagent_pid_age)"
                     log "PetAgent process is still within startup grace (${age}s); waiting for port"
                 elif petagent_process_alive; then
-                    log "PetAgent process is alive but port $PETAGENT_PORT is not listening; keeping process"
+                    pid="$(petagent_pid)"
+                    log "PetAgent process $pid is alive but port $PETAGENT_PORT is not listening after grace; restarting"
+                    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+                    sleep 2
+                    [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
+                    start_petagent || log "CRITICAL: PetAgent restart failed while port was down"
                 else
                     log "PetAgent port $PETAGENT_PORT is down and process is missing; starting runtime"
                     start_petagent || log "CRITICAL: PetAgent start failed while port was down"
