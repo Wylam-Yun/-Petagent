@@ -77,10 +77,10 @@ def test_context_debug_endpoint_returns_detail_when_enabled():
     assert "context_config" in body
 
 
-def test_voice_exit_phrase_pre_detection_updates_activation():
-    """VoicePipeline should classify exit phrases and update ActivationManager."""
+def test_voice_exit_phrase_is_normal_user_text_in_chat_pipeline():
+    """Voice chat should not route recognized text through fixed activation phrases."""
     app = create_app(testing=True)
-    app.state.asr_provider.text = "momo休息吧"
+    app.state.asr_provider.text = "先这样写代码"
 
     client = TestClient(app)
 
@@ -89,10 +89,9 @@ def test_voice_exit_phrase_pre_detection_updates_activation():
         files={"file": ("voice.wav", b"RIFF\x00\x00\x00\x00WAVE", "audio/wav")},
     )
     assert response.status_code == 200
-
-    # Activation session should be ended
-    activation = app.state.activation_manager
-    assert activation.state.active is False
+    body = response.json()
+    assert body["user_text"] == "先这样写代码"
+    assert "activation" not in body
 
 
 def test_context_debug_desensitizes_user_text():

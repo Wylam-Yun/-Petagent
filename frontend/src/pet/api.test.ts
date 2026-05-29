@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   VOICE_UPLOAD_TIMEOUT_MS,
   getAudioJob,
-  getProactiveCheck,
+  getPetState,
   postAudioRetry,
   reportDeviceState,
   sendHeartbeat,
@@ -141,20 +141,6 @@ describe("stage 3 API helpers", () => {
     });
   });
 
-  test("fetches proactive check endpoint", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ active: false })
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await getProactiveCheck();
-
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/pet/proactive");
-    expect(response).toEqual({ active: false });
-  });
-
   test("sends frontend heartbeat as JSON body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -204,12 +190,12 @@ describe("requestJson retry", () => {
   test("does not require AbortController in old Android browsers", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ active: false })
+      json: async () => ({ name: "豆豆", mood: "idle" })
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("AbortController", undefined);
 
-    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+    await expect(getPetState()).resolves.toEqual({ name: "豆豆", mood: "idle" });
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init).not.toHaveProperty("signal");
@@ -263,7 +249,7 @@ describe("requestJson retry", () => {
       send(body: XMLHttpRequestBodyInit | null) {
         this.body = body;
         this.status = 200;
-        this.responseText = JSON.stringify({ active: false });
+        this.responseText = JSON.stringify({ name: "豆豆", mood: "idle" });
         this.readyState = FakeXMLHttpRequest.DONE;
         this.onreadystatechange?.();
       }
@@ -272,7 +258,7 @@ describe("requestJson retry", () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
 
-    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+    await expect(getPetState()).resolves.toEqual({ name: "豆豆", mood: "idle" });
 
     vi.stubGlobal("fetch", originalFetch);
     vi.stubGlobal("XMLHttpRequest", originalXhr);
@@ -283,21 +269,21 @@ describe("requestJson retry", () => {
       .mockRejectedValueOnce(new Error("network error"))
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ active: false })
+        json: async () => ({ name: "豆豆", mood: "idle" })
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await getProactiveCheck();
+    const response = await getPetState();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(response).toEqual({ active: false });
+    expect(response).toEqual({ name: "豆豆", mood: "idle" });
   });
 
   test("throws after max retries exhausted", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("persistent failure"));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getProactiveCheck()).rejects.toThrow("persistent failure");
+    await expect(getPetState()).rejects.toThrow("persistent failure");
     // 1 initial + 2 retries = 3 total
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

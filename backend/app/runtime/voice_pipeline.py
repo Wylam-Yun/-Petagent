@@ -14,7 +14,6 @@ from app.providers.audio_omni import (
 from app.providers.errors import ProviderError
 from app.runtime.actions import PetResponse
 from app.runtime.dispatcher import RuntimeDispatcher
-from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
 
 logger = logging.getLogger(__name__)
@@ -44,7 +43,6 @@ class VoicePipeline:
         slow_fallback_enabled: bool = True,
         fast_brain_provider_name: str = "fast_llm",
         slow_brain_provider_name: str = "slow_llm",
-        activation_manager: Any = None,
         provider_gate: Any = None,
     ) -> None:
         self.dispatcher = dispatcher
@@ -55,7 +53,6 @@ class VoicePipeline:
         self.slow_fallback_enabled = slow_fallback_enabled
         self.fast_brain_provider_name = fast_brain_provider_name
         self.slow_brain_provider_name = slow_brain_provider_name
-        self.activation_manager = activation_manager
         self.provider_gate = provider_gate
         self._fast_asr_recovery_index = 0
         self._fast_asr_recovery_lock = threading.Lock()
@@ -216,28 +213,18 @@ class VoicePipeline:
 
         brain_started = perf_counter()
 
-        # Check for wake/exit phrase before dispatching as voice_message
-        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
-        activation_info = None
-        wake_source = ""
-        if activation_event is not None:
-            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
-            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
-            response = self.dispatcher.handle_event(activation_event, brain=brain)
-            activation_info = self._build_activation_info(activation_event["type"])
-        else:
-            response = self.dispatcher.handle_event(
-                {
-                    "type": "voice_message",
-                    "source": "voice_%s" % selected,
-                    "payload": {
-                        "user_text": understanding.user_text,
-                        "audio_understanding": understanding.dict(),
-                        "thinking_mode": thinking_mode,
-                    },
+        response = self.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_%s" % selected,
+                "payload": {
+                    "user_text": understanding.user_text,
+                    "audio_understanding": understanding.dict(),
+                    "thinking_mode": thinking_mode,
                 },
-                brain=brain,
-            )
+            },
+            brain=brain,
+        )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -254,11 +241,9 @@ class VoicePipeline:
                 brain_provider=brain_provider_name,
                 fallback_reason=fallback_reason,
                 emotion_source=emotion_source,
-                wake_source=wake_source,
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
-            activation=activation_info,
         )
 
     def _run_audio_understanding_route(
@@ -334,10 +319,6 @@ class VoicePipeline:
 
         brain_started = perf_counter()
 
-        # Check for wake/exit phrase
-        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
-        activation_info = None
-        wake_source = ""
         final_has_text = bool(understanding.user_text.strip())
         if not final_has_text:
             timings["total"] = _now_ms(started)
@@ -378,24 +359,18 @@ class VoicePipeline:
                 ),
                 fallback_reason=fallback_reason,
             )
-        if activation_event is not None:
-            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
-            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
-            response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
-            activation_info = self._build_activation_info(activation_event["type"])
-        else:
-            response = self.dispatcher.handle_event(
-                {
-                    "type": "voice_message",
-                    "source": "voice_thinking",
-                    "payload": {
-                        "user_text": understanding.user_text,
-                        "audio_understanding": understanding.dict(),
-                        "thinking_mode": thinking_mode,
-                    },
+        response = self.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_thinking",
+                "payload": {
+                    "user_text": understanding.user_text,
+                    "audio_understanding": understanding.dict(),
+                    "thinking_mode": thinking_mode,
                 },
-                brain=self.slow_brain,
-            )
+            },
+            brain=self.slow_brain,
+        )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -410,12 +385,10 @@ class VoicePipeline:
                 brain_provider=self.slow_brain_provider_name,
                 fallback_reason="" if final_has_text else "audio_understanding_insufficient",
                 emotion_source=emotion_source,
-                wake_source=wake_source,
                 provider_failure=provider_failure,
                 timings_ms=timings,
             ),
             fallback_reason=None if final_has_text else "audio_understanding_insufficient",
-            activation=activation_info,
         )
 
     def _run_audio_fallback(
@@ -448,26 +421,18 @@ class VoicePipeline:
 
         brain_started = perf_counter()
 
-        # Check for wake/exit phrase before dispatching as voice_message
-        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
-        activation_info = None
-        if activation_event is not None:
-            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
-            response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
-            activation_info = self._build_activation_info(activation_event["type"])
-        else:
-            response = self.dispatcher.handle_event(
-                {
-                    "type": "voice_message",
-                    "source": "voice_thinking",
-                    "payload": {
-                        "user_text": understanding.user_text,
-                        "audio_understanding": understanding.dict(),
-                        "thinking_mode": thinking_mode,
-                    },
+        response = self.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_thinking",
+                "payload": {
+                    "user_text": understanding.user_text,
+                    "audio_understanding": understanding.dict(),
+                    "thinking_mode": thinking_mode,
                 },
-                brain=self.slow_brain,
-            )
+            },
+            brain=self.slow_brain,
+        )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -486,19 +451,7 @@ class VoicePipeline:
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
-            activation=activation_info,
         )
-
-    def _build_activation_info(self, event_type: str) -> Dict[str, Any]:
-        """Build activation info dict from the activation manager state."""
-        if self.activation_manager is None:
-            return {"type": event_type, "active": False}
-        state = self.activation_manager.state
-        return {
-            "type": event_type,
-            "active": state.active,
-            "session_id": state.session_id,
-        }
 
     def _asr_name(self) -> str:
         return str(getattr(self.asr_provider, "name", "unknown_asr"))

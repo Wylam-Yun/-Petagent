@@ -206,7 +206,7 @@ def test_dispatcher_uses_provider_gate_for_llm():
     assert resp.status_code == 200
 
     # fast_llm profile maps to llm_fast gate type
-    mock_gate.acquire.assert_called_once_with("llm_fast")
+    mock_gate.acquire.assert_called_once_with("llm_fast", blocking=True, timeout_s=25)
     mock_gate.release.assert_called_once_with("llm_fast")
 
 
@@ -229,5 +229,5 @@ def test_dispatcher_provider_gate_slow_profile():
     })
     assert resp.status_code == 200
 
-    mock_gate.acquire.assert_called_once_with("llm_slow")
+    mock_gate.acquire.assert_called_once_with("llm_slow", blocking=True, timeout_s=25)
     mock_gate.release.assert_called_once_with("llm_slow")

@@ -1,10 +1,8 @@
 import type {
-  ActivationResponse,
   AudioJob,
   DeviceStatePayload,
   InteractionDefinition,
   PetEventType,
-  ProactiveResponse,
   PetResponse,
   PetState,
   TextChatResponse,
@@ -180,17 +178,6 @@ export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceSt
   });
 }
 
-export function getProactiveCheck(): Promise<{ active: boolean; candidate?: string }> {
-  return requestJson("/api/pet/proactive");
-}
-
-export function triggerProactiveEvent(): Promise<ProactiveResponse> {
-  return requestJson<ProactiveResponse>("/api/pet/proactive/trigger", {
-    method: "POST",
-    headers: { "content-type": "application/json" }
-  });
-}
-
 export function getInteractions(): Promise<InteractionDefinition[]> {
   return requestJson<InteractionDefinition[]>("/api/interactions");
 }
@@ -226,22 +213,6 @@ export function uploadVoice(
       signal: options.signal
     }
   );
-}
-
-export function wakeMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
-  return requestJson<ActivationResponse>("/api/activation/wake", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
-  });
-}
-
-export function exitMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
-  return requestJson<ActivationResponse>("/api/activation/exit", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
-  });
 }
 
 export type ContextRefreshResponse = {

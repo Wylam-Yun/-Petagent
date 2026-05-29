@@ -11,15 +11,13 @@ import {
   getAudioJob,
   getInteractions,
   getPetState,
-  getProactiveCheck,
   postAudioRetry,
   postPetEvent,
   refreshContext,
   reportDeviceState,
   resetRuntime,
   sendHeartbeat,
-  sendTextChat,
-  triggerProactiveEvent
+  sendTextChat
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
 import {
@@ -27,7 +25,6 @@ import {
   FAST_ACTION_MIN_VISIBLE_MS,
 } from "./pet/behaviorDirector";
 import { getErrorBubble } from "./pet/errorMessages";
-import { shouldApplyProactive } from "./pet/proactive";
 import { useClientConfig } from "./hooks/useClientConfig";
 import { useNetworkState } from "./hooks/useNetworkState";
 import type { DoudouAction } from "./pet/doudouSprites";
@@ -179,23 +176,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (!isOnline) return;
-      if (!shouldApplyProactive({ phase, busy })) return;
-      void getProactiveCheck()
-        .then((check) => {
-          if (!check.active || !shouldApplyProactive({ phase, busy })) return;
-          return triggerProactiveEvent();
-        })
-        .then((response) => {
-          if (response && response.active) applyPetResponse(response);
-        })
-        .catch(() => undefined);
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, [phase, busy, isOnline]);
-
-  useEffect(() => {
     if (!isOnline) return;
     void sendHeartbeat().catch(() => undefined);
     const timer = window.setInterval(() => {
@@ -204,23 +184,6 @@ function App() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [isOnline]);
-
-  // Ambient life loop
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const out = directorRef.current.onAmbientTick(
-        Date.now(),
-        phase,
-        busy,
-        document.visibilityState === "visible",
-      );
-      if (out) {
-        setDoudouAction(out.visibleAction);
-        if (out.bubbleText) setBubbleText(out.bubbleText);
-      }
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [phase, busy]);
 
   const titleMood = useMemo(() => petState.mood, [petState.mood]);
   const interactionPreview = useMemo(() => {

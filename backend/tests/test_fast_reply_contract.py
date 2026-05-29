@@ -295,8 +295,6 @@ def test_successful_voice_reply_repairs_passive_listening_copy():
     provider = app.state.dispatcher.brain.provider
     replies = [
         "嗯嗯，耳朵都竖起来了哦。",
-        "听到了哦，小主人的声音真好听。",
-        "嗯，今天都听你的。",
         "你说啥我都记着呢。",
         "那我可要假装没听见啦。",
         "要不你再提示一下？",
@@ -320,19 +318,42 @@ def test_successful_voice_reply_repairs_passive_listening_copy():
                 "payload": {"user_text": text},
             }
         ).reply
-        for text in ["第一句", "第二句", "第三句", "第四句", "第五句", "第六句"]
+        for text in ["第一句", "第二句", "第三句", "第四句"]
     ]
 
-    forbidden = ("耳朵", "听到", "听你", "你说啥", "假装没听见", "再提示")
+    forbidden = ("耳朵", "你说啥", "假装没听见", "再提示")
     assert all(not any(marker in reply for marker in forbidden) for reply in outputs)
     assert outputs == [
         "收到，关于“第一句”，豆豆继续陪你聊。",
         "收到，关于“第二句”，豆豆继续陪你聊。",
         "收到，关于“第三句”，豆豆继续陪你聊。",
         "收到，关于“第四句”，豆豆继续陪你聊。",
-        "收到，关于“第五句”，豆豆继续陪你聊。",
-        "收到，关于“第六句”，豆豆继续陪你聊。",
     ]
+
+
+def test_successful_voice_reply_keeps_normal_listening_words():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def natural_reply(messages):
+        return {
+            "reply": "听你的，我们继续把这件事往前推。",
+            "mood": "thinking",
+            "action": "speak",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = natural_reply
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "我们继续写代码"},
+        }
+    )
+
+    assert response.reply == "听你的，我们继续把这件事往前推。"
 
 
 def test_thinking_voice_reply_does_not_claim_asr_failure():
@@ -371,6 +392,54 @@ def test_thinking_voice_reply_does_not_claim_asr_failure():
     assert "声音糊" not in response.reply
     assert response.reply == "收到，关于“继续下一句”，豆豆继续陪你聊。"
     assert response.action in ALLOWED_BEHAVIOR_ACTIONS
+
+
+def test_thinking_voice_reply_dedupes_repeated_reply():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def repeated_reply(messages):
+        return {
+            "reply": "豆豆把小爪子放在桌边陪你。",
+            "mood": "thinking",
+            "face_type": "thinking",
+            "animation": "blink",
+            "voice_style": "soft",
+            "vibration": "none",
+            "state_delta": {},
+            "state_affect": {
+                "interaction_tone": "neutral",
+                "pet_effort": "none",
+                "emotional_effect": "uncertain",
+                "reason": "test",
+            },
+            "memory_update": {"should_save": False, "content": ""},
+            "behavior_plan": [
+                {"action": "think", "slot": "before_speech", "duration_ms": 900},
+                {"action": "speak", "slot": "speech", "duration_ms": 1400},
+            ],
+        }
+
+    provider.complete_json = repeated_reply
+
+    first = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_thinking",
+            "payload": {"user_text": "第一轮", "thinking_mode": True},
+        }
+    )
+    second = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_thinking",
+            "payload": {"user_text": "第二轮", "thinking_mode": True},
+        }
+    )
+
+    assert first.reply == "豆豆把小爪子放在桌边陪你。"
+    assert second.reply == "收到，关于“第二轮”，豆豆继续陪你聊。"
+    assert second.action in ALLOWED_BEHAVIOR_ACTIONS
 
 
 def test_thinking_response_has_route():

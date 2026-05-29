@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.runtime.route_policy import RECALL_KEYWORDS, RouteDecision, decide_route
+from app.runtime.route_policy import RouteDecision, decide_route
 
 
 def test_button_event_fast_reply():
@@ -11,14 +11,6 @@ def test_button_event_fast_reply():
     assert d.allow_tools is False
 
 
-def test_recall_keyword_non_thinking_stays_fast_reply():
-    """Recall keywords in non-thinking mode should stay on fast_reply path."""
-    d = decide_route("text_message", "text_fast", "昨天我说了什么")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
-    assert d.provider_profile == "fast_llm"
-
-
 def test_recall_keyword_thinking_mode_goes_thinking():
     """Recall keywords with thinking_mode should route to thinking."""
     d = decide_route("text_message", "text_fast", "昨天说了什么", thinking_mode=True)
@@ -26,21 +18,20 @@ def test_recall_keyword_thinking_mode_goes_thinking():
     assert d.context_profile == "thinking"
 
 
-def test_all_recall_keywords_non_thinking():
-    """All RECALL_KEYWORDS should stay fast_reply when thinking_mode=False."""
-    for kw in RECALL_KEYWORDS:
-        d = decide_route("text_message", "text_fast", f"我们{kw}什么")
-        assert d.route == "fast_reply", f"keyword '{kw}' unexpectedly routed to thinking"
+def test_keywords_do_not_change_default_chat_route():
+    for text in [
+        "昨天我说了什么",
+        "今天适合出门吗",
+        "帮我写一个排序算法",
+        "请详细分析一下",
+    ]:
+        d = decide_route("text_message", "text_fast", text)
+        assert d.route == "fast_reply"
         assert d.context_profile == "fast_reply"
-
-
-def test_weather_keyword_no_tools():
-    """V1.3: tool keywords route to fast_reply with no tools."""
-    d = decide_route("text_message", "text_fast", "今天适合出门吗")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
-    assert d.allow_tools is False
-    assert d.max_tool_calls == 0
+        assert d.provider_profile == "fast_llm"
+        assert d.allow_tools is False
+        assert d.max_tool_calls == 0
+        assert d.reason == "default companionship"
 
 
 def test_thinking_mode():
@@ -62,14 +53,6 @@ def test_normal_text_fast_reply():
     d = decide_route("text_message", "text_fast", "你好呀")
     assert d.route == "fast_reply"
     assert d.context_profile == "fast_reply"
-
-
-def test_code_keyword_fast_reply():
-    """V1.3: complex keywords route to fast_reply (suggest Thinking Mode in prompt)."""
-    d = decide_route("text_message", "text_fast", "帮我写一个排序算法")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
-    assert d.allow_tools is False
 
 
 def test_route_only_fast_reply_or_thinking():

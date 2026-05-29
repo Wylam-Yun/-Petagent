@@ -387,7 +387,6 @@ def create_app(testing: bool = False) -> FastAPI:
         ),
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
-        activation_manager=activation_manager,
         provider_gate=provider_gate,
     )
     text_pipeline = TextPipeline(
@@ -396,7 +395,6 @@ def create_app(testing: bool = False) -> FastAPI:
         slow_brain=brain,
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
-        activation_manager=activation_manager,
     )
 
     # CORS: explicit origin allowlist instead of wildcard

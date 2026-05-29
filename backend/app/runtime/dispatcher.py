@@ -37,19 +37,11 @@ FAST_DUPLICATE_RECOVERY_REPLIES = (
 )
 
 PROVIDER_FALLBACK_REPLIES = (
-    "豆豆在这儿，刚才反应慢了一下，但还陪着你。",
-    "刚才豆豆脑袋转慢了点，这次换个方式陪你。",
-    "豆豆慢半拍了，但没有走开，继续陪你聊。",
-    "这轮豆豆有点短路，先稳住，再接着陪你。",
-    "豆豆刚刚反应慢了点，主人继续讲就好。",
-)
-
-SUCCESSFUL_VOICE_REPAIR_REPLIES = (
-    "收到，豆豆顺着你这句继续聊。",
-    "明白，豆豆给你一个新的回应。",
-    "知道啦，豆豆这次直接回应你。",
-    "好，豆豆接着你的意思往下说。",
-    "嗯，豆豆换个角度陪你继续。",
+    "豆豆在这儿，刚才反应慢了一下，但这句收到了。",
+    "刚才豆豆脑袋转慢了点，这次直接接住你的意思。",
+    "豆豆慢半拍了，但没有走开，这句先记住。",
+    "这轮豆豆有点短路，先把你的话稳稳接住。",
+    "豆豆刚刚反应慢了点，但这次不会让你重说。",
 )
 
 ASR_FAILURE_COPY_MARKERS = (
@@ -73,19 +65,13 @@ ASR_FAILURE_COPY_MARKERS = (
     "竖着耳朵",
     "耳朵竖",
     "耳朵都竖",
-    "耳朵",
-    "小耳朵",
     "认真听",
     "乖乖听",
-    "听到",
-    "听到了",
-    "听见",
     "听清",
     "听着呢",
     "一直听着",
     "在听呢",
     "听你说",
-    "听你的",
     "你说啥",
     "假装没听见",
     "没听见",
@@ -142,6 +128,10 @@ def _is_duplicate_fast_reply(reply: str, cognition_context: Optional[Dict[str, A
         if _reply_similarity(reply, recent_reply) >= FAST_REPLY_REPEAT_SIMILARITY:
             return True
     return False
+
+
+def _is_duplicate_reply(reply: str, cognition_context: Optional[Dict[str, Any]]) -> bool:
+    return _is_duplicate_fast_reply(reply, cognition_context)
 
 
 def _recent_reply_norms(cognition_context: Optional[Dict[str, Any]]) -> List[str]:
@@ -606,7 +596,7 @@ class RuntimeDispatcher:
         gate_acquired = False
         try:
             if self.provider_gate is not None:
-                self.provider_gate.acquire(provider_type)
+                self.provider_gate.acquire(provider_type, blocking=True, timeout_s=25)
                 gate_acquired = True
             try:
                 if is_fast_reply:
@@ -690,6 +680,16 @@ class RuntimeDispatcher:
                     _event_user_text(event),
                     cognition_context,
                 )
+                dedupe_context = _dedupe_context_from_recent_events(
+                    cognition_context,
+                    self.event_log_store,
+                    episode_id,
+                )
+                if _is_duplicate_reply(action.reply, dedupe_context):
+                    action.reply = _select_duplicate_recovery_reply(
+                        _event_user_text(event),
+                        dedupe_context,
+                    )
             if run:
                 run.final_action = {
                     "reply": action.reply[:200],
