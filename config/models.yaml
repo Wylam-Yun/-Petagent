@@ -52,7 +52,8 @@ providers:
       - FunAudioLLM/SenseVoiceSmall
       - iic/SenseVoiceSmall
     language_field: language
-    language_code: zh-CN
+    language_code: zh
+    required_text_script: zh
     auth_scheme: bearer
     proxy_url_env:
       - SILICONFLOW_PROXY_URL

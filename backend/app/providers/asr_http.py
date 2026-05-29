@@ -12,6 +12,16 @@ from app.runtime.voice_types import ASRTranscript
 
 logger = logging.getLogger(__name__)
 
+_CJK_RANGES = (
+    ("\u3400", "\u4dbf"),
+    ("\u4e00", "\u9fff"),
+    ("\uf900", "\ufaff"),
+)
+_NON_ZH_SCRIPT_RANGES = (
+    ("\u3040", "\u30ff"),  # Hiragana + Katakana
+    ("\uac00", "\ud7af"),  # Hangul syllables
+)
+
 
 def _timeout_tuple(scalar: int, connect: int = 2) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
@@ -104,6 +114,10 @@ def _confidence(raw: Any) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _contains_script(text: str, ranges: Tuple[Tuple[str, str], ...]) -> bool:
+    return any(start <= char <= end for char in text for start, end in ranges)
+
+
 class HttpASRProvider:
     def __init__(self, config: ProviderConfig) -> None:
         self.config = config
@@ -148,6 +162,7 @@ class HttpASRProvider:
                 text_paths=self.config.extra.get("transcript_paths") or [],
                 confidence_paths=self.config.extra.get("confidence_paths") or [],
             )
+            text = self._validated_text(text)
             return ASRTranscript(text=text, confidence=confidence, provider=self.name)
         except requests.Timeout:
             return self._error("asr_timeout", "ASR HTTP request timed out")
@@ -220,6 +235,21 @@ class HttpASRProvider:
                 return False
             return 500 <= status <= 599
         return False
+
+    def _validated_text(self, text: str) -> str:
+        text = str(text or "").strip()
+        required_script = str(self.config.extra.get("required_text_script") or "").lower()
+        if not text or required_script not in {"zh", "cjk"}:
+            return text
+        if _contains_script(text, _CJK_RANGES) and not _contains_script(text, _NON_ZH_SCRIPT_RANGES):
+            return text
+        logger.info(
+            "http_asr_reject_text provider=%s required_script=%s text_len=%d reason=script_mismatch",
+            self.name,
+            required_script,
+            len(text),
+        )
+        return ""
 
     def _error(self, code: str, message: str) -> ASRTranscript:
         return ASRTranscript(
