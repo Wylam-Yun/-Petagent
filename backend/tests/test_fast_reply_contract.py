@@ -171,8 +171,8 @@ def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     replies = [
-        "豆豆竖起耳朵在听，主人慢慢说。",
-        "豆豆竖起耳朵听着呢，主人再说。",
+        "豆豆把小爪子放在桌边陪你。",
+        "豆豆把小爪放在桌边陪着你。",
     ]
 
     def similar_reply(messages):
@@ -200,7 +200,7 @@ def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
         }
     )
 
-    assert first.reply == "豆豆竖起耳朵在听，主人慢慢说。"
+    assert first.reply == "豆豆把小爪子放在桌边陪你。"
     assert second.reply == "这次换个说法吧，豆豆想给你一点新鲜回应。"
     assert second.action == "confused"
 
@@ -211,7 +211,7 @@ def test_fast_reply_rotates_duplicate_recovery_reply():
 
     def repeated_reply(messages):
         return {
-            "reply": "豆豆竖起耳朵在听，主人慢慢说。",
+            "reply": "豆豆把小爪子放在桌边陪你。",
             "mood": "thinking",
             "action": "listen",
             "voice_style": "soft",
@@ -230,7 +230,7 @@ def test_fast_reply_rotates_duplicate_recovery_reply():
         for i in range(3)
     ]
 
-    assert replies[0] == "豆豆竖起耳朵在听，主人慢慢说。"
+    assert replies[0] == "豆豆把小爪子放在桌边陪你。"
     assert replies[1] == "这次换个说法吧，豆豆想给你一点新鲜回应。"
     assert replies[2] == "上一句太像啦，豆豆换个角度陪你聊。"
 
@@ -260,6 +260,33 @@ def test_successful_voice_reply_does_not_claim_asr_failure():
     assert "没听清" not in response.reply
     assert response.reply == "我听到了，豆豆继续陪你聊。"
     assert response.action == "listen"
+
+
+def test_successful_voice_reply_does_not_use_generic_listening_loop_copy():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def misleading_reply(messages):
+        return {
+            "reply": "豆豆竖起耳朵在听，主人慢慢说。",
+            "mood": "thinking",
+            "action": "listen",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = misleading_reply
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "你要直接回答我"},
+        }
+    )
+
+    assert "竖起耳朵" not in response.reply
+    assert "慢慢说" not in response.reply
+    assert response.reply == "我听到了，豆豆继续陪你聊。"
 
 
 def test_thinking_voice_reply_does_not_claim_asr_failure():

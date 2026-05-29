@@ -52,9 +52,64 @@ def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
     body = response.json()
     assert body["voice_route"]["selected"] == "thinking"
     assert body["voice_route"]["asr_provider"] == "mock_asr"
-    assert body["voice_route"]["fallback_reason"] == "audio_understanding_insufficient"
+    assert body["voice_route"]["fallback_reason"] == ""
     assert body["voice_route"]["emotion_source"] == "asr"
     assert body["user_text"] == "我回来啦"
+
+
+def test_voice_asr_text_with_zero_confidence_is_usable():
+    class ZeroConfidenceASR:
+        name = "zero_confidence_asr"
+
+        def transcribe(self, audio_path, content_type):
+            return ASRTranscript(
+                text="今天继续陪我说中文",
+                confidence=0.0,
+                provider=self.name,
+            )
+
+    app = create_app(testing=True)
+    app.state.voice_pipeline.asr_provider = ZeroConfidenceASR()
+    client = TestClient(app)
+
+    response = post_voice(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_text"] == "今天继续陪我说中文"
+    assert body["voice_route"]["fallback_reason"] == ""
+    assert body["voice_route"]["asr_error_code"] == ""
+
+
+def test_thinking_asr_fallback_text_with_zero_confidence_is_usable():
+    class EmptyAudioUnderstanding:
+        def understand(self, audio_path, content_type):
+            from app.providers.audio_omni import FALLBACK_AUDIO_UNDERSTANDING
+
+            return FALLBACK_AUDIO_UNDERSTANDING
+
+    class ZeroConfidenceASR:
+        name = "zero_confidence_asr"
+
+        def transcribe(self, audio_path, content_type):
+            return ASRTranscript(
+                text="思考模式也继续听中文",
+                confidence=0.0,
+                provider=self.name,
+            )
+
+    app = create_app(testing=True)
+    app.state.voice_pipeline.audio_provider = EmptyAudioUnderstanding()
+    app.state.voice_pipeline.asr_provider = ZeroConfidenceASR()
+    client = TestClient(app)
+
+    response = post_voice(client, data={"thinking_mode": "true"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_text"] == "思考模式也继续听中文"
+    assert body["voice_route"]["fallback_reason"] == ""
+    assert body["voice_route"]["emotion_source"] == "asr"
 
 
 def test_thinking_mode_exposes_audio_understanding_provider_failure():

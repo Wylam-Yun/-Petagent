@@ -385,7 +385,6 @@ def create_app(testing: bool = False) -> FastAPI:
         slow_fallback_enabled=bool(
             settings.voice_routing.get("slow_fallback_enabled", True)
         ),
-        asr_min_confidence=float(settings.voice_routing.get("asr_min_confidence", 0.0)),
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
         slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
         activation_manager=activation_manager,

@@ -52,7 +52,6 @@ voice:
     - audio/ogg
     - audio/mp4
   max_audio_bytes: 8388608
-  asr_min_confidence: 0.25
   asr_wav_contract:
     required_channels: 1
     required_sample_width: 2

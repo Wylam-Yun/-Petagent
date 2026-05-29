@@ -42,7 +42,6 @@ class VoicePipeline:
         asr_provider: Any,
         audio_provider: Any,
         slow_fallback_enabled: bool = True,
-        asr_min_confidence: float = 0.0,
         fast_brain_provider_name: str = "fast_llm",
         slow_brain_provider_name: str = "slow_llm",
         activation_manager: Any = None,
@@ -54,7 +53,6 @@ class VoicePipeline:
         self.asr_provider = asr_provider
         self.audio_provider = audio_provider
         self.slow_fallback_enabled = slow_fallback_enabled
-        self.asr_min_confidence = asr_min_confidence
         self.fast_brain_provider_name = fast_brain_provider_name
         self.slow_brain_provider_name = slow_brain_provider_name
         self.activation_manager = activation_manager
@@ -129,8 +127,6 @@ class VoicePipeline:
                 fallback_reason = "asr_provider_error"
         elif not text:
             fallback_reason = fallback_reason or "asr_empty"
-        elif transcript.confidence < self.asr_min_confidence:
-            fallback_reason = "asr_low_confidence"
 
         logger.info(
             "voice_asr_result selected=%s provider=%s text_len=%d confidence=%.3f "
@@ -294,7 +290,7 @@ class VoicePipeline:
         timings["audio_understanding"] = _now_ms(started)
 
         # Step 2: Check if audio understanding gave usable text
-        has_usable_text = bool(understanding.user_text.strip()) and understanding.confidence >= 0.3
+        has_usable_text = bool(understanding.user_text.strip())
 
         transcript = None
         if has_usable_text:
@@ -322,7 +318,7 @@ class VoicePipeline:
                 )
             timings["asr"] = _now_ms(asr_start)
 
-            if transcript.text.strip() and transcript.confidence >= self.asr_min_confidence:
+            if transcript.text.strip():
                 # ASR succeeded — use it, but note emotion came from ASR
                 understanding = AudioUnderstanding(
                     user_text=transcript.text.strip(),
@@ -342,7 +338,8 @@ class VoicePipeline:
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
         wake_source = ""
-        if not understanding.user_text.strip():
+        final_has_text = bool(understanding.user_text.strip())
+        if not final_has_text:
             timings["total"] = _now_ms(started)
             fallback_reason = "audio_understanding_insufficient"
             if transcript is not None and transcript.error_code:
@@ -411,13 +408,13 @@ class VoicePipeline:
                 thinking_mode=thinking_mode,
                 asr_provider=getattr(transcript, "provider", "") if transcript else "",
                 brain_provider=self.slow_brain_provider_name,
-                fallback_reason="" if has_usable_text else "audio_understanding_insufficient",
+                fallback_reason="" if final_has_text else "audio_understanding_insufficient",
                 emotion_source=emotion_source,
                 wake_source=wake_source,
                 provider_failure=provider_failure,
                 timings_ms=timings,
             ),
-            fallback_reason=None if has_usable_text else "audio_understanding_insufficient",
+            fallback_reason=None if final_has_text else "audio_understanding_insufficient",
             activation=activation_info,
         )
 

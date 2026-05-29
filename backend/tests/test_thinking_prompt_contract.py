@@ -144,3 +144,29 @@ def test_thinking_prompt_caps_notebook_memory_to_20():
     payload = json.loads(messages[1]["content"])
 
     assert payload["notebook_memory"] == [f"记忆{i}" for i in range(20)]
+
+
+def test_thinking_voice_prompt_does_not_question_successful_asr():
+    event = normalize_event(
+        {
+            "type": "voice_message",
+            "source": "voice_thinking",
+            "payload": {"user_text": "继续陪我聊中文", "thinking_mode": True},
+        }
+    )
+    context = build_runtime_context(
+        event,
+        {"mood": "thinking", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "thinking",
+            "recent_exact_events": [],
+            "selected_card_items": [],
+        },
+    )
+
+    messages = build_thinking_messages(load_settings(), event, context)
+    system_prompt = messages[0]["content"]
+
+    assert "低置信" not in system_prompt
+    assert "可能不完整" not in system_prompt
+    assert "不要归因到语音识别质量" in system_prompt
