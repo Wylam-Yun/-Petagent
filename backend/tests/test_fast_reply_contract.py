@@ -294,7 +294,10 @@ def test_successful_voice_reply_repairs_passive_listening_copy():
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     replies = [
-        "嗯嗯，耳朵竖着呢，豆豆认真听。",
+        "嗯嗯，耳朵都竖起来了哦。",
+        "听到了哦，小主人的声音真好听。",
+        "嗯，今天都听你的。",
+        "你说啥我都记着呢。",
         "那我可要假装没听见啦。",
         "要不你再提示一下？",
     ]
@@ -317,15 +320,18 @@ def test_successful_voice_reply_repairs_passive_listening_copy():
                 "payload": {"user_text": text},
             }
         ).reply
-        for text in ["第一句", "第二句", "第三句"]
+        for text in ["第一句", "第二句", "第三句", "第四句", "第五句", "第六句"]
     ]
 
-    forbidden = ("耳朵竖", "认真听", "假装没听见", "再提示")
+    forbidden = ("耳朵", "听到", "听你", "你说啥", "假装没听见", "再提示")
     assert all(not any(marker in reply for marker in forbidden) for reply in outputs)
     assert outputs == [
         "收到，关于“第一句”，豆豆继续陪你聊。",
         "收到，关于“第二句”，豆豆继续陪你聊。",
         "收到，关于“第三句”，豆豆继续陪你聊。",
+        "收到，关于“第四句”，豆豆继续陪你聊。",
+        "收到，关于“第五句”，豆豆继续陪你聊。",
+        "收到，关于“第六句”，豆豆继续陪你聊。",
     ]
 
 
