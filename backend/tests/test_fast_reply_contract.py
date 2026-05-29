@@ -163,8 +163,8 @@ def test_fast_reply_dedupes_repeated_reply_before_tts():
     )
 
     assert first.reply == "嗯…主人在叫豆豆嘛～可是现在好困，眼皮在打架呢…"
-    assert second.reply == "这次换个说法吧，豆豆想给你一点新鲜回应。"
-    assert second.action == "confused"
+    assert second.reply == "收到，关于“今天还好吗”，豆豆继续陪你聊。"
+    assert second.action == "nap"
 
 
 def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
@@ -201,8 +201,8 @@ def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
     )
 
     assert first.reply == "豆豆把小爪子放在桌边陪你。"
-    assert second.reply == "这次换个说法吧，豆豆想给你一点新鲜回应。"
-    assert second.action == "confused"
+    assert second.reply == "收到，关于“你听见了吗”，豆豆继续陪你聊。"
+    assert second.action == "listen"
 
 
 def test_fast_reply_rotates_duplicate_recovery_reply():
@@ -231,8 +231,8 @@ def test_fast_reply_rotates_duplicate_recovery_reply():
     ]
 
     assert replies[0] == "豆豆把小爪子放在桌边陪你。"
-    assert replies[1] == "这次换个说法吧，豆豆想给你一点新鲜回应。"
-    assert replies[2] == "上一句太像啦，豆豆换个角度陪你聊。"
+    assert replies[1] == "收到，关于“第1句”，豆豆继续陪你聊。"
+    assert replies[2] == "收到，关于“第2句”，豆豆继续陪你聊。"
 
 
 def test_successful_voice_reply_does_not_claim_asr_failure():
@@ -258,7 +258,8 @@ def test_successful_voice_reply_does_not_claim_asr_failure():
     )
 
     assert "没听清" not in response.reply
-    assert response.reply == "我听到了，豆豆继续陪你聊。"
+    assert "听到了" not in response.reply
+    assert response.reply == "收到，关于“继续下一句”，豆豆继续陪你聊。"
     assert response.action == "listen"
 
 
@@ -286,7 +287,46 @@ def test_successful_voice_reply_does_not_use_generic_listening_loop_copy():
 
     assert "竖起耳朵" not in response.reply
     assert "慢慢说" not in response.reply
-    assert response.reply == "我听到了，豆豆继续陪你聊。"
+    assert response.reply == "收到，关于“你要直接回答我”，豆豆继续陪你聊。"
+
+
+def test_successful_voice_reply_repairs_passive_listening_copy():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+    replies = [
+        "嗯嗯，耳朵竖着呢，豆豆认真听。",
+        "那我可要假装没听见啦。",
+        "要不你再提示一下？",
+    ]
+
+    def misleading_reply(messages):
+        return {
+            "reply": replies.pop(0),
+            "mood": "thinking",
+            "action": "listen",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = misleading_reply
+
+    outputs = [
+        app.state.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_fast_reply",
+                "payload": {"user_text": text},
+            }
+        ).reply
+        for text in ["第一句", "第二句", "第三句"]
+    ]
+
+    forbidden = ("耳朵竖", "认真听", "假装没听见", "再提示")
+    assert all(not any(marker in reply for marker in forbidden) for reply in outputs)
+    assert outputs == [
+        "收到，关于“第一句”，豆豆继续陪你聊。",
+        "收到，关于“第二句”，豆豆继续陪你聊。",
+        "收到，关于“第三句”，豆豆继续陪你聊。",
+    ]
 
 
 def test_thinking_voice_reply_does_not_claim_asr_failure():
@@ -323,7 +363,7 @@ def test_thinking_voice_reply_does_not_claim_asr_failure():
 
     assert "没接准" not in response.reply
     assert "声音糊" not in response.reply
-    assert response.reply == "我听到了，豆豆继续陪你聊。"
+    assert response.reply == "收到，关于“继续下一句”，豆豆继续陪你聊。"
     assert response.action in ALLOWED_BEHAVIOR_ACTIONS
 
 
