@@ -44,6 +44,25 @@ PROVIDER_FALLBACK_REPLIES = (
     "豆豆刚刚反应慢了点，主人继续讲就好。",
 )
 
+SUCCESSFUL_VOICE_REPAIR_REPLIES = (
+    "我听到了，豆豆继续陪你聊。",
+    "嗯嗯，豆豆在认真听你说。",
+    "收到啦，豆豆换个方式回应你。",
+    "豆豆明白你的意思了，继续陪你。",
+    "好呀，豆豆接着陪你说下去。",
+)
+
+ASR_FAILURE_COPY_MARKERS = (
+    "没听清",
+    "没接准",
+    "声音有点糊",
+    "声音糊",
+    "没识别完整",
+    "听偏了",
+    "没接稳",
+    "没接住",
+)
+
 FAST_REPLY_REPEAT_SIMILARITY = 0.72
 
 _PROFILE_TO_GATE = {
@@ -123,6 +142,27 @@ def _dedupe_fast_reply(
         action="confused",
         voice_style=fast_action.voice_style,
     )
+
+
+def _is_successful_voice_event(event: Any) -> bool:
+    if getattr(event, "type", "") != "voice_message":
+        return False
+    payload = getattr(event, "payload", {}) or {}
+    return bool(str(payload.get("user_text") or "").strip())
+
+
+def _contains_asr_failure_copy(reply: str) -> bool:
+    text = str(reply or "")
+    return any(marker in text for marker in ASR_FAILURE_COPY_MARKERS)
+
+
+def _repair_successful_voice_reply(
+    reply: str,
+    cognition_context: Optional[Dict[str, Any]],
+) -> str:
+    if not _contains_asr_failure_copy(reply):
+        return reply
+    return _select_distinct_reply(SUCCESSFUL_VOICE_REPAIR_REPLIES, cognition_context)
 
 
 def _first_behavior_action(action: Any, mood: str) -> str:
@@ -516,6 +556,11 @@ class RuntimeDispatcher:
 
         if is_fast_reply:
             fast_action = guard_fast_reply_action(raw_action)
+            if _is_successful_voice_event(event):
+                fast_action.reply = _repair_successful_voice_reply(
+                    fast_action.reply,
+                    cognition_context,
+                )
             fast_action = _dedupe_fast_reply(
                 fast_action,
                 _dedupe_context_from_recent_events(
@@ -544,6 +589,11 @@ class RuntimeDispatcher:
                 max_reply_chars=self._max_reply_chars(active_brain),
                 event_type=event.type,
             )
+            if _is_successful_voice_event(event):
+                action.reply = _repair_successful_voice_reply(
+                    action.reply,
+                    cognition_context,
+                )
             if run:
                 run.final_action = {
                     "reply": action.reply[:200],

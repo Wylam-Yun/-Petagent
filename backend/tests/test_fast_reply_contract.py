@@ -235,6 +235,71 @@ def test_fast_reply_rotates_duplicate_recovery_reply():
     assert replies[2] == "上一句太像啦，豆豆换个角度陪你聊。"
 
 
+def test_successful_voice_reply_does_not_claim_asr_failure():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def misleading_reply(messages):
+        return {
+            "reply": "呜...刚才在数星星，没听清呢，能再说一遍吗？",
+            "mood": "thinking",
+            "action": "listen",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = misleading_reply
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "继续下一句"},
+        }
+    )
+
+    assert "没听清" not in response.reply
+    assert response.reply == "我听到了，豆豆继续陪你聊。"
+    assert response.action == "listen"
+
+
+def test_thinking_voice_reply_does_not_claim_asr_failure():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def misleading_reply(messages):
+        return {
+            "reply": "声音糊糊的，豆豆没接准。",
+            "mood": "concerned",
+            "face_type": "concerned",
+            "animation": "tilt",
+            "voice_style": "soft",
+            "vibration": "none",
+            "state_delta": {},
+            "state_affect": {
+                "interaction_tone": "comforting",
+                "pet_effort": "none",
+                "emotional_effect": "uncertain",
+                "reason": "test",
+            },
+            "memory_update": {"should_save": False, "content": ""},
+        }
+
+    provider.complete_json = misleading_reply
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_thinking",
+            "payload": {"user_text": "继续下一句", "thinking_mode": True},
+        }
+    )
+
+    assert "没接准" not in response.reply
+    assert "声音糊" not in response.reply
+    assert response.reply == "我听到了，豆豆继续陪你聊。"
+    assert response.action in ALLOWED_BEHAVIOR_ACTIONS
+
+
 def test_thinking_response_has_route():
     """Thinking mode PetResponse includes route='thinking'."""
     app = create_app(testing=True)
