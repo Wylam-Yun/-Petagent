@@ -71,6 +71,7 @@ export LD_PRELOAD="$REMOTE_HOME/../usr/lib/libtermux-exec-ld-preload.so"
 mkdir -p "\$remote_dir"
 cd "\$remote_dir"
 mkdir -p backend/data backend/secrets backend/static/audio logs
+rm -rf "\$remote_dir/backend/app" "\$remote_dir/config" "\$remote_dir/scripts" "\$remote_dir/frontend/dist"
 tar -xzf "\$archive" -C "\$remote_dir"
 find "\$remote_dir" -name '._*' -type f -delete 2>/dev/null || true
 chown "\$uid:\$uid" "\$remote_dir" backend frontend logs 2>/dev/null || true

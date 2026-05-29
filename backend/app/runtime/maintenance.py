@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 from app.runtime.memory_store import (
     DailySummaryStore,
@@ -13,9 +13,6 @@ from app.runtime.memory_store import (
     MaintenanceStateStore,
     SummaryJobStore,
 )
-
-if TYPE_CHECKING:
-    from app.runtime.backup import DatabaseBackupManager
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +47,6 @@ class MaintenanceService:
         episode_store: Any = None,
         config: Optional[Dict[str, Any]] = None,
         memory_card_manager: Any = None,
-        backup_manager: Optional["DatabaseBackupManager"] = None,
-        connection: Any = None,
         memory_judgment_queue: Any = None,
         notebook_manager: Any = None,
         nightly_cleanup_runner: Any = None,
@@ -68,8 +63,6 @@ class MaintenanceService:
         self.event_log_store = event_log_store
         self.episode_store = episode_store
         self.memory_card_manager = memory_card_manager
-        self.backup_manager = backup_manager
-        self.connection = connection
         self.memory_judgment_queue = memory_judgment_queue
         self.notebook_manager = notebook_manager
         self.nightly_cleanup_runner = nightly_cleanup_runner
@@ -79,12 +72,7 @@ class MaintenanceService:
         self.consolidation_enabled = cfg.get("consolidation_enabled", True)
         self.candidate_cleanup_days = cfg.get("candidate_cleanup_days", 7)
         self.job_cleanup_days = cfg.get("job_cleanup_days", 3)
-        self.wal_checkpoint_interval_seconds = cfg.get("wal_checkpoint_interval_seconds", 1800)
         self._running_lock = threading.Lock()
-        self._write_count = 0
-        self._last_wal_checkpoint_at: Optional[datetime] = None
-        self._wal_checkpoint_retry_after: Optional[datetime] = None
-        self._last_backup_date: Optional[str] = None
 
     def tick(self, force: bool = False) -> Dict[str, int]:
         """Run one small maintenance batch. Returns activity summary.
@@ -348,84 +336,3 @@ class MaintenanceService:
         if not self.memory_card_manager:
             return {"error": "no_card_manager"}
         return self.memory_card_manager.rebuild(reason)
-
-    def record_write(self) -> None:
-        """Increment write counter for WAL checkpoint scheduling."""
-        self._write_count += 1
-
-    def wal_checkpoint_if_due(self) -> bool:
-        """Run PASSIVE WAL checkpoint if due (time or write count).
-
-        Returns True if checkpoint was run.
-        """
-        now = datetime.utcnow()
-        retry_after = getattr(self, "_wal_checkpoint_retry_after", None)
-        if retry_after is not None and now < retry_after:
-            return False
-
-        time_due = False
-        if self._last_wal_checkpoint_at is None:
-            time_due = True
-        else:
-            elapsed = (now - self._last_wal_checkpoint_at).total_seconds()
-            time_due = elapsed >= self.wal_checkpoint_interval_seconds
-
-        write_due = self._write_count >= 100
-
-        if not time_due and not write_due:
-            return False
-
-        if self.connection is None:
-            return False
-
-        try:
-            with self.connection.locked():
-                raw = getattr(self.connection, "_connection", self.connection)
-                wal_row = raw.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
-                wal_bytes = int(wal_row[1]) if wal_row and len(wal_row) > 1 else 0
-            self._last_wal_checkpoint_at = now
-            self._wal_checkpoint_retry_after = None
-            self._write_count = 0
-            if wal_bytes > 0:
-                logger.info("WAL checkpoint: %d bytes", wal_bytes)
-            return True
-        except Exception:
-            self._wal_checkpoint_retry_after = now + timedelta(minutes=5)
-            logger.warning("WAL checkpoint failed", exc_info=True)
-            return False
-
-    def daily_backup_if_due(self) -> bool:
-        """Create a routine backup if not done today.
-
-        Returns True if backup was created.
-        """
-        if self.backup_manager is None:
-            return False
-
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        if self._last_backup_date == today:
-            return False
-
-        path = self.backup_manager.create_routine_backup()
-        if path:
-            self._last_backup_date = today
-            logger.info("Daily backup created: %s", path.name)
-            return True
-        return False
-
-    def wal_truncate_idle(self) -> bool:
-        """TRUNCATE WAL during idle/shutdown (only when no active writers).
-
-        Returns True if TRUNCATE was attempted.
-        """
-        if self.connection is None:
-            return False
-        try:
-            with self.connection.locked():
-                raw = getattr(self.connection, "_connection", self.connection)
-                raw.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            logger.info("WAL TRUNCATE completed")
-            return True
-        except Exception:
-            logger.warning("WAL TRUNCATE failed", exc_info=True)
-            return False

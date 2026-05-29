@@ -85,12 +85,17 @@ def test_termux_manager_can_clear_root_stale_lock():
     text = script.read_text()
     assert 'CHECK_INTERVAL="${CHECK_INTERVAL:-30}"' in text
     assert 'PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-45}"' in text
-    assert "PETAGENT_FOREGROUND=1 sh scripts/start.sh" in text
+    assert 'HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-2}"' in text
+    assert "HOST=0.0.0.0 PORT=\"$PETAGENT_PORT\" PETAGENT_FOREGROUND=0 sh scripts/start.sh" in text
+    assert "PETAGENT_FOREGROUND=1 sh scripts/start.sh" not in text
     assert "remove_stale_lock() {" in text
     assert "su -c \"rm -rf '$LOCK_DIR' 2>/dev/null\"" in text
     assert "remove_stale_lock || true" in text
     assert "Stopping foreign service manager process" in text
     assert "Manager lock points to non-manager pid" in text
+    assert "HTTP half-alive state persisted; restarting" in text
+    assert "orphan HTTP half-alive state persisted" in text
+    assert "http_fail_count=0" in text
 
 
 def test_start_script_supports_foreground_runtime_mode():
@@ -120,6 +125,7 @@ def test_nubia_deploy_excludes_heavy_runtime_artifacts():
     assert 'chown -R "$uid:$uid" "$remote_dir"' not in text
     assert "COPYFILE_DISABLE=1 tar" in text
     assert "--format=ustar" in text
+    assert 'rm -rf "\\$remote_dir/backend/app" "\\$remote_dir/config" "\\$remote_dir/scripts" "\\$remote_dir/frontend/dist"' in text
     assert "find \"\\$remote_dir\" -name '._*' -type f -delete" in text
     assert "adb-launched background processes do not stay alive reliably" in text
     assert 'START_SERVICES="${START_SERVICES:-1}"' not in text

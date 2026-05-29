@@ -84,9 +84,9 @@ def health_deep(request: Request) -> Dict[str, Any]:
     state_store = request.app.state.state_store
     dispatcher = request.app.state.dispatcher
 
-    # DB quick check
+    # DB quick check. Avoid WAL checkpoint here; on old Nubia devices it can
+    # lock under normal traffic and make diagnostics disturb the app.
     db_ok = True
-    wal_bytes = 0
     try:
         conn = state_store.connection
         raw = getattr(conn, "_connection", conn)
@@ -95,12 +95,6 @@ def health_deep(request: Request) -> Dict[str, Any]:
             db_ok = bool(row and row[0] == "ok")
         except Exception:
             db_ok = True  # Skip check if DB is locked (e.g. testing)
-        try:
-            wal_row = raw.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
-            if wal_row:
-                wal_bytes = int(wal_row[1]) if len(wal_row) > 1 else 0
-        except Exception:
-            pass
     except Exception as exc:
         db_ok = False
         logger.warning("deep health DB check failed: %s", exc)
@@ -137,7 +131,6 @@ def health_deep(request: Request) -> Dict[str, Any]:
     return {
         "ok": db_ok,
         "db_quick_check": db_ok,
-        "wal_bytes": wal_bytes,
         "core_ready": getattr(request.app.state, "core_ready", True),
         "providers_ready": getattr(request.app.state, "providers_ready", True),
         "event_loop_tick_age_s": round(_age_s(dispatcher.event_loop_tick), 1),

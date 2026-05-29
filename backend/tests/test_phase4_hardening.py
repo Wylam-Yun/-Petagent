@@ -219,8 +219,6 @@ def test_maintenance_worker_log_rotation(tmp_path):
 
     service = type("MockService", (), {
         "tick": lambda self: {},
-        "wal_checkpoint_if_due": lambda self: False,
-        "daily_backup_if_due": lambda self: False,
     })()
     worker = MaintenanceWorker(
         service,
@@ -245,8 +243,6 @@ def test_maintenance_worker_no_rotation_when_small(tmp_path):
 
     service = type("MockService", (), {
         "tick": lambda self: {},
-        "wal_checkpoint_if_due": lambda self: False,
-        "daily_backup_if_due": lambda self: False,
     })()
     worker = MaintenanceWorker(
         service,
@@ -267,8 +263,6 @@ def test_maintenance_worker_no_log_path():
 
     service = type("MockService", (), {
         "tick": lambda self: {},
-        "wal_checkpoint_if_due": lambda self: False,
-        "daily_backup_if_due": lambda self: False,
     })()
     worker = MaintenanceWorker(service, log_path=None)
     # Should not raise

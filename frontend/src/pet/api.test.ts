@@ -1,6 +1,7 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  VOICE_UPLOAD_TIMEOUT_MS,
   getAudioJob,
   getProactiveCheck,
   postAudioRetry,
@@ -10,6 +11,12 @@ import {
   uploadVoice
 } from "./api";
 import { getErrorBubble } from "./errorMessages";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("uploadVoice", () => {
   test("sends thinking mode as multipart form data", async () => {
@@ -46,7 +53,27 @@ describe("uploadVoice", () => {
       thinkingMode: false
     });
 
-    expect(timeouts).toContain(10_000);
+    expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.fast);
+  });
+
+  test("uses a full-chain timeout for thinking voice uploads", async () => {
+    const originalSetTimeout = window.setTimeout;
+    const timeouts: number[] = [];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, timeout?: number) => {
+      timeouts.push(Number(timeout));
+      return originalSetTimeout(handler, 0);
+    }) as typeof window.setTimeout);
+
+    await uploadVoice(new Blob(["voice"], { type: "audio/wav" }), {
+      thinkingMode: true
+    });
+
+    expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.thinking);
   });
 });
 
@@ -158,7 +185,6 @@ describe("sendTextChat", () => {
 
 describe("requestJson retry", () => {
   test("does not require AbortController in old Android browsers", async () => {
-    const originalAbortController = globalThis.AbortController;
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ active: false })
@@ -170,7 +196,23 @@ describe("requestJson retry", () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init).not.toHaveProperty("signal");
-    vi.stubGlobal("AbortController", originalAbortController);
+  });
+
+  test("times out fetch requests even when AbortController is missing", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockReturnValue(new Promise(() => undefined));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("AbortController", undefined);
+
+    const promise = uploadVoice(new Blob(["voice"], { type: "audio/wav" }), {
+      thinkingMode: false
+    });
+    const assertion = expect(promise).rejects.toThrow("request timeout");
+    await vi.advanceTimersByTimeAsync(VOICE_UPLOAD_TIMEOUT_MS.fast);
+
+    await assertion;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init).not.toHaveProperty("signal");
   });
 
   test("falls back to XMLHttpRequest when fetch is missing", async () => {

@@ -113,28 +113,10 @@ class MaintenanceWorker:
             except Exception:
                 logger.warning("Maintenance tick failed", exc_info=True)
 
-            # WAL checkpoint if due (every 30 min or 100 writes)
-            try:
-                self._service.wal_checkpoint_if_due()
-            except Exception:
-                logger.warning("WAL checkpoint failed", exc_info=True)
-
-            # Daily backup if due
-            try:
-                self._service.daily_backup_if_due()
-            except Exception:
-                logger.warning("Daily backup failed", exc_info=True)
-
             # Runtime log rotation
             try:
                 self._rotate_log()
             except Exception:
                 pass  # Best-effort
-
-        # Shutdown: TRUNCATE WAL (idle, no active writers)
-        try:
-            self._service.wal_truncate_idle()
-        except Exception:
-            logger.warning("WAL TRUNCATE on shutdown failed", exc_info=True)
 
         logger.info("Maintenance worker loop exited")

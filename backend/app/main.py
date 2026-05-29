@@ -55,7 +55,6 @@ from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.agent_run import AgentRunRegistry
 from app.runtime.agent_run_store import AgentRunStore
-from app.runtime.backup import DatabaseBackupManager
 from app.runtime.incident import IncidentStore
 from app.runtime.policy_guard import PolicyGuard
 from app.runtime.device import DeviceStateStore
@@ -262,11 +261,6 @@ def create_app(testing: bool = False) -> FastAPI:
         candidate_store=memory_candidate_store,
         timezone_name=cc_config.get("timezone", "Asia/Shanghai"),
     )
-    backup_dir = settings.data_dir / "backups"
-    backup_manager = DatabaseBackupManager(
-        connection=state_store.connection,
-        backup_dir=backup_dir,
-    )
     # V1.3: Nightly cleanup runner (provider_gate wired after creation)
     from app.runtime.nightly_cleanup import NightlyCleanupRunner
     nightly_cleanup_runner = NightlyCleanupRunner(
@@ -291,8 +285,6 @@ def create_app(testing: bool = False) -> FastAPI:
         episode_store=episode_manager,
         config=memory_config,
         memory_card_manager=memory_card_manager,
-        backup_manager=backup_manager,
-        connection=state_store.connection,
         memory_judgment_queue=memory_judgment_queue,
         notebook_manager=notebook_manager,
         nightly_cleanup_runner=nightly_cleanup_runner,

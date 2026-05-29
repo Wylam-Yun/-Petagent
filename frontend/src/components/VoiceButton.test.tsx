@@ -169,4 +169,26 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
     expect(onPhaseChange).toHaveBeenCalledWith("listening");
   });
+
+  test("shows a recoverable message when voice upload times out", async () => {
+    const onError = vi.fn();
+    render(
+      <VoiceButton
+        disabled={false}
+        phase="idle"
+        recorderFactory={recorderFactory()}
+        thinkingMode={false}
+        uploadVoice={vi.fn().mockRejectedValue(new Error("request timeout"))}
+        onError={onError}
+        onPhaseChange={vi.fn()}
+        onVoiceResponse={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+    await waitFor(() => screen.getByRole("button", { name: "点一下发送" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("豆豆还在路上卡住了，再点一下试试。"));
+  });
 });

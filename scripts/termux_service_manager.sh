@@ -21,7 +21,8 @@ PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
 PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
 FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"
 STUCK_MAX="${STUCK_MAX:-3}"
-MANAGER_VERSION="stale-lock-recovery-20260528"
+HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-2}"
+MANAGER_VERSION="http-half-alive-recovery-20260529"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -341,7 +342,7 @@ start_petagent() {
     log "Starting PetAgent runtime"
     (
         cd "$PETAGENT_DIR" || exit 1
-        HOST=0.0.0.0 PORT="$PETAGENT_PORT" PETAGENT_FOREGROUND=1 sh scripts/start.sh
+        HOST=0.0.0.0 PORT="$PETAGENT_PORT" PETAGENT_FOREGROUND=0 sh scripts/start.sh
     ) >> "$PETAGENT_LOG" 2>&1
 
     if petagent_health; then
@@ -357,11 +358,6 @@ start_petagent() {
     if petagent_within_startup_grace; then
         age="$(petagent_pid_age)"
         log "PetAgent runtime is still starting (${age}s); waiting"
-        return 0
-    fi
-
-    if petagent_process_alive && petagent_port_listening; then
-        log "PetAgent HTTP health is not ready, but process and port are alive; leaving it running"
         return 0
     fi
 
@@ -396,6 +392,7 @@ main() {
     proxy_fail_count=0
     stuck_count=0
     su_fail_count=0
+    http_fail_count=0
     last_su_check="$(date +%s 2>/dev/null || echo 0)"
 
     while true; do
@@ -454,16 +451,32 @@ main() {
         case "$petagent_rc" in
             0)
                 petagent_fail_count=0
+                http_fail_count=0
                 ;;
             1)
                 if petagent_start_in_progress; then
                     log "PetAgent start is already in progress; waiting"
+                    http_fail_count=0
                     petagent_fail_count=0
                 elif petagent_port_listening; then
-                    log "PetAgent pid file is stale or missing, but port $PETAGENT_PORT is listening; leaving runtime untouched"
-                    petagent_fail_count=0
+                    if petagent_health; then
+                        log "PetAgent pid file is stale or missing, but port $PETAGENT_PORT is healthy; leaving runtime untouched"
+                        http_fail_count=0
+                        petagent_fail_count=0
+                    else
+                        http_fail_count=$((http_fail_count + 1))
+                        log "PetAgent pid file is missing and port $PETAGENT_PORT is HTTP half-alive ($http_fail_count/$HTTP_FAIL_MAX)"
+                        if [ "$http_fail_count" -ge "$HTTP_FAIL_MAX" ]; then
+                            http_fail_count=0
+                            log "CRITICAL: PetAgent orphan HTTP half-alive state persisted; attempting runtime restart"
+                            cleanup_duplicate_runtimes ""
+                            start_petagent || log "CRITICAL: PetAgent restart failed while orphan HTTP was half-alive"
+                        fi
+                        petagent_fail_count=0
+                    fi
                 else
                     log "PetAgent process not running; starting runtime"
+                    http_fail_count=0
                     if start_petagent; then
                         petagent_fail_count=0
                     else
@@ -473,6 +486,7 @@ main() {
                 fi
                 ;;
             2)
+                http_fail_count=0
                 if petagent_within_startup_grace; then
                     age="$(petagent_pid_age)"
                     log "PetAgent process is still within startup grace (${age}s); waiting for port"
@@ -490,7 +504,17 @@ main() {
                 petagent_fail_count=0
                 ;;
             3)
-                log "PetAgent HTTP health failed, but process and port are alive; keeping runtime"
+                http_fail_count=$((http_fail_count + 1))
+                log "PetAgent HTTP health failed while process and port are alive ($http_fail_count/$HTTP_FAIL_MAX)"
+                if [ "$http_fail_count" -ge "$HTTP_FAIL_MAX" ]; then
+                    http_fail_count=0
+                    pid="$(petagent_pid)"
+                    log "CRITICAL: PetAgent HTTP half-alive state persisted; restarting pid ${pid:-unknown}"
+                    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+                    sleep 2
+                    [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
+                    start_petagent || log "CRITICAL: PetAgent restart failed while HTTP was half-alive"
+                fi
                 petagent_fail_count=0
                 ;;
             *)

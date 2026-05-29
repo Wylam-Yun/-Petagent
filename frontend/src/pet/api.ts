@@ -11,6 +11,11 @@ import type {
   VoiceChatResponse
 } from "./types";
 
+export const VOICE_UPLOAD_TIMEOUT_MS = {
+  fast: 30_000,
+  thinking: 60_000
+} as const;
+
 async function requestJson<T>(url: string, init?: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
   const maxRetries = 2;
   const timeoutMs = options.timeoutMs ?? 8_000;
@@ -61,14 +66,26 @@ async function requestWithFetch(
   timeoutMs: number
 ): Promise<JsonTransportResponse> {
   const controller = createAbortController();
-  const timer = controller
-    ? window.setTimeout(() => controller.abort(), timeoutMs)
-    : null;
+  let timedOut = false;
+  let timer: number | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      timedOut = true;
+      controller?.abort();
+      reject(new Error("request timeout"));
+    }, timeoutMs);
+  });
   try {
-    return await fetch(url, {
-      ...init,
-      ...(controller ? { signal: controller.signal } : {})
-    });
+    return await Promise.race([
+      fetch(url, {
+        ...init,
+        ...(controller ? { signal: controller.signal } : {})
+      }),
+      timeout
+    ]);
+  } catch (err) {
+    if (timedOut) throw new Error("request timeout");
+    throw err;
   } finally {
     if (timer !== null) window.clearTimeout(timer);
   }
@@ -185,7 +202,7 @@ export function uploadVoice(
       method: "POST",
       body: formData
     },
-    { timeoutMs: options.thinkingMode ? 20_000 : 10_000 }
+    { timeoutMs: options.thinkingMode ? VOICE_UPLOAD_TIMEOUT_MS.thinking : VOICE_UPLOAD_TIMEOUT_MS.fast }
   );
 }
 

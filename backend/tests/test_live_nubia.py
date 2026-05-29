@@ -170,7 +170,6 @@ def test_08_debug_runs_and_incidents_with_token():
 def test_09_deep_health_with_token():
     data = _get("/api/health/deep", token=True, timeout=15)
     assert "db_quick_check" in data
-    assert "wal_bytes" in data
     assert "provider_inflight_age_s" in data
     assert "probes" in data
 
