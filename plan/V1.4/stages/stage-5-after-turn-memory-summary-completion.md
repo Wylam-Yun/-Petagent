@@ -1,7 +1,7 @@
 # V1.4 Stage 5 Completion: After-Turn Memory Summarization
 
 **Date:** 2026-05-29
-**Commit:** pending at time of writing
+**Commit:** `0bf8688`
 
 ## Result
 

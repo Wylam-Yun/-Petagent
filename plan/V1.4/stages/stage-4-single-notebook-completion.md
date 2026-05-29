@@ -1,7 +1,7 @@
 # V1.4 Stage 4 Completion: Single Notebook Migration And Selection
 
 **Date:** 2026-05-29
-**Commit:** pending at time of writing
+**Commit:** `41e05ea`
 
 ## Result
 
