@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -165,6 +166,11 @@ def create_app(testing: bool = False) -> FastAPI:
     maintenance_state = MaintenanceStateStore(state_store.connection)
 
     memory_cards_config = settings.app_config.get("memory_cards", {})
+    if testing:
+        test_memory_cards_dir = Path(tempfile.mkdtemp(prefix="petagent-memory-cards-"))
+        memory_cards_config = dict(memory_cards_config)
+        memory_cards_config["user_preferences_path"] = str(test_memory_cards_dir / "user.md")
+        memory_cards_config["momo_memories_path"] = str(test_memory_cards_dir / "memory.md")
     memory_card_manager = None
     if memory_cards_config.get("enabled", True):
         # Resolve relative card paths against project_root (P1 fix)
