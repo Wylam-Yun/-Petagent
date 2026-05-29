@@ -1,5 +1,6 @@
 export const MIN_RECORDING_MS = 300;
 export const MAX_RECORDING_MS = 15_000;
+const ASR_WAV_SAMPLE_RATE = 16_000;
 
 export class RecordingTooShortError extends Error {
   constructor() {
@@ -309,8 +310,10 @@ function stopStream(stream: MediaStream) {
   stream.getTracks().forEach((track) => track.stop());
 }
 
-function encodeWavBlob(chunks: Float32Array[], sampleRate: number): Blob {
-  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+function encodeWavBlob(chunks: Float32Array[], sourceSampleRate: number): Blob {
+  const samples = resamplePcm(flattenChunks(chunks), sourceSampleRate, ASR_WAV_SAMPLE_RATE);
+  const sampleRate = ASR_WAV_SAMPLE_RATE;
+  const sampleCount = samples.length;
   const buffer = new ArrayBuffer(44 + sampleCount * 2);
   const view = new DataView(buffer);
   writeString(view, 0, "RIFF");
@@ -328,19 +331,49 @@ function encodeWavBlob(chunks: Float32Array[], sampleRate: number): Blob {
   view.setUint32(40, sampleCount * 2, true);
 
   let offset = 44;
-  chunks.forEach((chunk) => {
-    for (let index = 0; index < chunk.length; index += 1) {
-      const sample = Math.max(-1, Math.min(1, chunk[index]));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += 2;
-    }
-  });
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += 2;
+  }
 
   return new Blob([buffer], { type: "audio/wav" });
 }
 
 function normalizedSampleRate(sampleRate: number): number {
-  return Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 48000;
+  return Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : ASR_WAV_SAMPLE_RATE;
+}
+
+function flattenChunks(chunks: Float32Array[]): Float32Array {
+  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const samples = new Float32Array(sampleCount);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return samples;
+}
+
+function resamplePcm(
+  samples: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate: number
+): Float32Array {
+  if (!samples.length || sourceSampleRate === targetSampleRate) {
+    return samples;
+  }
+  const ratio = sourceSampleRate / targetSampleRate;
+  const targetLength = Math.max(1, Math.round(samples.length / ratio));
+  const output = new Float32Array(targetLength);
+  for (let index = 0; index < targetLength; index += 1) {
+    const sourceIndex = index * ratio;
+    const leftIndex = Math.floor(sourceIndex);
+    const rightIndex = Math.min(leftIndex + 1, samples.length - 1);
+    const weight = sourceIndex - leftIndex;
+    output[index] = samples[leftIndex] * (1 - weight) + samples[rightIndex] * weight;
+  }
+  return output;
 }
 
 function writeString(view: DataView, offset: number, value: string) {

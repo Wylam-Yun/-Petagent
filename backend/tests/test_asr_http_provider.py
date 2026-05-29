@@ -332,7 +332,7 @@ def test_http_asr_does_not_retry_bad_json(tmp_path: Path, monkeypatch):
     assert transcript.error_code == "asr_bad_response"
 
 
-def test_timeout_tuple_keeps_total_under_scalar(tmp_path: Path, monkeypatch):
+def test_timeout_tuple_reserves_more_time_for_asr_read(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
     config = provider_config()
@@ -356,4 +356,4 @@ def test_timeout_tuple_keeps_total_under_scalar(tmp_path: Path, monkeypatch):
 
     HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert captured["timeout"] == (3, 3)
+    assert captured["timeout"] == (2, 4)

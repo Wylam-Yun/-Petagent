@@ -10,7 +10,7 @@ from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
 
-def _timeout_tuple(scalar: int, connect: int = 3) -> tuple:
+def _timeout_tuple(scalar: int, connect: int = 2) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
     scalar = max(1, int(scalar))
     connect_timeout = min(connect, scalar)
