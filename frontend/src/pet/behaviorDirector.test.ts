@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { BehaviorDirector } from "./behaviorDirector";
+import {
+  BehaviorDirector,
+  FAST_ACTION_MIN_VISIBLE_MS,
+} from "./behaviorDirector";
 
 describe("BehaviorDirector", () => {
   let dir: BehaviorDirector;
@@ -40,12 +43,12 @@ describe("BehaviorDirector", () => {
 
     it("does not interrupt protected listening phase", () => {
       const out = dir.onTap(1000, "listening");
-      expect(out.visibleAction).toBe("waiting"); // phase-mapped, not waving
+      expect(out.visibleAction).toBe("listen"); // phase-mapped, not waving
     });
 
     it("does not interrupt speaking phase", () => {
       const out = dir.onTap(1000, "speaking");
-      expect(out.visibleAction).toBe("review");
+      expect(out.visibleAction).toBe("speak");
     });
 
     it("allows overpoke bubble during protected phase", () => {
@@ -110,17 +113,31 @@ describe("BehaviorDirector", () => {
   describe("onPhaseChange", () => {
     it("maps listening to waiting", () => {
       const out = dir.onPhaseChange("listening");
-      expect(out.visibleAction).toBe("waiting");
+      expect(out.visibleAction).toBe("listen");
     });
 
     it("maps thinking to review", () => {
       const out = dir.onPhaseChange("thinking");
-      expect(out.visibleAction).toBe("review");
+      expect(out.visibleAction).toBe("think");
     });
 
     it("maps error to failed", () => {
       const out = dir.onPhaseChange("error");
-      expect(out.visibleAction).toBe("failed");
+      expect(out.visibleAction).toBe("confused");
+    });
+
+    it("preserves fast action during immediate waiting_voice", () => {
+      dir.onBackendResponse({ action: "happy", reply: "早呀" }, "idle", 1000);
+      const out = dir.onPhaseChange("waiting_voice", 1001);
+      expect(out.visibleAction).toBe("happy");
+      expect(dir.isFastActionHoldActive(1000 + FAST_ACTION_MIN_VISIBLE_MS - 1)).toBe(true);
+    });
+
+    it("uses think after fast action hold expires", () => {
+      dir.onBackendResponse({ action: "happy", reply: "早呀" }, "idle", 1000);
+      expect(dir.isFastActionHoldActive(1000 + FAST_ACTION_MIN_VISIBLE_MS + 1)).toBe(false);
+      const out = dir.onPhaseChange("waiting_voice", 1000 + FAST_ACTION_MIN_VISIBLE_MS + 1);
+      expect(out.visibleAction).toBe("think");
     });
 
     it("clears queued steps on phase change", () => {
@@ -226,10 +243,11 @@ describe("BehaviorDirector", () => {
   describe("phaseToAction", () => {
     it("maps phases to actions", () => {
       expect(BehaviorDirector.phaseToAction("idle")).toBe("idle");
-      expect(BehaviorDirector.phaseToAction("listening")).toBe("waiting");
-      expect(BehaviorDirector.phaseToAction("thinking")).toBe("review");
-      expect(BehaviorDirector.phaseToAction("speaking")).toBe("review");
-      expect(BehaviorDirector.phaseToAction("error")).toBe("failed");
+      expect(BehaviorDirector.phaseToAction("listening")).toBe("listen");
+      expect(BehaviorDirector.phaseToAction("thinking")).toBe("think");
+      expect(BehaviorDirector.phaseToAction("waiting_voice")).toBe("think");
+      expect(BehaviorDirector.phaseToAction("speaking")).toBe("speak");
+      expect(BehaviorDirector.phaseToAction("error")).toBe("confused");
     });
   });
 

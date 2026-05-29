@@ -100,6 +100,7 @@ export function DoudouSprite({
           fontSize: 48,
         }}
         aria-label="豆豆"
+        data-action={action}
         onClick={handleClick}
       >
         (=^-^=)
@@ -116,6 +117,7 @@ export function DoudouSprite({
           height: manifest.cellHeight,
         }}
         aria-label="豆豆"
+        data-action={action}
       />
     );
   }
@@ -125,6 +127,7 @@ export function DoudouSprite({
       className="doudou-sprite"
       role="img"
       aria-label="豆豆"
+      data-action={action}
       style={{
         width: manifest.cellWidth,
         height: manifest.cellHeight,

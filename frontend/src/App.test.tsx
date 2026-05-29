@@ -230,6 +230,82 @@ describe("text chat", () => {
       thinking_mode: false
     });
   });
+
+  test("fast action remains visible before waiting voice fallback", async () => {
+    const petStateResponse = {
+      schema_version: "0.1",
+      name: "豆豆",
+      mood: "idle",
+      energy: 72,
+      intimacy: 40,
+      hunger: 30,
+      cleanliness: 85,
+      loneliness: 35,
+      sleepiness: 15,
+      mode: "idle"
+    };
+
+    const textChatResponse = {
+      reply: "早呀，豆豆伸个懒腰。",
+      mood: "happy",
+      face_type: "happy",
+      animation: "bounce",
+      vibration: "none",
+      voice_url: null,
+      audio_job_id: "aud-fast-action",
+      action: "happy",
+      user_text: "早上好",
+      text_route: {
+        selected: "fast_reply",
+        thinking_mode: false,
+        brain_provider: "test",
+        timings_ms: {}
+      },
+      pet_state: { ...petStateResponse, mood: "happy" as const },
+      runtime: { event_id: "evt-text", skills_used: [] }
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 2000, audio_progressive: {}, pet_name: "豆豆" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => textChatResponse })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          job_id: "aud-fast-action",
+          status: "pending",
+          voice_url: null,
+          error: null,
+          created_at: "now",
+          updated_at: "now"
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await flush();
+
+    fireEvent.change(screen.getByPlaceholderText("输入一句话……"), { target: { value: "早上好" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    const sprite = screen.getAllByLabelText("豆豆").find(
+      (el) => el.getAttribute("role") === "img"
+    ) as HTMLElement;
+    expect(sprite.dataset.action).toBe("happy");
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/audio/jobs/aud-fast-action")).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+
+    expect(sprite.dataset.action).toBe("think");
+  });
 });
 
 test("mic tap during speaking stops current audio and starts a new recording", async () => {

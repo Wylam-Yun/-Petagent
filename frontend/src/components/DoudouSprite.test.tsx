@@ -41,6 +41,7 @@ describe("DoudouSprite", () => {
     const sprite = screen.getByRole("img", { name: "豆豆" });
     expect((sprite as HTMLElement).style.width).toBe("192px");
     expect((sprite as HTMLElement).style.height).toBe("208px");
+    expect((sprite as HTMLElement).dataset.action).toBe("idle");
   });
 
   it("renders with spritesheet background image", async () => {
@@ -138,6 +139,7 @@ describe("DoudouSprite", () => {
 
     // Should be at frame 0 of waving (row 3)
     expect((sprite as HTMLElement).style.backgroundPosition).toBe("0px -624px");
+    expect((sprite as HTMLElement).dataset.action).toBe("waving");
   });
 
   it("shows fallback when asset fails to load", async () => {

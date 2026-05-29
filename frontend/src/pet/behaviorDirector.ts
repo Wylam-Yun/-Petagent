@@ -21,6 +21,7 @@ const OVERPOKE_COOLDOWN_MS = 4000;
 const AMBIENT_MIN_MS = 20000;
 const AMBIENT_MAX_MS = 45000;
 const AMBIENT_COOLDOWN_MS = 15000;
+export const FAST_ACTION_MIN_VISIBLE_MS = 600;
 
 const AMBIENT_ACTIONS: DoudouAction[] = [
   "idle",
@@ -66,12 +67,12 @@ const PROTECTED_PHASES: Set<string> = new Set([
 
 const PHASE_SPRITE_MAP: Record<string, DoudouAction> = {
   idle: "idle",
-  listening: "waiting",
-  thinking: "review",
-  waiting_voice: "review",
-  speaking: "review",
-  audio_error: "failed",
-  error: "failed",
+  listening: "listen",
+  thinking: "think",
+  waiting_voice: "think",
+  speaking: "speak",
+  audio_error: "confused",
+  error: "confused",
 };
 
 function pick<T>(arr: T[]): T {
@@ -85,6 +86,12 @@ export class BehaviorDirector {
   private nextAmbientAt = 0;
   private queuedSteps: DoudouBehaviorStep[] = [];
   private currentSlot: DoudouBehaviorSlot | null = null;
+  private heldFastAction: DoudouAction | null = null;
+  private heldFastActionUntil = 0;
+
+  isFastActionHoldActive(now = Date.now()): boolean {
+    return !!this.heldFastAction && now < this.heldFastActionUntil;
+  }
 
   /** Handle a tap on Doudou. Returns immediate local reaction. */
   onTap(now: number, phase: PetUIPhase): DirectorOutput {
@@ -133,11 +140,14 @@ export class BehaviorDirector {
       reply?: string;
     },
     phase: PetUIPhase,
+    now = Date.now(),
   ): DirectorOutput {
     // Fast Reply: single action takes priority
     if (response.action && isValidDoudouAction(response.action)) {
+      this.heldFastAction = response.action as DoudouAction;
+      this.heldFastActionUntil = now + FAST_ACTION_MIN_VISIBLE_MS;
       return {
-        visibleAction: response.action as DoudouAction,
+        visibleAction: this.heldFastAction,
         bubbleText: response.reply ?? null,
       };
     }
@@ -163,10 +173,32 @@ export class BehaviorDirector {
   }
 
   /** Called when a phase transition occurs. */
-  onPhaseChange(phase: PetUIPhase): DirectorOutput {
+  onPhaseChange(phase: PetUIPhase, now = Date.now()): DirectorOutput {
     // For audio playback phases, preserve the behavior plan queue
     // so advanceSlot can consume it at the right boundaries.
-    if (phase === "waiting_voice" || phase === "speaking") {
+    if (phase === "waiting_voice") {
+      if (this.isFastActionHoldActive(now)) {
+        return {
+          visibleAction: this.heldFastAction ?? "idle",
+          bubbleText: null,
+        };
+      }
+      this.heldFastAction = null;
+      this.heldFastActionUntil = 0;
+      return {
+        visibleAction: PHASE_SPRITE_MAP[phase] ?? "idle",
+        bubbleText: null,
+      };
+    }
+    if (phase === "speaking") {
+      if (this.isFastActionHoldActive(now)) {
+        return {
+          visibleAction: this.heldFastAction ?? "idle",
+          bubbleText: null,
+        };
+      }
+      this.heldFastAction = null;
+      this.heldFastActionUntil = 0;
       return {
         visibleAction: PHASE_SPRITE_MAP[phase] ?? "idle",
         bubbleText: null,
@@ -176,6 +208,8 @@ export class BehaviorDirector {
     if (PROTECTED_PHASES.has(phase) || phase === "audio_error" || phase === "error") {
       this.queuedSteps = [];
       this.currentSlot = null;
+      this.heldFastAction = null;
+      this.heldFastActionUntil = 0;
       return {
         visibleAction: PHASE_SPRITE_MAP[phase] ?? "idle",
         bubbleText: null,
@@ -241,5 +275,7 @@ export class BehaviorDirector {
     this.nextAmbientAt = 0;
     this.queuedSteps = [];
     this.currentSlot = null;
+    this.heldFastAction = null;
+    this.heldFastActionUntil = 0;
   }
 }

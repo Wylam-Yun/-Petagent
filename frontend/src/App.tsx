@@ -24,7 +24,10 @@ import {
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
-import { BehaviorDirector } from "./pet/behaviorDirector";
+import {
+  BehaviorDirector,
+  FAST_ACTION_MIN_VISIBLE_MS,
+} from "./pet/behaviorDirector";
 import { detectActivationIntent } from "./pet/activation";
 import { getErrorBubble } from "./pet/errorMessages";
 import { shouldApplyProactive } from "./pet/proactive";
@@ -92,11 +95,27 @@ function App() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
   const audioRunRef = useRef(0);
+  const phaseRef = useRef<PetUIPhase>("idle");
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentPlaybackRef = useRef<PlaybackController | null>(null);
+  const fastActionHoldTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const directorRef = useRef(new BehaviorDirector());
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
+
+  function setPetPhase(nextPhase: PetUIPhase) {
+    phaseRef.current = nextPhase;
+    setPhase(nextPhase);
+  }
+
+  const clearFastActionHoldTimer = useCallback(() => {
+    if (fastActionHoldTimerRef.current) {
+      window.clearTimeout(fastActionHoldTimerRef.current);
+      fastActionHoldTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearFastActionHoldTimer, [clearFastActionHoldTimer]);
 
   useEffect(() => {
     let alive = true;
@@ -228,12 +247,42 @@ function App() {
 
   const handleOneShotComplete = useCallback((action: DoudouAction) => {
     // Return to phase-appropriate action after one-shot
-    if (phase === "listening" || phase === "waiting_voice" || phase === "speaking") {
-      setDoudouAction(BehaviorDirector.phaseToAction(phase));
+    const currentPhase = phaseRef.current;
+    if (currentPhase === "listening" || currentPhase === "waiting_voice" || currentPhase === "speaking") {
+      if (directorRef.current.isFastActionHoldActive()) return;
+      setDoudouAction(BehaviorDirector.phaseToAction(currentPhase));
     } else {
       setDoudouAction("idle");
     }
-  }, [phase]);
+  }, []);
+
+  function applyPhaseAction(nextPhase: PetUIPhase) {
+    const out = directorRef.current.onPhaseChange(nextPhase);
+    setDoudouAction(out.visibleAction);
+    return out;
+  }
+
+  function applySpeechPhaseAction(slotAction?: DoudouAction) {
+    if (slotAction) {
+      clearFastActionHoldTimer();
+      setDoudouAction(slotAction);
+    } else if (!directorRef.current.isFastActionHoldActive()) {
+      setDoudouAction(BehaviorDirector.phaseToAction("speaking"));
+    }
+  }
+
+  function scheduleFastActionHoldRelease(runId: number) {
+    clearFastActionHoldTimer();
+    fastActionHoldTimerRef.current = window.setTimeout(() => {
+      fastActionHoldTimerRef.current = null;
+      if (audioRunRef.current !== runId) return;
+      setDoudouAction(
+        BehaviorDirector.phaseToAction(
+          phaseRef.current === "speaking" ? "speaking" : "waiting_voice",
+        ),
+      );
+    }, FAST_ACTION_MIN_VISIBLE_MS);
+  }
 
   async function handlePetEvent(interaction: InteractionDefinition) {
     const event = interaction.event_id;
@@ -282,6 +331,7 @@ function App() {
         reply: response.reply,
       },
       phase,
+      Date.now(),
     );
     setDoudouAction(out.visibleAction);
     if (out.bubbleText) setBubbleText(out.bubbleText);
@@ -298,24 +348,28 @@ function App() {
   async function playResponseAudio(response: PetResponse) {
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
+    clearFastActionHoldTimer();
 
     try {
       if (response.audio_job_id) {
         setLastAudioJobId(response.audio_job_id);
-        setPhase("waiting_voice");
+        setPetPhase("waiting_voice");
+        applyPhaseAction("waiting_voice");
+        if (response.action) scheduleFastActionHoldRelease(runId);
         const beforeOut = directorRef.current.advanceSlot("before_speech");
         if (beforeOut) setDoudouAction(beforeOut.visibleAction);
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
           setLastAudioJobId(null);
-          setPhase("speaking");
+          setPetPhase("speaking");
+          applyPhaseAction("speaking");
           setBubbleText("豆豆在说…");
           const speechOut = directorRef.current.advanceSlot("speech");
-          setDoudouAction(speechOut?.visibleAction ?? "review");
+          applySpeechPhaseAction(speechOut?.visibleAction);
           await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
-            setPhase("idle");
+            setPetPhase("idle");
             setBubbleText("豆豆说完啦。");
             const afterOut = directorRef.current.advanceSlot("after_speech");
             setDoudouAction(afterOut?.visibleAction ?? "idle");
@@ -326,13 +380,15 @@ function App() {
       }
 
       if (response.voice_url) {
-        setPhase("speaking");
+        setPetPhase("speaking");
+        applyPhaseAction("speaking");
+        if (response.action) scheduleFastActionHoldRelease(runId);
         setBubbleText("豆豆在说…");
         const speechOut = directorRef.current.advanceSlot("speech");
-        setDoudouAction(speechOut?.visibleAction ?? "review");
+        applySpeechPhaseAction(speechOut?.visibleAction);
         await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
-          setPhase("idle");
+          setPetPhase("idle");
           setBubbleText("豆豆说完啦。");
           const afterOut = directorRef.current.advanceSlot("after_speech");
           setDoudouAction(afterOut?.visibleAction ?? "idle");
@@ -340,16 +396,19 @@ function App() {
         return;
       }
 
-      setPhase("idle");
+      setPetPhase("idle");
     } catch (error) {
       if (audioRunRef.current !== runId) return;
       const errBubble = getErrorBubble(errorClassForAudioError(error));
-      setPhase("audio_error");
+      setPetPhase("audio_error");
       setFaceType(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
-      setDoudouAction("failed");
+      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
     } finally {
+      if (audioRunRef.current === runId) {
+        clearFastActionHoldTimer();
+      }
       if (audioRunRef.current === runId) {
         setBusy(false);
       }
@@ -392,11 +451,12 @@ function App() {
   async function handleRetryAudio() {
     if (!lastAudioJobId || busy) return;
     setBusy(true);
-    setPhase("waiting_voice");
+    setPetPhase("waiting_voice");
     setBubbleText("豆豆再试试…");
-    setDoudouAction("review");
+    applyPhaseAction("waiting_voice");
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
+    clearFastActionHoldTimer();
     try {
       const { new_job_id } = await postAudioRetry(lastAudioJobId);
       if (audioRunRef.current !== runId) return;
@@ -406,30 +466,31 @@ function App() {
       if (!job || audioRunRef.current !== runId) return;
       if (job.voice_url) {
         setLastAudioJobId(null);
-        setPhase("speaking");
+        setPetPhase("speaking");
+        applyPhaseAction("speaking");
         setBubbleText("豆豆在说…");
-        setDoudouAction("review");
+        setDoudouAction(BehaviorDirector.phaseToAction("speaking"));
         await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
-          setPhase("idle");
+          setPetPhase("idle");
           setBubbleText("豆豆说完啦。");
           setDoudouAction("idle");
         }
       } else {
         const errBubble = getErrorBubble(job.error_class);
-        setPhase("audio_error");
+        setPetPhase("audio_error");
         setBubbleText(errBubble.text);
-        setDoudouAction("failed");
+        setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
         setLastAudioJobId(null);
       }
     } catch (error) {
       if (audioRunRef.current !== runId) return;
       const errBubble = getErrorBubble(errorClassForAudioError(error));
-      setPhase("audio_error");
+      setPetPhase("audio_error");
       setFaceType(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
-      setDoudouAction("failed");
+      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
       if (error instanceof AudioJobError && error.status === "superseded") {
         setLastAudioJobId(null);
       }
@@ -446,7 +507,7 @@ function App() {
       setFaceType(errBubble.mood);
       setAnimation("slowBlink");
       setBubbleText(errBubble.text);
-      setDoudouAction("failed");
+      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
       return;
     }
 
@@ -492,8 +553,8 @@ function App() {
   }
 
   function handleVoicePhase(nextPhase: PetUIPhase) {
-    setPhase(nextPhase);
-    const out = directorRef.current.onPhaseChange(nextPhase);
+    setPetPhase(nextPhase);
+    const out = applyPhaseAction(nextPhase);
     setDoudouAction(out.visibleAction);
 
     if (nextPhase === "listening") {
@@ -532,6 +593,7 @@ function App() {
     }
     currentPlaybackRef.current?.stop();
     currentPlaybackRef.current = null;
+    clearFastActionHoldTimer();
     setBusy(false);
     setLastAudioJobId(null);
   }
