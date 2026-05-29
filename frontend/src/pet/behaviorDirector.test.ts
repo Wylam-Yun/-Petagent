@@ -222,21 +222,61 @@ describe("BehaviorDirector", () => {
 
     it("returns null during cooldown after user interaction", () => {
       dir.onTap(1000, "idle");
-      expect(dir.onAmbientTick(5000, "idle", false, true)).toBeNull();
+      expect(dir.onAmbientTick(50000, "idle", false, true)).toBeNull();
     });
 
-    it("fires after cooldown and scheduled time", () => {
-      // No user interaction, so cooldown is 0
-      const out = dir.onAmbientTick(50000, "idle", false, true);
+    it("does not fire immediately on first idle tick", () => {
+      expect(dir.onAmbientTick(50000, "idle", false, true)).toBeNull();
+    });
+
+    it("fires short idle activity after threshold", () => {
+      dir.onAmbientTick(1000, "idle", false, true);
+      const out = dir.onAmbientTick(62000, "idle", false, true);
       expect(out).not.toBeNull();
-      expect(out!.visibleAction).toBeTruthy();
+      expect(["lazy_idle", "self_groom", "wander"]).toContain(out!.visibleAction);
     });
 
     it("returns null before scheduled ambient time", () => {
       // First tick sets the schedule
-      dir.onAmbientTick(50000, "idle", false, true);
+      dir.onAmbientTick(1000, "idle", false, true);
+      dir.onAmbientTick(62000, "idle", false, true);
       // Second tick immediately after should not fire
-      expect(dir.onAmbientTick(50001, "idle", false, true)).toBeNull();
+      expect(dir.onAmbientTick(62001, "idle", false, true)).toBeNull();
+    });
+
+    it("allows long idle activities after long threshold", () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.999;
+      try {
+        dir.onAmbientTick(1000, "idle", false, true);
+        const out = dir.onAmbientTick(302000, "idle", false, true);
+        expect(["nap", "sneak_eat", "watch_tv"]).toContain(out!.visibleAction);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it("returns interruption reaction for last idle activity", () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.999;
+      try {
+        dir.onAmbientTick(1000, "idle", false, true);
+        const idleOut = dir.onAmbientTick(302000, "idle", false, true);
+        expect(idleOut!.visibleAction).toBe("watch_tv");
+        const tapOut = dir.onTap(303000, "idle");
+        expect(tapOut.visibleAction).toBe("pretend_busy");
+        expect(tapOut.bubbleText).toContain("关键");
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it("clears idle activity after interruption reaction", () => {
+      dir.onAmbientTick(1000, "idle", false, true);
+      dir.onAmbientTick(62000, "idle", false, true);
+      dir.onTap(63000, "idle");
+      const out = dir.onTap(64000, "idle");
+      expect(["waving", "jumping", "failed"]).toContain(out.visibleAction);
     });
   });
 

@@ -14,38 +14,71 @@ export type DirectorOutput = {
 };
 
 type TapKind = "single" | "repeated" | "overpoke";
+export type DoudouIdleActivity =
+  | "lazy_idle"
+  | "nap"
+  | "sneak_eat"
+  | "watch_tv"
+  | "self_groom"
+  | "wander";
 
 const TAP_WINDOW_MS = 600;
 const OVERPOKE_THRESHOLD = 5;
 const OVERPOKE_COOLDOWN_MS = 4000;
 const AMBIENT_MIN_MS = 20000;
 const AMBIENT_MAX_MS = 45000;
-const AMBIENT_COOLDOWN_MS = 15000;
+const IDLE_SHORT_ACTIVITY_MS = 60000;
+const IDLE_LONG_ACTIVITY_MS = 300000;
 export const FAST_ACTION_MIN_VISIBLE_MS = 600;
 
-const AMBIENT_ACTIONS: DoudouAction[] = [
-  "idle",
-  "waiting",
-  "review",
-  "idle",
-  "waiting",
-  "idle",
-  "review",
-  "waving",
+const SHORT_IDLE_ACTIVITIES: DoudouIdleActivity[] = [
+  "lazy_idle",
+  "self_groom",
+  "wander",
 ];
 
-const AMBIENT_BUBBLES = [
-  null,
-  null,
-  null,
-  null,
-  "我刚刚没有偷懒。",
-  null,
-  "豆豆在看家。",
-  "我在翻小本本。",
-  null,
-  "省一点电也很重要。",
+const LONG_IDLE_ACTIVITIES: DoudouIdleActivity[] = [
+  "nap",
+  "sneak_eat",
+  "watch_tv",
 ];
+
+const IDLE_ACTIVITY_BUBBLES: Record<DoudouIdleActivity, (string | null)[]> = {
+  lazy_idle: [
+    null,
+    "我刚刚没有偷懒。",
+    "省一点电也很重要。",
+  ],
+  nap: [
+    null,
+    "豆豆眯一小会儿。",
+  ],
+  sneak_eat: [
+    "我没有偷吃。",
+    null,
+  ],
+  watch_tv: [
+    "我在看家。",
+    null,
+  ],
+  self_groom: [
+    null,
+    "豆豆把毛毛理顺。",
+  ],
+  wander: [
+    null,
+    "豆豆巡逻回来啦。",
+  ],
+};
+
+const RETURN_REACTIONS: Record<DoudouIdleActivity, DirectorOutput> = {
+  lazy_idle: { visibleAction: "lazy_idle", bubbleText: "我刚刚在看家。" },
+  nap: { visibleAction: "confused", bubbleText: "唔，刚刚睡着了一小下。" },
+  sneak_eat: { visibleAction: "tease", bubbleText: "我没有偷吃，是零食自己过来的。" },
+  watch_tv: { visibleAction: "pretend_busy", bubbleText: "等下等下，豆豆刚看到关键地方。" },
+  self_groom: { visibleAction: "happy", bubbleText: "豆豆刚把毛毛整理好。" },
+  wander: { visibleAction: "greet", bubbleText: "你回来啦，豆豆刚巡逻完。" },
+};
 
 const TAP_BUBBLES: Record<TapKind, string[]> = {
   single: ["摸到了。", "嗯~", "喵~", "在的在的。"],
@@ -88,6 +121,8 @@ export class BehaviorDirector {
   private currentSlot: DoudouBehaviorSlot | null = null;
   private heldFastAction: DoudouAction | null = null;
   private heldFastActionUntil = 0;
+  private lastIdleActivity: DoudouIdleActivity | null = null;
+  private lastIdleActivityAt = 0;
 
   isFastActionHoldActive(now = Date.now()): boolean {
     return !!this.heldFastAction && now < this.heldFastActionUntil;
@@ -124,6 +159,14 @@ export class BehaviorDirector {
       };
     }
 
+    if (this.lastIdleActivity) {
+      const reaction = RETURN_REACTIONS[this.lastIdleActivity];
+      this.lastIdleActivity = null;
+      this.lastIdleActivityAt = 0;
+      this.lastUserInteraction = now;
+      return reaction;
+    }
+
     return {
       visibleAction: TAP_ACTIONS[kind],
       bubbleText: pick(TAP_BUBBLES[kind]),
@@ -142,6 +185,10 @@ export class BehaviorDirector {
     phase: PetUIPhase,
     now = Date.now(),
   ): DirectorOutput {
+    this.lastUserInteraction = now;
+    this.lastIdleActivity = null;
+    this.lastIdleActivityAt = 0;
+
     // Fast Reply: single action takes priority
     if (response.action && isValidDoudouAction(response.action)) {
       this.heldFastAction = response.action as DoudouAction;
@@ -249,17 +296,32 @@ export class BehaviorDirector {
     if (phase !== "idle") return null;
     if (busy) return null;
     if (!documentVisible) return null;
-    if (now - this.lastUserInteraction < AMBIENT_COOLDOWN_MS) return null;
+    if (this.lastUserInteraction === 0) {
+      this.lastUserInteraction = now;
+      return null;
+    }
+    const idleFor = this.lastUserInteraction > 0
+      ? now - this.lastUserInteraction
+      : 0;
+    if (idleFor < IDLE_SHORT_ACTIVITY_MS) return null;
     if (now < this.nextAmbientAt) return null;
 
     // Schedule next ambient
     this.nextAmbientAt =
       now + AMBIENT_MIN_MS + Math.random() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS);
 
-    const action = pick(AMBIENT_ACTIONS);
-    const bubble = pick(AMBIENT_BUBBLES);
+    const activity = pick(
+      idleFor >= IDLE_LONG_ACTIVITY_MS
+        ? [...SHORT_IDLE_ACTIVITIES, ...LONG_IDLE_ACTIVITIES]
+        : SHORT_IDLE_ACTIVITIES,
+    );
+    this.lastIdleActivity = activity;
+    this.lastIdleActivityAt = now;
 
-    return { visibleAction: action, bubbleText: bubble };
+    return {
+      visibleAction: activity,
+      bubbleText: pick(IDLE_ACTIVITY_BUBBLES[activity]),
+    };
   }
 
   /** Get the sprite action for a given phase (used for initial/default). */
@@ -277,5 +339,7 @@ export class BehaviorDirector {
     this.currentSlot = null;
     this.heldFastAction = null;
     this.heldFastActionUntil = 0;
+    this.lastIdleActivity = null;
+    this.lastIdleActivityAt = 0;
   }
 }
