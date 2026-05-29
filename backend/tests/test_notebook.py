@@ -321,6 +321,41 @@ def test_migrate_existing_v14_marker_merges_legacy_user_file():
     assert "single_notebook_stub" in user.read_text(encoding="utf-8")
 
 
+def test_migrate_imports_misresolved_backend_backend_notebook():
+    tmpdir = tempfile.mkdtemp()
+    project_backend = Path(tmpdir) / "backend"
+    real_dir = project_backend / "data" / "memory_cards"
+    wrong_dir = project_backend / "backend" / "data" / "memory_cards"
+    user = real_dir / "user.md"
+    memory = real_dir / "memory.md"
+    wrong_memory = wrong_dir / "memory.md"
+    real_dir.mkdir(parents=True)
+    wrong_dir.mkdir(parents=True)
+    memory.write_text(
+        "<!-- v1.4_single_notebook -->\n"
+        "- [2026-05-26 10:00][preference] 喜欢短回复。\n",
+        encoding="utf-8",
+    )
+    user.write_text(
+        "<!-- v1.4_single_notebook_stub: canonical memory is memory.md -->\n",
+        encoding="utf-8",
+    )
+    wrong_memory.write_text(
+        "<!-- v1.4_single_notebook -->\n"
+        "- [2026-05-29 09:28][preference] 快速模式记住十条重要小本本。\n",
+        encoding="utf-8",
+    )
+    nm = NotebookManager(user, memory)
+
+    assert nm.migrate_if_needed() is True
+
+    content = memory.read_text(encoding="utf-8")
+    assert "喜欢短回复" in content
+    assert "快速模式记住十条重要小本本" in content
+    assert "misresolved_notebook_imported" in wrong_memory.read_text(encoding="utf-8")
+    assert list(wrong_dir.glob("memory.md.bak.*"))
+
+
 def test_old_type_category_mapping():
     """All old types map to valid new categories."""
     nm, user, _ = _make_nm()

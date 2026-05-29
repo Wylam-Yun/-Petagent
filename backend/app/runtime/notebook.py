@@ -45,6 +45,9 @@ _V14_MARKER = "<!-- v1.4_single_notebook -->"
 _USER_STUB = (
     "<!-- v1.4_single_notebook_stub: canonical memory is memory.md -->\n"
 )
+_MISRESOLVED_STUB = (
+    "<!-- v1.4_misresolved_notebook_imported: canonical memory is memory.md -->\n"
+)
 _LOCAL_OFFSET = timedelta(hours=8)
 _MAX_CONTENT_CJK = 120
 _MAX_CONTENT_CHARS = 240
@@ -495,11 +498,18 @@ class NotebookManager:
 
     def _ensure_single_notebook_marker(self) -> bool:
         """Finalize canonical memory.md shape even when old cards had no items."""
-        memory_entries = self._parse_file(self._memory_path, max_entries=None)
-        user_entries = self._parse_file(self._user_path, max_entries=None)
+        source_paths = [
+            self._user_path,
+            self._memory_path,
+            *self._misresolved_notebook_paths(),
+        ]
+        source_entries = [
+            self._parse_file(path, max_entries=None) for path in source_paths
+        ]
+        misresolved_has_entries = any(source_entries[2:])
         seen: set[str] = set()
         merged: List[NotebookEntry] = []
-        for entry in [*user_entries, *memory_entries]:
+        for entry in [entry for entries in source_entries for entry in entries]:
             norm = _normalize_text(entry.content)
             if not norm or norm in seen:
                 continue
@@ -509,6 +519,7 @@ class NotebookManager:
         if (
             self._has_v14_marker(self._memory_path)
             and self._read_raw_path(self._user_path) == _USER_STUB
+            and not misresolved_has_entries
         ):
             return False
 
@@ -524,7 +535,32 @@ class NotebookManager:
         if not self._write_text_atomic(self._memory_path, "\n".join(lines)):
             return False
         self._write_text_atomic(self._user_path, _USER_STUB)
+        self._mark_misresolved_notebooks_imported()
         return True
+
+    def _misresolved_notebook_paths(self) -> List[Path]:
+        """Paths created by the old relative-path bug when uvicorn cwd was backend/."""
+        paths: List[Path] = []
+        for path in (self._user_path, self._memory_path):
+            if path.parent.name != "memory_cards":
+                continue
+            if len(path.parents) < 3:
+                continue
+            backend_dir = path.parents[2]
+            if backend_dir.name != "backend":
+                continue
+            misplaced = backend_dir / "backend" / "data" / "memory_cards" / path.name
+            if misplaced == path or misplaced in paths:
+                continue
+            paths.append(misplaced)
+        return paths
+
+    def _mark_misresolved_notebooks_imported(self) -> None:
+        for path in self._misresolved_notebook_paths():
+            if not path.exists():
+                continue
+            self._backup_file(path)
+            self._write_text_atomic(path, _MISRESOLVED_STUB)
 
     def _read_raw_path(self, path: Path) -> str:
         try:
