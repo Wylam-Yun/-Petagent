@@ -218,6 +218,50 @@ def test_tts_provider_can_use_openai_speech_binary_response(tmp_path: Path, monk
     assert "豆豆在呢。" in captured["json"]["input"]
 
 
+def test_tts_provider_can_send_plain_speech_input(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    class DummySettings:
+        api_key = None
+        audio_dir = tmp_path
+
+    class Response:
+        content = b"FAKEAUDIOBYTES"
+
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    settings = DummySettings()
+    settings.tts = ProviderConfig(
+        name="siliconflow_tts",
+        model="FunAudioLLM/CosyVoice2-0.5B",
+        base_url="https://api.siliconflow.cn/v1",
+        api_key_env="SILICONFLOW_API_KEY",
+        timeout_seconds=60,
+        api_key="sf-key",
+        voice="FunAudioLLM/CosyVoice2-0.5B:claire",
+        audio_format="mp3",
+        extra={
+            "api_style": "openai_speech",
+            "auth_scheme": "bearer",
+            "include_voice_prompt": False,
+            "speed": 1.0,
+        },
+    )
+    monkeypatch.setattr("app.providers.tts_mimo.requests.post", fake_post)
+
+    url = MiMoTTSProvider(settings).synthesize("豆豆在呢。", "happy")
+
+    assert url is not None
+    assert captured["json"]["input"] == "豆豆在呢。"
+    assert captured["json"]["speed"] == 1.0
+
+
 def test_fallback_tts_provider_uses_secondary_when_primary_returns_none(tmp_path: Path):
     primary = MockTTSProvider(audio_dir=tmp_path, fail=True)
     fallback = MockTTSProvider(audio_dir=tmp_path)

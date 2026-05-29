@@ -348,6 +348,7 @@ function App() {
   async function playResponseAudio(response: PetResponse) {
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
+    stopCurrentAudioPlayback();
     clearFastActionHoldTimer();
 
     try {
@@ -581,7 +582,16 @@ function App() {
 
   function interruptVoiceRun() {
     audioRunRef.current += 1;
+    stopCurrentAudioPlayback();
+    clearFastActionHoldTimer();
+    setBusy(false);
+    setLastAudioJobId(null);
+  }
+
+  function stopCurrentAudioPlayback() {
     const audio = currentAudioRef.current;
+    const playback = currentPlaybackRef.current;
+    playback?.stop();
     if (audio) {
       audio.onended = null;
       audio.onerror = null;
@@ -589,13 +599,12 @@ function App() {
       if (typeof audio.removeAttribute === "function") {
         audio.removeAttribute("src");
       }
-      currentAudioRef.current = null;
+      if (typeof audio.load === "function") {
+        audio.load();
+      }
     }
-    currentPlaybackRef.current?.stop();
+    currentAudioRef.current = null;
     currentPlaybackRef.current = null;
-    clearFastActionHoldTimer();
-    setBusy(false);
-    setLastAudioJobId(null);
   }
 
   async function handleRefreshContext() {

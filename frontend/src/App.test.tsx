@@ -21,6 +21,7 @@ class MockAudio {
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
   paused = false;
+  loaded = false;
 
   constructor(readonly src: string) {}
 
@@ -31,6 +32,14 @@ class MockAudio {
 
   pause() {
     this.paused = true;
+  }
+
+  removeAttribute() {
+    return undefined;
+  }
+
+  load() {
+    this.loaded = true;
   }
 }
 
@@ -363,7 +372,7 @@ test("mic tap during speaking stops current audio and starts a new recording", a
       non_verbal: "",
       confidence: 0.9
     },
-    audio_job_id: null,
+    audio_job_id: "aud-voice",
     voice_url: null
   };
   const originalMediaDevices = navigator.mediaDevices;
@@ -406,7 +415,18 @@ test("mic tap during speaking stops current audio and starts a new recording", a
         updated_at: "now"
       })
     })
-    .mockResolvedValueOnce({ ok: true, json: async () => voiceResponse });
+    .mockResolvedValueOnce({ ok: true, json: async () => voiceResponse })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job_id: "aud-voice",
+        status: "ready",
+        voice_url: "/static/audio/voice.wav",
+        error: null,
+        created_at: "now",
+        updated_at: "now"
+      })
+    });
   vi.stubGlobal("fetch", fetchMock);
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
@@ -452,6 +472,16 @@ test("mic tap during speaking stops current audio and starts a new recording", a
     "/api/voice/chat",
     expect.objectContaining({ method: "POST" })
   );
+
+  for (let i = 0; i < 10; i++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+  }
+
+  expect(audioInstances).toHaveLength(2);
+  expect(audioInstances[0].paused).toBe(true);
+  expect(audioInstances[0].loaded).toBe(true);
 
   audioInstances[0].onended?.();
   await act(async () => {

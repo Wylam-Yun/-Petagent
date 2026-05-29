@@ -87,7 +87,8 @@ providers:
     api_style: openai_speech
     endpoint: /audio/speech
     auth_scheme: bearer
-    speed: 1.15
+    speed: 1.0
+    include_voice_prompt: false
     proxy_url_env:
       - SILICONFLOW_PROXY_URL
       - PETAGENT_PROXY_URL
