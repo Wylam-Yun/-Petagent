@@ -142,68 +142,32 @@ def _recent_reply_norms(cognition_context: Optional[Dict[str, Any]]) -> List[str
     ]
 
 
-def _clean_user_topic(user_text: str) -> str:
-    topic = _normalize_reply_for_repeat(user_text)
-    if not topic:
-        return "这句"
-    if len(topic) > 16:
-        topic = topic[:16]
-    return topic
-
-
-def _contextual_recovery_replies(user_text: str) -> tuple[str, ...]:
-    topic = _clean_user_topic(user_text)
-    if "重复" in user_text:
-        return (
-            "知道啦，豆豆这次不沿用上一句。",
-            "嗯，豆豆会避开刚才那句继续聊。",
-            "收到，豆豆这次直接给你新的回应。",
-        )
-    if "中文" in user_text:
-        return (
-            "知道啦，豆豆继续用中文回应你。",
-            "嗯，豆豆会一直用中文陪你聊。",
-            "收到，中文对话继续。",
-        )
-    if "工作" in user_text or "代码" in user_text or "测试" in user_text:
-        return (
-            "那我们按工作的节奏慢慢来。",
-            "收到，豆豆陪你把这一步稳住。",
-            "嗯，先把眼前这件事推进一点。",
-        )
-    if "休息" in user_text or "累" in user_text or "烦" in user_text:
-        return (
-            "那就先慢一点，豆豆陪你缓一缓。",
-            "嗯，先放轻松一点，豆豆在旁边陪你。",
-            "收到，我们把节奏放软一点。",
-        )
+def _generic_recovery_replies() -> tuple[str, ...]:
     return (
-        f"收到，关于“{topic}”，豆豆继续陪你聊。",
+        "收到，豆豆继续陪你聊。",
         "嗯，豆豆接着你的意思往下说。",
         "好，豆豆换个角度陪你继续。",
     )
 
 
-def _select_contextual_recovery_reply(
-    user_text: str,
+def _select_generic_recovery_reply(
     cognition_context: Optional[Dict[str, Any]],
 ) -> str:
     recent = _recent_reply_norms(cognition_context)
-    for reply in _contextual_recovery_replies(user_text):
+    for reply in _generic_recovery_replies():
         if _normalize_reply_for_repeat(reply) not in recent:
             return reply
-    return _contextual_recovery_replies(user_text)[0]
+    return _generic_recovery_replies()[0]
 
 
 def _select_duplicate_recovery_reply(
-    user_text: str,
     cognition_context: Optional[Dict[str, Any]],
 ) -> str:
     recent = _recent_reply_norms(cognition_context)
-    for reply in _contextual_recovery_replies(user_text) + FAST_DUPLICATE_RECOVERY_REPLIES:
+    for reply in _generic_recovery_replies() + FAST_DUPLICATE_RECOVERY_REPLIES:
         if _normalize_reply_for_repeat(reply) not in recent:
             return reply
-    return _contextual_recovery_replies(user_text)[0]
+    return _generic_recovery_replies()[0]
 
 
 def _select_distinct_reply(
@@ -223,21 +187,19 @@ def _event_user_text(event: Any) -> str:
 
 
 def _select_successful_voice_repair_reply(
-    user_text: str,
     cognition_context: Optional[Dict[str, Any]],
 ) -> str:
-    return _select_contextual_recovery_reply(user_text, cognition_context)
+    return _select_generic_recovery_reply(cognition_context)
 
 
 def _dedupe_fast_reply(
     fast_action: FastReplyAction,
     cognition_context: Optional[Dict[str, Any]],
-    user_text: str = "",
 ) -> FastReplyAction:
     if not _is_duplicate_fast_reply(fast_action.reply, cognition_context):
         return fast_action
     return FastReplyAction(
-        reply=_select_duplicate_recovery_reply(user_text, cognition_context),
+        reply=_select_duplicate_recovery_reply(cognition_context),
         mood=fast_action.mood or "happy",
         action=fast_action.action or "speak",
         voice_style=fast_action.voice_style,
@@ -257,12 +219,11 @@ def _contains_asr_failure_copy(reply: str) -> bool:
 
 def _repair_successful_voice_reply(
     reply: str,
-    user_text: str,
     cognition_context: Optional[Dict[str, Any]],
 ) -> str:
     if not _contains_asr_failure_copy(reply):
         return reply
-    return _select_successful_voice_repair_reply(user_text, cognition_context)
+    return _select_successful_voice_repair_reply(cognition_context)
 
 
 def _first_behavior_action(action: Any, mood: str) -> str:
@@ -635,7 +596,6 @@ class RuntimeDispatcher:
             if _is_successful_voice_event(event):
                 fast_action.reply = _repair_successful_voice_reply(
                     fast_action.reply,
-                    _event_user_text(event),
                     cognition_context,
                 )
             fast_action = _dedupe_fast_reply(
@@ -645,7 +605,6 @@ class RuntimeDispatcher:
                     self.event_log_store,
                     episode_id,
                 ),
-                _event_user_text(event),
             )
             if run:
                 run.final_action = {
@@ -670,7 +629,6 @@ class RuntimeDispatcher:
             if _is_successful_voice_event(event):
                 action.reply = _repair_successful_voice_reply(
                     action.reply,
-                    _event_user_text(event),
                     cognition_context,
                 )
                 dedupe_context = _dedupe_context_from_recent_events(
@@ -680,7 +638,6 @@ class RuntimeDispatcher:
                 )
                 if _is_duplicate_reply(action.reply, dedupe_context):
                     action.reply = _select_duplicate_recovery_reply(
-                        _event_user_text(event),
                         dedupe_context,
                     )
             if run:
