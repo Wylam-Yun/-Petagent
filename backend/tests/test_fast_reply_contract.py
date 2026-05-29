@@ -163,7 +163,7 @@ def test_fast_reply_dedupes_repeated_reply_before_tts():
     )
 
     assert first.reply == "嗯…主人在叫豆豆嘛～可是现在好困，眼皮在打架呢…"
-    assert second.reply == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
+    assert second.reply == "这次换个说法吧，豆豆想给你一点新鲜回应。"
     assert second.action == "confused"
 
 
@@ -201,7 +201,7 @@ def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
     )
 
     assert first.reply == "豆豆竖起耳朵在听，主人慢慢说。"
-    assert second.reply == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
+    assert second.reply == "这次换个说法吧，豆豆想给你一点新鲜回应。"
     assert second.action == "confused"
 
 
@@ -231,8 +231,8 @@ def test_fast_reply_rotates_duplicate_recovery_reply():
     ]
 
     assert replies[0] == "豆豆竖起耳朵在听，主人慢慢说。"
-    assert replies[1] == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
-    assert replies[2] == "这句豆豆有点接歪了，主人再说清楚一点点？"
+    assert replies[1] == "这次换个说法吧，豆豆想给你一点新鲜回应。"
+    assert replies[2] == "上一句太像啦，豆豆换个角度陪你聊。"
 
 
 def test_thinking_response_has_route():
