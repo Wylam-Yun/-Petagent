@@ -200,7 +200,7 @@ def test_fast_path_uses_cards():
     assert context["relevant_memories"] == []
 
 
-def test_v13_profiles_use_notebook_selection_without_legacy_cards():
+def test_v14_profiles_use_single_notebook_selection_without_legacy_cards():
     from app.runtime.events import normalize_event
     from app.runtime.notebook import NotebookManager
 
@@ -215,7 +215,7 @@ def test_v13_profiles_use_notebook_selection_without_legacy_cards():
     })
     notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
     (tmp / "user.md").write_text("- [2026-05-26 10:00][identity] 我叫小明\n", encoding="utf-8")
-    (tmp / "memory.md").write_text("- [2026-05-26 10:00][project] 正在修 V1.3\n", encoding="utf-8")
+    (tmp / "memory.md").write_text("- [2026-05-26 10:00][project] 正在修 V1.4\n", encoding="utf-8")
 
     ep, _ = episodes.get_or_create_current()
     event = normalize_event({"type": "text_message", "source": "text", "payload": {"user_text": "你好"}})
@@ -233,7 +233,7 @@ def test_v13_profiles_use_notebook_selection_without_legacy_cards():
             notebook_manager=notebook,
         )
         assert context["memory_cards"] is None
-        assert context["selected_card_items"]
+        assert context["selected_card_items"] == ["正在修 V1.4"]
 
 
 def test_fast_path_no_daily_summary():

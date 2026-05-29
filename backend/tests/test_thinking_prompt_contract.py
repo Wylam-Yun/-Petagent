@@ -35,10 +35,10 @@ def _thinking_context():
                 "user_preferences": ["旧卡片偏好"],
                 "momo_memories": ["旧卡片记忆"],
             },
-            "selected_card_items": (
-                ["用户喜欢短回复"],
-                ["正在修 PetAgent V1.3"],
-            ),
+            "selected_card_items": [
+                "用户喜欢短回复",
+                "正在修 PetAgent V1.4",
+            ],
         },
     )
 
@@ -58,8 +58,8 @@ def test_thinking_prompt_excludes_forbidden_fields():
     payload = json.loads(messages[1]["content"])
 
     assert payload["user_input"] == "认真帮我想想"
-    assert payload["notebook_user"] == ["用户喜欢短回复"]
-    assert payload["notebook_memory"] == ["正在修 PetAgent V1.3"]
+    assert "notebook_user" not in payload
+    assert payload["notebook_memory"] == ["用户喜欢短回复", "正在修 PetAgent V1.4"]
     assert payload["recent_dialogue"] == [{"user": "前一句", "pet": "回应"}]
     assert "memory_update" not in json.dumps(payload, ensure_ascii=False)
 
@@ -120,3 +120,27 @@ def test_brain_generate_thinking_uses_thinking_builder():
     assert "memory_cards" not in payload
     assert "memory_update" not in serialized
     assert "OUTPUT_SCHEMA_HINT" not in serialized
+
+
+def test_thinking_prompt_caps_notebook_memory_to_20():
+    event = normalize_event(
+        {
+            "type": "text_message",
+            "source": "text",
+            "payload": {"user_text": "认真帮我想想"},
+        }
+    )
+    context = build_runtime_context(
+        event,
+        {"mood": "thinking", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "thinking",
+            "recent_exact_events": [],
+            "selected_card_items": [f"记忆{i}" for i in range(25)],
+        },
+    )
+
+    messages = build_thinking_messages(load_settings(), event, context)
+    payload = json.loads(messages[1]["content"])
+
+    assert payload["notebook_memory"] == [f"记忆{i}" for i in range(20)]

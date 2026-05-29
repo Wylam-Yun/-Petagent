@@ -17,13 +17,12 @@ def _make_runner(**overrides):
     tmpdir = tempfile.mkdtemp()
     user = Path(tmpdir) / "user.md"
     memory = Path(tmpdir) / "memory.md"
-    user.write_text(
+    user.write_text("<!-- v1.4_single_notebook_stub: canonical memory is memory.md -->\n", encoding="utf-8")
+    memory.write_text(
+        "<!-- v1.4_single_notebook -->\n"
         "- [2026-05-20 10:00][identity] 我叫小明。\n"
         "- [2026-05-20 11:00][preference] 喜欢咖啡。\n"
-        "- [2026-05-23 09:00][temporary] 今天心情好。\n",
-        encoding="utf-8",
-    )
-    memory.write_text(
+        "- [2026-05-23 09:00][temporary] 今天心情好。\n"
         "- [2026-05-23 10:00][project] 在调 PetAgent V1.3。\n",
         encoding="utf-8",
     )
@@ -61,7 +60,7 @@ def test_cleanup_prompt_includes_aging_rules():
     """Cleanup prompt should contain aging rules."""
     from app.pet.prompt_builder import build_nightly_cleanup_messages
 
-    messages = build_nightly_cleanup_messages("内容", "内容", [], "2026-05-26 00:00 Monday")
+    messages = build_nightly_cleanup_messages("内容", [], "2026-05-26 00:00 Monday")
     system = messages[0]["content"]
     assert "identity" in system
     assert "temporary" in system
@@ -71,10 +70,11 @@ def test_cleanup_prompt_includes_aging_rules():
 def test_cleanup_prompt_includes_current_time():
     from app.pet.prompt_builder import build_nightly_cleanup_messages
 
-    messages = build_nightly_cleanup_messages("内容", "内容", [], "2026-05-26 00:00 Monday")
+    messages = build_nightly_cleanup_messages("内容", [], "2026-05-26 00:00 Monday")
     import json
     payload = json.loads(messages[1]["content"])
     assert "2026-05-26" in payload["current_time"]
+    assert "user_md" not in payload
 
 
 def test_apply_add_operations():
@@ -87,6 +87,22 @@ def test_apply_add_operations():
     result = runner.run()
     assert result.get("adds", 0) == 1
     content = nm.read_raw("memory.md")
+    assert "今天去了公园" in content
+
+
+def test_apply_add_creates_canonical_memory_file_when_missing():
+    nm, _, memory = _make_nm_simple()
+    assert not memory.exists()
+
+    result = nm.apply_cleanup_operations({
+        "add": [{"target": "memory.md", "category": "relationship", "content": "今天去了公园"}],
+        "update": [],
+        "delete": [],
+    })
+
+    assert result.get("adds") == 1
+    content = memory.read_text(encoding="utf-8")
+    assert "v1.4_single_notebook" in content
     assert "今天去了公园" in content
 
 
@@ -104,8 +120,9 @@ def test_apply_update_operations():
     }
     result = runner.run()
     assert result.get("updates", 0) == 1
-    content = nm.read_raw("user.md")
+    content = nm.read_raw("memory.md")
     assert "喜欢咖啡和茶" in content
+    assert "single_notebook_stub" in nm.read_raw("user.md")
 
 
 def test_apply_delete_operations():
@@ -117,7 +134,7 @@ def test_apply_delete_operations():
     }
     result = runner.run()
     assert result.get("deletes", 0) == 1
-    content = nm.read_raw("user.md")
+    content = nm.read_raw("memory.md")
     assert "今天心情好" not in content
 
 
@@ -181,7 +198,7 @@ def test_apply_rejects_identity_delete():
     result = runner.run()
     # Identity lines should NOT be deleted
     assert result.get("deletes", 0) == 0
-    content = nm.read_raw("user.md")
+    content = nm.read_raw("memory.md")
     assert "我叫小明" in content
 
 
@@ -296,7 +313,7 @@ def test_cleanup_preserves_identity_lines():
     }
     result = runner.run()
     # Identity should be preserved, temporary should be deleted
-    content = nm.read_raw("user.md")
+    content = nm.read_raw("memory.md")
     assert "我叫小明" in content
     assert "今天心情好" not in content
 

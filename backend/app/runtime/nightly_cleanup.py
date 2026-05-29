@@ -1,7 +1,7 @@
-"""V1.3 Nightly Memory Cleanup Runner.
+"""Nightly Memory Cleanup Runner.
 
 Runs at local midnight to "整理小本本". LLM proposes add/update/delete
-operations on user.md and memory.md. Backend validates and applies atomically.
+operations on canonical memory.md. Backend validates and applies atomically.
 
 Safety gates: once per day, skip during active responses, skip under
 provider backpressure, skip when event loop stale, 60s timeout.
@@ -96,7 +96,8 @@ class NightlyCleanupRunner:
 
     def _run_inner(self, cancel_flag: threading.Event) -> Dict[str, int]:
         # Step 1: Read current notebook content (no lock needed)
-        user_content = self._notebook.read_raw("user.md")
+        # V1.4: memory.md is the only prompt-facing notebook. user.md is a
+        # migration stub and must not influence cleanup decisions.
         memory_content = self._notebook.read_raw("memory.md")
 
         if cancel_flag.is_set():
@@ -132,9 +133,7 @@ class NightlyCleanupRunner:
             if pet:
                 event_lines.append(f"豆豆: {pet}")
 
-        messages = build_nightly_cleanup_messages(
-            user_content, memory_content, event_lines, current_time
-        )
+        messages = build_nightly_cleanup_messages(memory_content, event_lines, current_time)
 
         try:
             result = self._provider.complete_json(messages)
@@ -179,23 +178,29 @@ class NightlyCleanupRunner:
                     target = item.get("target", "")
                     cat = item.get("category", "")
                     content = str(item.get("content", "")).strip()
-                    if target in ("user.md", "memory.md") and cat and content:
-                        ops["add"].append({"target": target, "category": cat, "content": content})
+                    if target == "user.md":
+                        target = "memory.md"
+                    if target == "memory.md" and cat and content:
+                        ops["add"].append({"target": "memory.md", "category": cat, "content": content})
                 elif op_type == "update":
                     target = item.get("target", "")
                     old = str(item.get("old", "")).strip()
                     new_cat = item.get("new_category", "")
                     new_content = str(item.get("new_content", "")).strip()
-                    if target in ("user.md", "memory.md") and old and new_cat and new_content:
+                    if target == "user.md":
+                        target = "memory.md"
+                    if target == "memory.md" and old and new_cat and new_content:
                         ops["update"].append({
-                            "target": target, "old": old,
+                            "target": "memory.md", "old": old,
                             "new_category": new_cat, "new_content": new_content,
                         })
                 elif op_type == "delete":
                     target = item.get("target", "")
                     old = str(item.get("old", "")).strip()
-                    if target in ("user.md", "memory.md") and old:
-                        ops["delete"].append({"target": target, "old": old})
+                    if target == "user.md":
+                        target = "memory.md"
+                    if target == "memory.md" and old:
+                        ops["delete"].append({"target": "memory.md", "old": old})
 
         has_any = bool(ops["add"] or ops["update"] or ops["delete"])
         return ops if has_any else None

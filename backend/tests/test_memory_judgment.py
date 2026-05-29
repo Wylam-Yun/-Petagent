@@ -66,10 +66,25 @@ def test_process_one_calls_provider():
     result = q.process_one()
     assert result is not None
     assert result["should_write"] is True
-    assert result["target"] == "user.md"
+    assert result["target"] == "memory.md"
     assert result["category"] == "preference"
     assert result["content"] == "喜欢咖啡"
     assert provider.last_messages is not None
+
+
+def test_process_one_redirects_legacy_user_target_to_memory():
+    provider = MockProvider(result={
+        "should_write": True,
+        "target": "user.md",
+        "category": "identity",
+        "content": "主人叫小明",
+    })
+    q = MemoryJudgmentQueue(provider=provider)
+    q.enqueue("记住我叫小明", ["explicit"])
+    result = q.process_one()
+    assert result is not None
+    assert result["should_write"] is True
+    assert result["target"] == "memory.md"
 
 
 def test_process_one_validates_output():
@@ -89,7 +104,7 @@ def test_process_one_validates_output():
 def test_process_one_validates_category():
     provider = MockProvider(result={
         "should_write": True,
-        "target": "user.md",
+        "target": "memory.md",
         "category": "invalid",
         "content": "test",
     })
@@ -110,7 +125,7 @@ def test_skips_judgment_under_backpressure():
     gate = MockProviderGate(available=False)
     provider = MockProvider(result={
         "should_write": True,
-        "target": "user.md",
+        "target": "memory.md",
         "category": "preference",
         "content": "test",
     })

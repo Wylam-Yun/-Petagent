@@ -1,4 +1,4 @@
-"""V1.3 NotebookManager: deterministic card-only memory for user.md and memory.md.
+"""NotebookManager: deterministic card-only memory for canonical memory.md.
 
 Handles both new V1.3 format and legacy HTML-comment format.
 No LLM calls. No SQLite. Pure file reads + atomic writes.
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from app.runtime.memory_policy import SENSITIVE_MARKERS
 
@@ -40,9 +40,17 @@ _OLD_TYPE_TO_CATEGORY = {
 }
 
 _TARGET_WHITELIST = {"user.md", "memory.md"}
+_V14_MARKER = "<!-- v1.4_single_notebook -->"
+_USER_STUB = (
+    "<!-- v1.4_single_notebook_stub: canonical memory is memory.md -->\n"
+)
 _LOCAL_OFFSET = timedelta(hours=8)
 _MAX_CONTENT_CJK = 120
 _MAX_CONTENT_CHARS = 240
+_FAST_MAX_ITEMS = 10
+_FAST_MAX_CJK = 800
+_THINKING_MAX_ITEMS = 20
+_THINKING_MAX_CJK = 1600
 
 _CJK_RANGE = ("一", "鿿")
 
@@ -83,7 +91,7 @@ class NotebookEntry:
 
 
 class NotebookManager:
-    """Deterministic card-only memory manager for V1.3 notebook files."""
+    """Deterministic card-only memory manager for notebook files."""
 
     def __init__(self, user_path: Path, memory_path: Path) -> None:
         self._user_path = user_path
@@ -98,7 +106,7 @@ class NotebookManager:
     def parse_memory(self) -> List[NotebookEntry]:
         return self._parse_file(self._memory_path)
 
-    def _parse_file(self, path: Path) -> List[NotebookEntry]:
+    def _parse_file(self, path: Path, max_entries: Optional[int] = 200) -> List[NotebookEntry]:
         if not path.exists():
             return []
         entries: List[NotebookEntry] = []
@@ -112,7 +120,7 @@ class NotebookManager:
             entry = self._parse_line(raw_line, i)
             if entry is not None:
                 collected.append(entry)
-                if len(collected) >= 200:
+                if max_entries is not None and len(collected) >= max_entries:
                     break
         return list(reversed(collected))
 
@@ -137,17 +145,13 @@ class NotebookManager:
 
     # ── Selection ──
 
-    def select_for_fast_reply(self) -> Tuple[Optional[str], Optional[str]]:
-        """Select 1 user.md item + 1 memory.md item by priority."""
-        user_item = self._select_one(self.parse_user())
-        memory_item = self._select_one(self.parse_memory())
-        return (user_item, memory_item)
+    def select_for_fast_reply(self) -> List[str]:
+        """Select up to 10 canonical memory.md lines for fast reply."""
+        return self._select_canonical_for_fast(self.parse_memory())
 
-    def select_for_thinking(self) -> Tuple[List[str], List[str]]:
-        """Select up to 8 user.md items + 12 memory.md items."""
-        user_items = self._select_n(self.parse_user(), 8, 200)
-        memory_items = self._select_n(self.parse_memory(), 12, 200)
-        return (user_items, memory_items)
+    def select_for_thinking(self) -> List[str]:
+        """Select up to 20 canonical memory.md lines for thinking mode."""
+        return self._select_n(self.parse_memory(), _THINKING_MAX_ITEMS, _THINKING_MAX_CJK)
 
     def _select_one(self, entries: List[NotebookEntry]) -> Optional[str]:
         if not entries:
@@ -170,6 +174,37 @@ class NotebookManager:
             if total_cjk + cjk > max_cjk:
                 break
             result.append(e.content)
+            total_cjk += cjk
+        return result
+
+    def _select_canonical_for_fast(self, entries: List[NotebookEntry]) -> List[str]:
+        if not entries:
+            return []
+        ranked = self._rank_entries(entries)
+        caps = {
+            "identity": 2,
+            "preference": 3,
+            "relationship_project": 3,
+            "temporary": 2,
+        }
+        counts = {key: 0 for key in caps}
+        result: List[str] = []
+        total_cjk = 0
+        for e in ranked:
+            if len(result) >= _FAST_MAX_ITEMS:
+                break
+            bucket = e.category
+            if e.category in ("relationship", "project"):
+                bucket = "relationship_project"
+            if bucket not in counts:
+                continue
+            if counts[bucket] >= caps[bucket]:
+                continue
+            cjk = _cjk_len(e.content)
+            if total_cjk + cjk > _FAST_MAX_CJK:
+                break
+            result.append(e.content)
+            counts[bucket] += 1
             total_cjk += cjk
         return result
 
@@ -208,7 +243,9 @@ class NotebookManager:
         ts = _local_timestamp()
         line = f"- [{ts}][{category}] {content}\n"
 
-        path = self._user_path if target == "user.md" else self._memory_path
+        # V1.4 canonical notebook: all new writes go to memory.md. Keep accepting
+        # user.md as a compatibility target from older judgment/cleanup prompts.
+        path = self._memory_path
 
         with self._lock:
             # Duplicate check
@@ -272,6 +309,13 @@ class NotebookManager:
     def migrate_if_needed(self, memory_card_manager=None) -> bool:
         """One-time migration from old format to new. Returns True if migration ran."""
         with self._lock:
+            if self._has_v14_marker(self._memory_path):
+                return False
+
+            if self._merge_split_notebooks():
+                logger.info("migrate_if_needed: V1.4 single notebook migration completed")
+                return True
+
             # Check if new format already present
             for path in (self._user_path, self._memory_path):
                 if self._has_new_format(path):
@@ -291,6 +335,46 @@ class NotebookManager:
             if migrated:
                 logger.info("migrate_if_needed: migration completed")
             return migrated
+
+    def _has_v14_marker(self, path: Path) -> bool:
+        if not path.exists():
+            return False
+        try:
+            return _V14_MARKER in path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return False
+
+    def _merge_split_notebooks(self) -> bool:
+        user_entries = self._parse_file(self._user_path, max_entries=None)
+        memory_entries = self._parse_file(self._memory_path, max_entries=None)
+        if not user_entries and not memory_entries:
+            return False
+
+        merged: List[NotebookEntry] = []
+        seen: set[str] = set()
+        for entry in [*user_entries, *memory_entries]:
+            norm = _normalize_text(entry.content)
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            merged.append(entry)
+
+        if not merged:
+            return False
+
+        self._memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self._backup_file(self._memory_path)
+        self._backup_file(self._user_path)
+
+        lines = [_V14_MARKER]
+        for entry in merged:
+            ts = entry.timestamp or _local_timestamp()
+            lines.append(f"- [{ts}][{entry.category}] {entry.content}")
+        lines.append("")
+        if not self._write_text_atomic(self._memory_path, "\n".join(lines)):
+            return False
+        self._write_text_atomic(self._user_path, _USER_STUB)
+        return True
 
     def _has_new_format(self, path: Path) -> bool:
         if not path.exists():
@@ -356,27 +440,43 @@ class NotebookManager:
             return False
 
     def _import_from_old_paths(self, memory_card_manager) -> bool:
-        """Import from old subdirectory paths if canonical files are empty."""
+        """Import old card paths into canonical memory.md if notebook files are empty."""
         user_empty = not self._user_path.exists() or self._user_path.stat().st_size == 0
         mem_empty = not self._memory_path.exists() or self._memory_path.stat().st_size == 0
         if not user_empty and not mem_empty:
             return False
 
-        imported = False
         try:
-            if user_empty:
-                old_items = memory_card_manager.read_card("user_preferences")
-                if old_items:
-                    self._write_imported(self._user_path, "preference", old_items)
-                    imported = True
-            if mem_empty:
-                old_items = memory_card_manager.read_card("momo_memories")
-                if old_items:
-                    self._write_imported(self._memory_path, "temporary", old_items)
-                    imported = True
+            old_user_items = memory_card_manager.read_card("user_preferences") if user_empty else []
+            old_memory_items = memory_card_manager.read_card("momo_memories") if mem_empty else []
         except Exception:
             logger.warning("_import_from_old_paths failed", exc_info=True)
-        return imported
+            return False
+
+        if not old_user_items and not old_memory_items:
+            return False
+
+        self._memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self._backup_file(self._memory_path)
+        self._backup_file(self._user_path)
+        ts = _local_timestamp()
+        lines = [_V14_MARKER]
+        seen: set[str] = set()
+        for item in old_user_items:
+            norm = _normalize_text(item)
+            if norm and norm not in seen:
+                seen.add(norm)
+                lines.append(f"- [{ts}][preference] {item}")
+        for item in old_memory_items:
+            norm = _normalize_text(item)
+            if norm and norm not in seen:
+                seen.add(norm)
+                lines.append(f"- [{ts}][temporary] {item}")
+        lines.append("")
+        if not self._write_text_atomic(self._memory_path, "\n".join(lines)):
+            return False
+        self._write_text_atomic(self._user_path, _USER_STUB)
+        return True
 
     def _write_imported(self, path: Path, default_category: str, items: List[str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +503,27 @@ class NotebookManager:
             except OSError:
                 pass
 
+    def _write_text_atomic(self, path: Path, content: str) -> bool:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd = -1
+            os.replace(tmp_path, str(path))
+            return True
+        except OSError:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return False
+
     # ── Cleanup operations ──
 
     def apply_cleanup_operations(self, operations: Dict[str, Any]) -> Dict[str, int]:
@@ -416,19 +537,28 @@ class NotebookManager:
         deletes = operations.get("delete", [])
 
         stats = {"adds": 0, "updates": 0, "deletes": 0, "errors": 0}
+        adds = self._canonical_cleanup_items(adds)
+        updates = self._canonical_cleanup_items(updates)
+        deletes = self._canonical_cleanup_items(deletes)
 
         with self._lock:
-            for target in ("user.md", "memory.md"):
-                path = self._user_path if target == "user.md" else self._memory_path
-                if not path.exists():
+            for target in ("memory.md",):
+                path = self._memory_path
+                if not path.exists() and not (
+                    any(a.get("target") == target for a in adds)
+                    or any(u.get("target") == target for u in updates)
+                    or any(d.get("target") == target for d in deletes)
+                ):
                     continue
 
                 try:
                     current_lines = path.read_text(encoding="utf-8").splitlines()
                 except OSError:
-                    continue
+                    current_lines = []
 
                 new_lines = list(current_lines)
+                if not new_lines:
+                    new_lines.append(_V14_MARKER)
                 target_adds = [a for a in adds if a.get("target") == target]
                 target_updates = [u for u in updates if u.get("target") == target]
                 target_deletes = [d for d in deletes if d.get("target") == target]
@@ -490,6 +620,20 @@ class NotebookManager:
                     stats["errors"] += 1
 
         return stats
+
+    def _canonical_cleanup_items(self, items: Any) -> List[Dict[str, Any]]:
+        """Redirect legacy user.md cleanup targets to canonical memory.md."""
+        if not isinstance(items, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            copied = dict(item)
+            if copied.get("target") == "user.md":
+                copied["target"] = "memory.md"
+            normalized.append(copied)
+        return normalized
 
     def _find_line_prefix(self, lines: List[str], old: str) -> Optional[int]:
         """Find line index by exact match or prefix match."""

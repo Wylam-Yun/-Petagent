@@ -97,7 +97,9 @@ class MemoryJudgmentQueue:
         target = result.get("target", "")
         category = result.get("category", "")
         content = str(result.get("content", "")).strip()
-        if target not in ("user.md", "memory.md"):
+        if target == "user.md":
+            target = "memory.md"
+        if target != "memory.md":
             return {"should_write": False}
         if category not in ("identity", "preference", "relationship", "project", "temporary"):
             return {"should_write": False}

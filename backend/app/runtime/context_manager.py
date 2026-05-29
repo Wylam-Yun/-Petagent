@@ -153,7 +153,7 @@ class ContextManager:
             except Exception:
                 memory_cards = {"user_preferences": [], "momo_memories": []}
 
-        # V1.3: NotebookManager card selection for fast_reply/thinking
+        # V1.4: NotebookManager single canonical memory.md selection.
         selected_card_items = None
         if notebook_manager is not None and profile in ("fast_reply", "thinking"):
             try:
@@ -162,7 +162,7 @@ class ContextManager:
                 else:
                     selected_card_items = notebook_manager.select_for_thinking()
             except Exception:
-                selected_card_items = (None, None) if profile == "fast_reply" else ([], [])
+                selected_card_items = []
 
         elif memory_manager is not None:
             user_text = str(event.payload.get("user_text", "") if hasattr(event, "payload") else "")

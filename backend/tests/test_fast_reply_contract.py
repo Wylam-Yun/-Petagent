@@ -223,7 +223,7 @@ def test_fast_reply_prompt_uses_selected_card_items():
             "context_profile": "fast_reply",
             "recent_exact_events": [],
             "memory_cards": {"user_preferences": ["旧数据"], "momo_memories": []},
-            "selected_card_items": ("我是小明", "今天去了公园"),
+            "selected_card_items": ["我是小明", "今天去了公园"],
         },
     )
 
@@ -262,6 +262,35 @@ def test_fast_reply_prompt_does_not_fallback_to_legacy_memory_cards():
     messages = build_fast_reply_messages(settings, event, context)
     user_payload = json.loads(messages[1]["content"])
     assert user_payload.get("memory_hints") == []
+
+
+def test_fast_reply_prompt_caps_selected_memory_hints_to_10():
+    """V1.4 fast reply loads at most 10 canonical notebook lines."""
+    from app.config import load_settings
+    from app.pet.prompt_builder import build_fast_reply_messages
+    from app.runtime.context import build_runtime_context
+    from app.runtime.events import normalize_event
+    import json
+
+    settings = load_settings()
+    event = normalize_event({
+        "type": "text_message", "source": "text",
+        "payload": {"user_text": "你好"},
+    })
+    context = build_runtime_context(
+        event,
+        {"mood": "happy", "energy": 70, "intimacy": 10, "sleepiness": 20},
+        cognition_context={
+            "context_profile": "fast_reply",
+            "recent_exact_events": [],
+            "selected_card_items": [f"记忆{i}" for i in range(12)],
+        },
+    )
+
+    messages = build_fast_reply_messages(settings, event, context)
+    user_payload = json.loads(messages[1]["content"])
+
+    assert user_payload["memory_hints"] == [f"记忆{i}" for i in range(10)]
 
 
 def test_fast_reply_response_has_memory_ack_hint():

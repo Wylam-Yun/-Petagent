@@ -100,18 +100,13 @@ def test_select_fast_reply():
         "- [2026-05-25 22:00][relationship] 今天去了公园。\n",
         encoding="utf-8",
     )
-    user_item, memory_item = nm.select_for_fast_reply()
-    assert user_item is not None
-    assert "小明" in user_item  # identity > preference
-    assert memory_item is not None
-    assert "公园" in memory_item
+    items = nm.select_for_fast_reply()
+    assert items == ["今天去了公园。"]
 
 
 def test_select_fast_reply_empty():
     nm, _, _ = _make_nm()
-    user_item, memory_item = nm.select_for_fast_reply()
-    assert user_item is None
-    assert memory_item is None
+    assert nm.select_for_fast_reply() == []
 
 
 def test_select_thinking():
@@ -120,21 +115,53 @@ def test_select_thinking():
     user.write_text("".join(user_lines), encoding="utf-8")
     memory_lines = [f"- [2026-05-25 {20+i:02d}:00][project] 项目{i}\n" for i in range(15)]
     memory.write_text("".join(memory_lines), encoding="utf-8")
-    user_items, memory_items = nm.select_for_thinking()
-    assert len(user_items) <= 8
-    assert len(memory_items) <= 12
-    assert len(user_items) == 8  # should hit cap
-    assert len(memory_items) == 12  # should hit cap
+    items = nm.select_for_thinking()
+    assert len(items) <= 20
+    assert len(items) == 15
+
+
+def test_select_fast_reply_uses_up_to_10_canonical_memory_lines():
+    nm, user, memory = _make_nm()
+    user.write_text(
+        "- [2026-05-25 20:00][identity] user.md 不再作为 prompt 来源。\n",
+        encoding="utf-8",
+    )
+    memory.write_text(
+        "".join([
+            f"- [2026-05-25 20:{i:02d}][identity] 身份{i}\n"
+            for i in range(3)
+        ] + [
+            f"- [2026-05-25 21:{i:02d}][preference] 偏好{i}\n"
+            for i in range(4)
+        ] + [
+            f"- [2026-05-25 22:{i:02d}][project] 项目{i}\n"
+            for i in range(4)
+        ] + [
+            f"- [2026-05-25 23:{i:02d}][temporary] 临时{i}\n"
+            for i in range(3)
+        ]),
+        encoding="utf-8",
+    )
+
+    items = nm.select_for_fast_reply()
+
+    assert len(items) == 10
+    assert not any("user.md" in item for item in items)
+    assert sum(item.startswith("身份") for item in items) == 2
+    assert sum(item.startswith("偏好") for item in items) == 3
+    assert sum(item.startswith("项目") for item in items) == 3
+    assert sum(item.startswith("临时") for item in items) == 2
 
 
 def test_append_line_adds_timestamp():
     nm, user, _ = _make_nm()
     result = nm.append_line("user.md", "preference", "喜欢短回复")
     assert result is True
-    content = user.read_text(encoding="utf-8")
+    content = nm.read_raw("memory.md")
     assert "- [2026-" in content
     assert "[preference]" in content
     assert "喜欢短回复" in content
+    assert not user.exists()
 
 
 def test_append_line_uses_local_timestamp(monkeypatch):
@@ -147,9 +174,9 @@ def test_append_line_uses_local_timestamp(monkeypatch):
             return datetime(2026, 5, 25, 16, 30)
 
     monkeypatch.setattr(notebook, "datetime", FixedDateTime)
-    nm, user, _ = _make_nm()
+    nm, _, memory = _make_nm()
     assert nm.append_line("user.md", "preference", "喜欢短回复") is True
-    assert "- [2026-05-26 00:30][preference]" in user.read_text(encoding="utf-8")
+    assert "- [2026-05-26 00:30][preference]" in memory.read_text(encoding="utf-8")
 
 
 def test_append_line_rejects_overlong_content():
@@ -178,11 +205,11 @@ def test_append_line_validates_target():
 
 
 def test_append_line_rejects_duplicates():
-    nm, user, _ = _make_nm()
+    nm, _, memory = _make_nm()
     nm.append_line("user.md", "preference", "喜欢咖啡")
     result = nm.append_line("user.md", "preference", "喜欢咖啡")
     assert result is False
-    content = user.read_text(encoding="utf-8")
+    content = memory.read_text(encoding="utf-8")
     assert content.count("喜欢咖啡") == 1
 
 
@@ -194,10 +221,10 @@ def test_append_line_rejects_secrets():
 
 
 def test_append_line_atomic():
-    nm, user, _ = _make_nm()
+    nm, _, memory = _make_nm()
     nm.append_line("user.md", "preference", "第一行")
     nm.append_line("user.md", "identity", "第二行")
-    content = user.read_text(encoding="utf-8")
+    content = memory.read_text(encoding="utf-8")
     lines = [l for l in content.splitlines() if l.strip()]
     assert len(lines) == 2
     assert "第一行" in lines[0]
@@ -213,20 +240,21 @@ def test_migrate_old_format():
     )
     result = nm.migrate_if_needed()
     assert result is True
-    content = user.read_text(encoding="utf-8")
-    assert "v1.3_migrated" in content
+    content = memory.read_text(encoding="utf-8")
+    assert "v1.4_single_notebook" in content
     assert "[preference]" in content
     assert "喜欢短回复" in content
+    assert "single_notebook_stub" in user.read_text(encoding="utf-8")
 
 
-def test_migrate_skips_if_new_format_present():
+def test_migrate_v13_new_format_to_single_notebook():
     nm, user, _ = _make_nm()
     user.write_text(
         "- [2026-05-26 10:00][preference] 喜欢咖啡\n",
         encoding="utf-8",
     )
     result = nm.migrate_if_needed()
-    assert result is False
+    assert result is True
 
 
 def test_old_type_category_mapping():
@@ -251,3 +279,28 @@ def test_old_type_category_mapping():
     assert cats["名言"] == "preference"
     assert cats["心情"] == "temporary"
     assert cats["事件"] == "project"
+
+
+def test_migrate_merges_user_and_memory_into_canonical_memory():
+    nm, user, memory = _make_nm()
+    user.write_text(
+        "- [2026-05-26 10:00][identity] 我叫小明。\n"
+        "- [2026-05-26 10:01][preference] 喜欢短回复。\n",
+        encoding="utf-8",
+    )
+    memory.write_text(
+        "- [2026-05-26 10:02][project] 正在修 V1.4。\n"
+        "- [2026-05-26 10:03][preference] 喜欢短回复。\n",
+        encoding="utf-8",
+    )
+
+    assert nm.migrate_if_needed() is True
+
+    canonical = memory.read_text(encoding="utf-8")
+    assert "v1.4_single_notebook" in canonical
+    assert "我叫小明" in canonical
+    assert "正在修 V1.4" in canonical
+    assert canonical.count("喜欢短回复") == 1
+    assert "single_notebook_stub" in user.read_text(encoding="utf-8")
+    assert list(memory.parent.glob("memory.md.bak.*"))
+    assert list(user.parent.glob("user.md.bak.*"))
