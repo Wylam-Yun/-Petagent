@@ -541,23 +541,37 @@ def test_http_asr_does_not_retry_client_errors(tmp_path: Path, monkeypatch):
     assert transcript.error_code == "asr_http_400"
 
 
-def test_http_asr_does_not_retry_timeouts(tmp_path: Path, monkeypatch):
+def test_http_asr_uses_fallback_model_after_timeout(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
     config = provider_config()
-    config.extra["transient_retries"] = 2
+    config.extra["retry_backoff_seconds"] = 0
+    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
     calls = []
 
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "备用模型听清了", "confidence": 0.91}
+
     def fake_post(url, **kwargs):
-        calls.append((url, kwargs))
-        raise requests.Timeout("read timed out")
+        calls.append(kwargs["data"]["model"])
+        if len(calls) == 1:
+            raise requests.Timeout("read timed out")
+        return SuccessResponse()
 
     monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
 
     transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert len(calls) == 1
-    assert transcript.error_code == "asr_timeout"
+    assert calls == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
+    assert transcript.text == "备用模型听清了"
+    assert transcript.confidence == 0.91
+    assert transcript.error_code == ""
 
 
 def test_http_asr_does_not_retry_bad_json(tmp_path: Path, monkeypatch):

@@ -231,7 +231,7 @@ class HttpASRProvider:
             return bool(retry_empty) and model_index < model_count - 1
         if not error_code or attempt >= attempts - 1:
             return False
-        if error_code in {"asr_request_error", "asr_provider_error"}:
+        if error_code in {"asr_timeout", "asr_request_error", "asr_provider_error"}:
             return True
         if error_code.startswith("asr_http_"):
             try:
