@@ -12,16 +12,26 @@ def test_fast_reply_guard_sanitizes():
     raw = {
         "reply": "<think>让我想想...</think>\n早呀，豆豆醒着呢。" + "很长" * 50,
         "mood": "happy",
-        "action": "waving",
+        "action": "happy",
         "voice_style": "soft",
     }
     result = guard_fast_reply_action(raw)
     assert isinstance(result, FastReplyAction)
     assert "<think>" not in result.reply
     assert result.mood == "happy"
-    assert result.action == "waving"
+    assert result.action == "happy"
     assert result.voice_style == "soft"
     assert len(result.reply) <= 80
+
+
+def test_fast_reply_guard_accepts_v14_product_actions():
+    for action in ["greet", "listen", "speak", "remember", "comfort", "confused"]:
+        result = guard_fast_reply_action({
+            "reply": "豆豆在。",
+            "mood": "happy",
+            "action": action,
+        })
+        assert result.action == action
 
 
 def test_fast_reply_guard_fallback_on_empty():
@@ -60,7 +70,7 @@ def test_fast_reply_guard_strips_structured_reasoning():
     raw = {
         "reply": "分析：这是早安问候，回复要短。\n最终回复：早呀主人，豆豆醒啦～",
         "mood": "happy",
-        "action": "waving",
+        "action": "greet",
     }
 
     result = guard_fast_reply_action(raw)

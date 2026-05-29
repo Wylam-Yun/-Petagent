@@ -90,12 +90,12 @@ describe("BehaviorDirector", () => {
         { behavior_intent: "clingy_happy", mood: "idle" },
         "idle",
       );
-      expect(out.visibleAction).toBe("waving"); // first of clingy_happy fallback
+      expect(out.visibleAction).toBe("happy"); // first of clingy_happy fallback
     });
 
     it("falls back to mood when intent is missing", () => {
       const out = dir.onBackendResponse({ mood: "excited" }, "idle");
-      expect(out.visibleAction).toBe("jumping"); // excited -> jumping
+      expect(out.visibleAction).toBe("excited");
     });
 
     it("includes reply as bubble text", () => {

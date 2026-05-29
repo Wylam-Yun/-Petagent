@@ -10,6 +10,11 @@ from app.runtime.interaction_catalog import button_event_ids, get_interaction
 
 
 BUTTON_EVENTS = set(button_event_ids())
+BEHAVIOR_ACTION_SCHEMA = (
+    "idle/waiting/review/waving/jumping/failed/running/running-left/running-right/"
+    "lazy_idle/nap/sneak_eat/watch_tv/self_groom/wander/greet/happy/tease/"
+    "pretend_busy/listen/think/speak/remember/comfort/confused/deny/excited"
+)
 
 
 OUTPUT_SCHEMA_HINT = {
@@ -23,7 +28,7 @@ OUTPUT_SCHEMA_HINT = {
     "autonomy_notes": "简短说明豆豆为什么这样反应",
     "behavior_intent": "可选：soft_comfort/clingy_happy/clingy_wronged_happy/lazy_busy/quiet_sleepy/playful_proud/confused_wronged/neutral_companion",
     "behavior_plan": [
-        {"action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right", "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600-2500}
+        {"action": BEHAVIOR_ACTION_SCHEMA, "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600-2500}
     ],
     "state_delta": {
         "energy": 0,
@@ -191,7 +196,7 @@ def build_pet_messages(
 FAST_REPLY_SCHEMA = {
     "reply": "自然简短的回复，不超过 80 字",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
-    "action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right",
+    "action": BEHAVIOR_ACTION_SCHEMA,
 }
 
 
@@ -260,7 +265,7 @@ THINKING_RESPONSE_SCHEMA = {
     "vibration": "none/light/medium",
     "behavior_intent": "soft_comfort/clingy_happy/clingy_wronged_happy/lazy_busy/quiet_sleepy/playful_proud/confused_wronged/neutral_companion",
     "behavior_plan": [
-        {"action": "idle/waiting/review/waving/jumping/failed/running/running-left/running-right", "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600}
+        {"action": BEHAVIOR_ACTION_SCHEMA, "slot": "before_speech/speech/after_speech/idle_after", "duration_ms": 600}
     ],
     "state_delta": {
         "energy": 0,

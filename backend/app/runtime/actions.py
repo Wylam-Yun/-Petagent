@@ -37,6 +37,10 @@ ALLOWED_VOICE_STYLES = {"soft", "normal", "happy", "sleepy", "shy"}
 ALLOWED_BEHAVIOR_ACTIONS = {
     "idle", "waiting", "review", "waving", "jumping",
     "failed", "running", "running-left", "running-right",
+    "lazy_idle", "nap", "sneak_eat", "watch_tv",
+    "self_groom", "wander", "greet", "happy", "tease",
+    "pretend_busy", "listen", "think", "speak", "remember",
+    "comfort", "confused", "deny", "excited",
 }
 ALLOWED_BEHAVIOR_SLOTS = {"before_speech", "speech", "after_speech", "idle_after"}
 ALLOWED_BEHAVIOR_INTENTS = {

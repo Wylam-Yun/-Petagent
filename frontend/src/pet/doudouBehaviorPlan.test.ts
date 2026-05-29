@@ -9,24 +9,25 @@ import {
 describe("validateBehaviorPlan", () => {
   it("accepts a valid plan", () => {
     const plan = validateBehaviorPlan([
-      { action: "waving", slot: "before_speech", duration_ms: 1200 },
-      { action: "jumping", slot: "speech", duration_ms: 1000 },
+      { action: "comfort", slot: "before_speech", duration_ms: 1200 },
+      { action: "speak", slot: "speech", duration_ms: 1000 },
     ]);
     expect(plan).toHaveLength(2);
     expect(plan![0]).toEqual({
-      action: "waving",
+      action: "comfort",
       slot: "before_speech",
       duration_ms: 1200,
     });
+    expect(plan![1].action).toBe("speak");
   });
 
   it("drops unknown actions", () => {
     const plan = validateBehaviorPlan([
       { action: "sleep", slot: "speech", duration_ms: 1000 },
-      { action: "waving", slot: "speech", duration_ms: 1200 },
+      { action: "remember", slot: "speech", duration_ms: 1200 },
     ]);
     expect(plan).toHaveLength(1);
-    expect(plan![0].action).toBe("waving");
+    expect(plan![0].action).toBe("remember");
   });
 
   it("repairs unknown slots to speech", () => {
@@ -49,7 +50,7 @@ describe("validateBehaviorPlan", () => {
   it("uses default duration when missing", () => {
     const plan = validateBehaviorPlan([
       { action: "failed", slot: "speech" },
-      { action: "waving", slot: "speech" },
+      { action: "happy", slot: "speech" },
     ]);
     expect(plan![0].duration_ms).toBe(900);
     expect(plan![1].duration_ms).toBe(1200);
@@ -98,19 +99,19 @@ describe("fallbackBehaviorPlan", () => {
   it("uses intent fallback when available", () => {
     const plan = fallbackBehaviorPlan("clingy_happy", "idle", "idle");
     const actions = plan.map((s) => s.action);
-    expect(actions).toEqual(["waving", "jumping", "idle"]);
+    expect(actions).toEqual(["happy", "greet", "idle"]);
   });
 
   it("falls back to mood when intent is missing", () => {
     const plan = fallbackBehaviorPlan(null, "excited", "idle");
     const actions = plan.map((s) => s.action);
-    expect(actions).toEqual(["jumping", "idle"]);
+    expect(actions).toEqual(["excited", "idle"]);
   });
 
   it("falls back to phase when mood is unknown", () => {
     const plan = fallbackBehaviorPlan(null, null, "listening");
     expect(plan).toHaveLength(1);
-    expect(plan[0].action).toBe("waiting");
+    expect(plan[0].action).toBe("listen");
   });
 
   it("falls back to idle for unknown everything", () => {
@@ -121,12 +122,17 @@ describe("fallbackBehaviorPlan", () => {
 
   it("maps thinking phase to review", () => {
     const plan = fallbackBehaviorPlan(null, null, "thinking");
-    expect(plan[0].action).toBe("review");
+    expect(plan[0].action).toBe("think");
   });
 
-  it("maps error phase to failed", () => {
+  it("maps speaking phase to speak", () => {
+    const plan = fallbackBehaviorPlan(null, null, "speaking");
+    expect(plan[0].action).toBe("speak");
+  });
+
+  it("maps error phase to confused", () => {
     const plan = fallbackBehaviorPlan(null, null, "audio_error");
-    expect(plan[0].action).toBe("failed");
+    expect(plan[0].action).toBe("confused");
   });
 });
 

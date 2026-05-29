@@ -206,15 +206,35 @@ def test_guard_preserves_valid_behavior_plan():
         "mood": "happy",
         "behavior_intent": "clingy_happy",
         "behavior_plan": [
-            {"action": "waving", "slot": "before_speech", "duration_ms": 1200},
-            {"action": "jumping", "slot": "speech", "duration_ms": 1000},
+            {"action": "comfort", "slot": "before_speech", "duration_ms": 1200},
+            {"action": "speak", "slot": "speech", "duration_ms": 1000},
         ],
     })
     assert action.behavior_intent == "clingy_happy"
     assert action.behavior_plan is not None
     assert len(action.behavior_plan) == 2
-    assert action.behavior_plan[0]["action"] == "waving"
-    assert action.behavior_plan[1]["action"] == "jumping"
+    assert action.behavior_plan[0]["action"] == "comfort"
+    assert action.behavior_plan[1]["action"] == "speak"
+
+
+def test_guard_accepts_v14_product_behavior_actions():
+    action = guard_action({
+        "reply": "豆豆记住啦。",
+        "mood": "happy",
+        "behavior_plan": [
+            {"action": "remember", "slot": "before_speech"},
+            {"action": "happy", "slot": "speech"},
+            {"action": "nap", "slot": "idle_after"},
+            {"action": "sneak_eat", "slot": "after_speech"},
+        ],
+    })
+    assert action.behavior_plan is not None
+    assert [step["action"] for step in action.behavior_plan] == [
+        "remember",
+        "happy",
+        "nap",
+        "sneak_eat",
+    ]
 
 
 def test_guard_drops_unknown_behavior_actions():
@@ -223,12 +243,12 @@ def test_guard_drops_unknown_behavior_actions():
         "mood": "idle",
         "behavior_plan": [
             {"action": "sleep", "slot": "speech", "duration_ms": 1000},
-            {"action": "waving", "slot": "speech", "duration_ms": 1200},
+            {"action": "listen", "slot": "speech", "duration_ms": 1200},
         ],
     })
     assert action.behavior_plan is not None
     assert len(action.behavior_plan) == 1
-    assert action.behavior_plan[0]["action"] == "waving"
+    assert action.behavior_plan[0]["action"] == "listen"
 
 
 def test_guard_repairs_unknown_behavior_slots():

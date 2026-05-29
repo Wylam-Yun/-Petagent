@@ -82,6 +82,24 @@ allowed:
     - running
     - running-left
     - running-right
+    - lazy_idle
+    - nap
+    - sneak_eat
+    - watch_tv
+    - self_groom
+    - wander
+    - greet
+    - happy
+    - tease
+    - pretend_busy
+    - listen
+    - think
+    - speak
+    - remember
+    - comfort
+    - confused
+    - deny
+    - excited
   behavior_slots:
     - before_speech
     - speech

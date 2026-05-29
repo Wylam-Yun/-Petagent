@@ -1,3 +1,4 @@
+import { DOUDOU_ACTIONS } from "./doudouSprites";
 import type { DoudouAction } from "./doudouSprites";
 import type { Mood, PetUIPhase } from "./types";
 
@@ -31,18 +32,6 @@ const VALID_SLOTS: readonly DoudouBehaviorSlot[] = [
   "idle_after",
 ];
 
-const VALID_ACTIONS: readonly DoudouAction[] = [
-  "idle",
-  "waiting",
-  "review",
-  "waving",
-  "jumping",
-  "failed",
-  "running",
-  "running-left",
-  "running-right",
-];
-
 const VALID_INTENTS: readonly DoudouBehaviorIntent[] = [
   "soft_comfort",
   "clingy_happy",
@@ -64,6 +53,24 @@ const DEFAULT_DURATIONS: Record<DoudouAction, number> = {
   running: 1400,
   "running-left": 1400,
   "running-right": 1400,
+  lazy_idle: 1400,
+  nap: 1600,
+  sneak_eat: 1400,
+  watch_tv: 1400,
+  self_groom: 1400,
+  wander: 1400,
+  greet: 1200,
+  happy: 1200,
+  tease: 1200,
+  pretend_busy: 1400,
+  listen: 1400,
+  think: 1400,
+  speak: 1400,
+  remember: 1400,
+  comfort: 1400,
+  confused: 900,
+  deny: 900,
+  excited: 1200,
 };
 
 const MAX_STEPS = 4;
@@ -72,26 +79,26 @@ const MIN_DURATION_MS = 600;
 const MAX_DURATION_MS = 2500;
 
 const INTENT_FALLBACK: Record<DoudouBehaviorIntent, DoudouAction[]> = {
-  soft_comfort: ["review", "waving", "waiting", "idle"],
-  clingy_happy: ["waving", "jumping", "idle"],
-  clingy_wronged_happy: ["failed", "waving", "jumping", "idle"],
-  lazy_busy: ["review", "idle"],
-  quiet_sleepy: ["waiting", "idle"],
-  playful_proud: ["jumping", "waving", "idle"],
-  confused_wronged: ["failed", "waiting", "idle"],
-  neutral_companion: ["waving", "idle"],
+  soft_comfort: ["comfort", "listen", "idle"],
+  clingy_happy: ["happy", "greet", "idle"],
+  clingy_wronged_happy: ["deny", "happy", "idle"],
+  lazy_busy: ["pretend_busy", "lazy_idle", "idle"],
+  quiet_sleepy: ["nap", "idle"],
+  playful_proud: ["tease", "happy", "idle"],
+  confused_wronged: ["confused", "listen", "idle"],
+  neutral_companion: ["greet", "idle"],
 };
 
 const MOOD_FALLBACK: Record<string, DoudouAction[]> = {
-  happy: ["waving", "idle"],
-  shy: ["waving", "idle"],
-  excited: ["jumping", "idle"],
-  thinking: ["review", "idle"],
-  sad: ["failed", "waiting", "idle"],
-  angry: ["failed", "waiting", "idle"],
-  concerned: ["failed", "waiting", "idle"],
+  happy: ["happy", "idle"],
+  shy: ["happy", "idle"],
+  excited: ["excited", "idle"],
+  thinking: ["think", "idle"],
+  sad: ["comfort", "listen", "idle"],
+  angry: ["deny", "idle"],
+  concerned: ["comfort", "listen", "idle"],
   lonely: ["failed", "waiting", "idle"],
-  sleepy: ["waiting", "idle"],
+  sleepy: ["nap", "idle"],
   idle: ["idle"],
 };
 
@@ -106,7 +113,7 @@ export function isValidDoudouIntent(
 }
 
 function isValidAction(action: string): action is DoudouAction {
-  return (VALID_ACTIONS as readonly string[]).includes(action);
+  return (DOUDOU_ACTIONS as readonly string[]).includes(action);
 }
 
 function clampDuration(action: DoudouAction, duration?: number): number {
@@ -189,16 +196,16 @@ export function fallbackBehaviorPlan(
 
   // Phase-based
   if (phase === "listening") {
-    return [{ action: "waiting", slot: "speech", duration_ms: 1400 }];
+    return [{ action: "listen", slot: "speech", duration_ms: 1400 }];
   }
   if (phase === "thinking" || phase === "waiting_voice") {
-    return [{ action: "review", slot: "speech", duration_ms: 1400 }];
+    return [{ action: "think", slot: "speech", duration_ms: 1400 }];
   }
   if (phase === "speaking") {
-    return [{ action: "review", slot: "speech", duration_ms: 1400 }];
+    return [{ action: "speak", slot: "speech", duration_ms: 1400 }];
   }
   if (phase === "audio_error" || phase === "error") {
-    return [{ action: "failed", slot: "speech", duration_ms: 900 }];
+    return [{ action: "confused", slot: "speech", duration_ms: 900 }];
   }
 
   return [{ action: "idle", slot: "speech", duration_ms: 1400 }];
