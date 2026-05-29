@@ -1,13 +1,17 @@
 # V1.4 Stage 7 Completion: Integration, Nubia Deployment, And Live API
 
 **Date:** 2026-05-29
-**Deployed commit:** `274abfa`
+**Deployed code commit:** `274abfa`
 
 ## Result
 
 Stage 7 is complete. V1.4 was deployed to the connected Nubia device, the
 runtime started cleanly, live API tests passed, and the real notebook files on
 the phone were verified after migration.
+
+Later commits under `plan/V1.4/` are documentation-only and are excluded by the
+Nubia deployment archive. The deployed runtime/frontend/config code is
+`274abfa`.
 
 Two final migration fixes were added during integration:
 

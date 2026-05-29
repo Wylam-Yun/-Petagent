@@ -1,7 +1,7 @@
 # V1.4 Stage 1 Completion: Action Contract And Safe Fallbacks
 
 **Date:** 2026-05-29
-**Commit:** pending at time of writing
+**Commit:** `b3741cb`
 
 ## Result
 

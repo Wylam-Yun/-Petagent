@@ -1,11 +1,14 @@
-# V1.4 Stage 0 Completion: Action Asset Generation Spike
+# V1.4 Stage 0 / Spec Stage 6 Completion: Action Asset Generation Spike
 
 **Date:** 2026-05-29
+**Commit:** `db52f9e`
 **Project:** `/Users/wylam/Documents/workspace/Petagent`
 
 ## Scope Result
 
-Stage 0 stayed within the planned documentation and generated-artifact scope:
+This was executed before runtime stages as Stage 0, but it satisfies the V1.4
+spec's Stage 6 "Asset Pipeline Spike" requirements. It stayed within the
+planned documentation and generated-artifact scope:
 
 ```text
 plan/V1.4/generated/
