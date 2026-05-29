@@ -331,13 +331,19 @@ def test_successful_voice_reply_repairs_passive_listening_copy():
     ]
 
 
-def test_successful_voice_reply_keeps_normal_listening_words():
+def test_successful_voice_reply_keeps_normal_listening_words_and_user_quote():
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
+    replies = [
+        "听你的，我们继续把这件事往前推。",
+        "收到，关于“我想听你说一句新的话”，豆豆继续陪你聊。",
+        "我会认真听你说完，再自然接话。",
+        "这次听清了，我们继续聊。",
+    ]
 
     def natural_reply(messages):
         return {
-            "reply": "听你的，我们继续把这件事往前推。",
+            "reply": replies.pop(0),
             "mood": "thinking",
             "action": "speak",
             "voice_style": "soft",
@@ -345,15 +351,28 @@ def test_successful_voice_reply_keeps_normal_listening_words():
 
     provider.complete_json = natural_reply
 
-    response = app.state.dispatcher.handle_event(
-        {
-            "type": "voice_message",
-            "source": "voice_fast_reply",
-            "payload": {"user_text": "我们继续写代码"},
-        }
-    )
+    outputs = [
+        app.state.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_fast_reply",
+                "payload": {"user_text": user_text},
+            }
+        ).reply
+        for user_text in [
+            "我们继续写代码",
+            "我想听你说一句新的话",
+            "你先听我说完",
+            "这次听清了吗",
+        ]
+    ]
 
-    assert response.reply == "听你的，我们继续把这件事往前推。"
+    assert outputs == [
+        "听你的，我们继续把这件事往前推。",
+        "收到，关于“我想听你说一句新的话”，豆豆继续陪你聊。",
+        "我会认真听你说完，再自然接话。",
+        "这次听清了，我们继续聊。",
+    ]
 
 
 def test_thinking_voice_reply_does_not_claim_asr_failure():

@@ -488,7 +488,7 @@ function App() {
     if (nextPhase === "listening") {
       setFaceType("thinking");
       setAnimation("blink");
-      setBubbleText("嗯嗯，豆豆听着呢。");
+      setBubbleText("录音中。");
     } else if (nextPhase === "thinking") {
       setFaceType("thinking");
       setAnimation("blink");
