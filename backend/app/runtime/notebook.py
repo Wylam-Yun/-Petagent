@@ -26,6 +26,7 @@ _NEW_LINE_RE = re.compile(
 _OLD_LINE_RE = re.compile(
     r"^- (.+?) <!-- source:memory:\d+ type:(\S+) updated:\S+ ttl:\S+ -->$"
 )
+_CONTENT_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 _CATEGORY_WHITELIST = {"identity", "preference", "relationship", "project", "temporary"}
 
@@ -589,7 +590,11 @@ class NotebookManager:
                     if not old or new_cat not in _CATEGORY_WHITELIST or not new_content:
                         stats["errors"] += 1
                         continue
-                    if _is_too_long(new_content) or _is_sensitive(new_content):
+                    if (
+                        _is_too_long(new_content)
+                        or _is_sensitive(new_content)
+                        or _CONTENT_TIMESTAMP_RE.match(new_content)
+                    ):
                         stats["errors"] += 1
                         continue
                     found_idx = self._find_line_prefix(new_lines, old)
@@ -607,7 +612,14 @@ class NotebookManager:
                     if cat not in _CATEGORY_WHITELIST or not content:
                         stats["errors"] += 1
                         continue
-                    if _is_sensitive(content) or _is_too_long(content):
+                    if (
+                        _is_sensitive(content)
+                        or _is_too_long(content)
+                        or _CONTENT_TIMESTAMP_RE.match(content)
+                    ):
+                        stats["errors"] += 1
+                        continue
+                    if self._line_exists(path, content):
                         stats["errors"] += 1
                         continue
                     ts = _local_timestamp()
@@ -640,6 +652,9 @@ class NotebookManager:
         for i, line in enumerate(lines):
             stripped = line.strip()
             if stripped == old:
+                return i
+            entry = self._parse_line(stripped, i + 1)
+            if entry and _normalize_text(entry.content) == _normalize_text(old):
                 return i
             # Prefix match on timestamp+category portion
             old_parts = old.split("] ", 2)

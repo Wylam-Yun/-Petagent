@@ -129,6 +129,14 @@ providers:
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 60
+  memory_summarizer:
+    name: mimo_memory_summarizer
+    model_env: MIMO_MEMORY_MODEL
+    default_model: mimo-v2.5
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 30
+    max_tokens: 600
   tts_fallback:
     name: mimo
     model: mimo-v2.5-tts
@@ -149,6 +157,7 @@ providers:
         env={
             "MIMO_BASE_URL": "https://mimo.example/v1",
             "MIMO_API_KEY": "test-mimo-secret",
+            "MIMO_MEMORY_MODEL": "mimo-test-memory",
             "ASR_BASE_URL": "https://api.siliconflow.cn",
             "ASR_API_KEY": "test-asr-secret",
             "PETAGENT_ASR_PROXY_URL": "http://127.0.0.1:7897",
@@ -172,6 +181,10 @@ providers:
     assert settings.llm_fallback is not None
     assert settings.llm_fallback.model == "mimo-v2-omni"
     assert settings.llm_fast_fallback is not None
+    assert settings.memory_summarizer is not None
+    assert settings.memory_summarizer.name == "mimo_memory_summarizer"
+    assert settings.memory_summarizer.model == "mimo-test-memory"
+    assert settings.memory_summarizer.extra["max_tokens"] == 600
     assert settings.tts_fallback is not None
     assert settings.tts_fallback.model == "mimo-v2.5-tts"
     assert settings.voice_routing["allowed_audio_types"] == ["audio/wav"]

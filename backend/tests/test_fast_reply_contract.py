@@ -318,3 +318,52 @@ def test_fast_reply_no_memory_ack_without_trigger():
         }
     )
     assert response.memory_ack_hint is None
+
+
+def test_fast_reply_enqueues_memory_summary_without_calling_provider():
+    """After-turn memory summary is queued, not executed on the response path."""
+    app = create_app(testing=True)
+    queue = app.state.memory_judgment_queue
+    provider = queue._provider
+    calls = {"count": 0}
+
+    def complete_json(messages):
+        calls["count"] += 1
+        return {"add": [{"category": "preference", "content": "喜欢短回复"}], "update": [], "delete": []}
+
+    provider.complete_json = complete_json
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "我喜欢短回复"},
+        }
+    )
+
+    assert response.route == "fast_reply"
+    assert calls["count"] == 0
+    assert queue.pending_count() == 1
+
+
+def test_maintenance_processes_memory_summary_into_notebook():
+    app = create_app(testing=True)
+    queue = app.state.memory_judgment_queue
+    provider = queue._provider
+
+    def complete_json(messages):
+        return {"add": [{"category": "preference", "content": "偏好安静回应"}], "update": [], "delete": []}
+
+    provider.complete_json = complete_json
+
+    app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "今天先轻声聊一会"},
+        }
+    )
+    result = app.state.maintenance_service.tick(force=True)
+
+    assert result.get("memory_summary_adds") == 1
+    assert "偏好安静回应" in app.state.notebook_manager.read_raw("memory.md")

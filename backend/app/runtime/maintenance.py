@@ -121,7 +121,29 @@ class MaintenanceService:
             logger.warning("Curator batch failed", exc_info=True)
             result["curator_error"] = 1
 
-        # Priority 1.3: Nightly cleanup (V1.3, once per day)
+        # Priority 1.3: Process after-turn memory summary queue.
+        try:
+            if self.memory_judgment_queue and self.memory_judgment_queue.pending_count() > 0:
+                judgment = self.memory_judgment_queue.process_one()
+                if (
+                    judgment
+                    and judgment.get("operations") is not None
+                    and self.notebook_manager
+                ):
+                    stats = self.notebook_manager.apply_cleanup_operations(
+                        judgment["operations"]
+                    )
+                    if any(v > 0 for v in stats.values()):
+                        result.update({"memory_summary_%s" % k: v for k, v in stats.items()})
+                elif judgment and judgment.get("should_write") and self.notebook_manager:
+                    self.notebook_manager.append_line(
+                        judgment["target"], judgment["category"], judgment["content"]
+                    )
+                    result["memory_judgment_written"] = 1
+        except Exception:
+            logger.warning("Memory judgment processing failed", exc_info=True)
+
+        # Priority 1.5: Nightly cleanup (V1.4, once per day)
         try:
             if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run(force=force):
                 cleanup_result = self.nightly_cleanup_runner.run(force=force)
@@ -130,18 +152,6 @@ class MaintenanceService:
                     return result
         except Exception:
             logger.warning("Nightly cleanup failed", exc_info=True)
-
-        # Priority 1.5: Process memory judgment queue (V1.3)
-        try:
-            if self.memory_judgment_queue and self.memory_judgment_queue.pending_count() > 0:
-                judgment = self.memory_judgment_queue.process_one()
-                if judgment and judgment.get("should_write") and self.notebook_manager:
-                    self.notebook_manager.append_line(
-                        judgment["target"], judgment["category"], judgment["content"]
-                    )
-                    result["memory_judgment_written"] = 1
-        except Exception:
-            logger.warning("Memory judgment processing failed", exc_info=True)
 
         # Priority 2: Process pending episode summary jobs
         try:

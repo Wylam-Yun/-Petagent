@@ -1,7 +1,11 @@
 """Tests for V1.3 MemoryJudgmentQueue."""
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import mkdtemp
+
 from app.runtime.memory_judgment import MemoryJudgmentQueue
+from app.runtime.notebook import NotebookManager
 
 
 class MockProvider:
@@ -145,3 +149,64 @@ def test_process_one_clears_seen_on_process():
     # After processing, same input can be enqueued again
     result = q.enqueue("我喜欢咖啡", ["preference"])
     assert result is True
+
+
+def test_enqueue_turn_summary_processes_operations():
+    provider = MockProvider(result={
+        "add": [{"category": "preference", "content": "喜欢短回复"}],
+        "update": [],
+        "delete": [],
+    })
+    tmp = Path(mkdtemp())
+    notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
+    q = MemoryJudgmentQueue(provider=provider, notebook_manager=notebook)
+
+    assert q.enqueue_turn_summary(
+        user_text="我喜欢短回复",
+        pet_reply="豆豆记住啦",
+        route="fast_reply",
+        selected_memory=["旧记忆"],
+    ) is True
+
+    result = q.process_one()
+
+    assert result is not None
+    assert result["should_write"] is True
+    assert result["operations"]["add"] == [{
+        "target": "memory.md",
+        "category": "preference",
+        "content": "喜欢短回复",
+    }]
+    assert provider.last_messages is not None
+
+
+def test_explicit_turn_summary_evicts_oldest_normal_job_when_full():
+    provider = MockProvider(result={"add": [], "update": [], "delete": []})
+    q = MemoryJudgmentQueue(provider=provider, max_pending=2)
+
+    assert q.enqueue_turn_summary("普通1", "回复1", "fast_reply") is True
+    assert q.enqueue_turn_summary("普通2", "回复2", "fast_reply") is True
+    assert q.enqueue_turn_summary(
+        "记住我喜欢咖啡",
+        "我先记到小本本",
+        "fast_reply",
+        trigger_categories=["explicit"],
+    ) is True
+
+    assert q.pending_count() == 2
+    q.process_one()
+    assert "记住我喜欢咖啡" in provider.last_messages[1]["content"]
+
+
+def test_invalid_turn_summary_output_is_ignored_safely():
+    provider = MockProvider(result={
+        "add": [{"category": "bad", "content": "x"}],
+        "update": [{"old": "", "new_category": "preference", "new_content": "x"}],
+        "delete": [{"old": ""}],
+    })
+    q = MemoryJudgmentQueue(provider=provider)
+    q.enqueue_turn_summary("你好", "豆豆在", "fast_reply")
+
+    result = q.process_one()
+
+    assert result == {"should_write": False, "operations": {"add": [], "update": [], "delete": []}}

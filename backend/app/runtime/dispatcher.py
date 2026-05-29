@@ -477,16 +477,34 @@ class RuntimeDispatcher:
         if not is_fast_reply:
             self._collect_memory_candidates(event, action, episode_id)
 
-        # V1.3: Memory trigger detection (both fast reply and thinking)
+        reply_text = fast_action.reply if is_fast_reply else action.reply
+        route = "fast_reply" if is_fast_reply else "thinking"
+
+        # V1.4: after-turn memory summary is queued only. The summarizer LLM is
+        # called later by maintenance, never before returning the response.
         memory_ack = None
+        trigger_categories: List[str] = []
         if user_text:
             try:
                 trigger_categories = detect_memory_triggers(user_text)
-                if trigger_categories:
-                    if self.memory_judgment_queue is not None:
-                        self.memory_judgment_queue.enqueue(user_text, trigger_categories)
-                    if "explicit" in trigger_categories:
-                        memory_ack = "我先记到小本本"
+                if "explicit" in trigger_categories:
+                    memory_ack = "我先记到小本本"
+            except Exception:
+                trigger_categories = []
+        if user_text and self.memory_judgment_queue is not None:
+            try:
+                selected_memory = []
+                if cognition_context:
+                    raw_selected = cognition_context.get("selected_card_items") or []
+                    if isinstance(raw_selected, list):
+                        selected_memory = [str(item) for item in raw_selected[:10] if item]
+                self.memory_judgment_queue.enqueue_turn_summary(
+                    user_text=user_text,
+                    pet_reply=reply_text,
+                    route=route,
+                    selected_memory=selected_memory,
+                    trigger_categories=trigger_categories,
+                )
             except Exception:
                 pass
 

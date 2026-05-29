@@ -105,6 +105,16 @@ providers:
     timeout_seconds: 30
     chat_template_kwargs:
       enable_thinking: false
+  memory_summarizer:
+    name: mimo_memory_summarizer
+    model_env: MIMO_MEMORY_MODEL
+    default_model: mimo-v2.5
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 30
+    chat_template_kwargs:
+      enable_thinking: false
+    max_tokens: 600
   tts_fallback:
     name: mimo
     model: mimo-v2.5-tts

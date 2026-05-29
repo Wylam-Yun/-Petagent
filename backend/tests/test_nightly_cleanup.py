@@ -172,6 +172,31 @@ def test_apply_rejects_sensitive_content():
     assert result.get("errors", 0) >= 1 or result.get("adds", 0) == 0
 
 
+def test_apply_rejects_model_timestamp_in_content():
+    runner, nm, provider, ms, gate, dispatcher = _make_runner()
+    provider.complete_json.return_value = {
+        "add": [{"target": "memory.md", "category": "preference", "content": "2026-05-29 喜欢短回复"}],
+        "update": [],
+        "delete": [],
+    }
+    result = runner.run()
+    assert result.get("errors", 0) >= 1 or result.get("adds", 0) == 0
+    assert "2026-05-29 喜欢短回复" not in nm.read_raw("memory.md")
+
+
+def test_apply_skips_duplicate_add_content():
+    runner, nm, provider, ms, gate, dispatcher = _make_runner()
+    provider.complete_json.return_value = {
+        "add": [{"target": "memory.md", "category": "preference", "content": "喜欢咖啡。"}],
+        "update": [],
+        "delete": [],
+    }
+    result = runner.run()
+    assert result.get("adds", 0) == 0
+    assert result.get("errors", 0) >= 1
+    assert nm.read_raw("memory.md").count("喜欢咖啡。") == 1
+
+
 def test_apply_skips_update_when_old_line_missing():
     runner, nm, provider, ms, gate, dispatcher = _make_runner()
     provider.complete_json.return_value = {

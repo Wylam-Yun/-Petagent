@@ -93,6 +93,17 @@ def _select_llm_provider(
     return primary
 
 
+def _select_memory_summarizer_provider(settings: Settings, testing: bool):
+    config = settings.memory_summarizer or settings.llm_fallback or settings.llm
+    return _select_llm_provider(
+        settings,
+        testing,
+        config,
+        "mock_memory_summarizer",
+        fallback_config=None,
+    )
+
+
 def _select_tts_provider(settings: Settings, testing: bool):
     if testing:
         return MockTTSProvider(settings.audio_dir)
@@ -221,8 +232,9 @@ def create_app(testing: bool = False) -> FastAPI:
     proactive_brain = PetBrain(settings, ProactiveRuleProvider())
 
     memory_judgment_queue = MemoryJudgmentQueue(
-        provider=slow_llm_provider,
+        provider=_select_memory_summarizer_provider(settings, testing),
         provider_gate=None,  # wired after provider_gate is created
+        notebook_manager=notebook_manager,
     )
 
     memory_curator = MemoryCurator(
@@ -485,6 +497,8 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.incident_store = incident_store
     app.state.agent_run_registry = agent_run_registry
     app.state.memory_card_manager = memory_card_manager
+    app.state.notebook_manager = notebook_manager
+    app.state.memory_judgment_queue = memory_judgment_queue
     app.state.policy_guard = policy_guard
     app.state.agent_work_executor = agent_work_executor
     app.state.proactive_scheduler = proactive_scheduler

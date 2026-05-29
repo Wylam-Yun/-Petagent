@@ -44,6 +44,7 @@ class Settings:
     llm_fast: Optional[ProviderConfig]
     llm_fallback: Optional[ProviderConfig]
     llm_fast_fallback: Optional[ProviderConfig]
+    memory_summarizer: Optional[ProviderConfig]
     audio_understanding: ProviderConfig
     asr: Optional[ProviderConfig]
     tts: ProviderConfig
@@ -115,11 +116,17 @@ def _env_value(env_values: Mapping[str, str], value: Any) -> str:
 def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> ProviderConfig:
     base_url_env = raw.get("base_url_env", "MIMO_BASE_URL")
     api_key_env = raw.get("api_key_env", "MIMO_API_KEY")
+    model = str(raw.get("model", ""))
+    model_env = raw.get("model_env")
+    if model_env:
+        model = env_values.get(str(model_env)) or str(raw.get("default_model") or model)
     extra: Dict[str, Any] = {}
     for key, value in raw.items():
         if key in {
             "name",
             "model",
+            "model_env",
+            "default_model",
             "base_url_env",
             "api_key_env",
             "timeout_seconds",
@@ -134,7 +141,7 @@ def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> Prov
             extra[key] = value
     return ProviderConfig(
         name=raw.get("name", "mimo"),
-        model=raw.get("model", ""),
+        model=model,
         base_url=_env_value(env_values, base_url_env),
         api_key_env=_env_name(api_key_env),
         timeout_seconds=int(raw.get("timeout_seconds", 60)),
@@ -187,6 +194,12 @@ def load_settings(
         if llm_fast_fallback_raw
         else None
     )
+    memory_summarizer_raw = providers.get("memory_summarizer")
+    memory_summarizer = (
+        _provider_config(memory_summarizer_raw, env_values)
+        if memory_summarizer_raw
+        else None
+    )
     audio_understanding = _provider_config(
         providers.get("audio_understanding", providers.get("llm", {})), env_values
     )
@@ -224,6 +237,7 @@ def load_settings(
         tts_fallback=tts_fallback,
         llm_fallback=llm_fallback,
         llm_fast_fallback=llm_fast_fallback,
+        memory_summarizer=memory_summarizer,
         voice_routing=voice_routing,
         api_key=api_key,
     )

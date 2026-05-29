@@ -375,6 +375,19 @@ MEMORY_JUDGMENT_SCHEMA = {
 }
 
 
+MEMORY_SUMMARY_SCHEMA = {
+    "add": [
+        {"category": "identity/preference/relationship/project/temporary", "content": "新记忆一句话"}
+    ],
+    "update": [
+        {"old": "原始行全文（含 - [timestamp][category]）", "new_category": "新分类", "new_content": "新内容一句话"}
+    ],
+    "delete": [
+        {"old": "原始行全文（含 - [timestamp][category]）", "reason": "删除原因"}
+    ],
+}
+
+
 def build_memory_judgment_messages(
     user_text: str, trigger_categories: list
 ) -> list:
@@ -392,6 +405,42 @@ def build_memory_judgment_messages(
         "user_text": user_text,
         "trigger_categories": trigger_categories,
         "output_schema": MEMORY_JUDGMENT_SCHEMA,
+    }
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def build_memory_summary_messages(
+    user_text: str,
+    pet_reply: str,
+    route: str,
+    selected_memory: list,
+    memory_content: str,
+    trigger_categories: list,
+) -> list:
+    """Build prompt for after-turn notebook summarization."""
+    system_prompt = (
+        "你是豆豆的小本本后台整理器。当前回复已经给用户了，你只判断这一轮对话是否需要更新 memory.md。\n"
+        "用户体验规则：\n"
+        "1. 只记录会让豆豆以后更懂主人的信息。\n"
+        "2. 明确说“记住/别忘了/写进小本本”的内容优先判断。\n"
+        "3. 不记录普通寒暄、短暂情绪、重复信息、密钥、口令、token 或大段原话。\n"
+        "4. 不输出时间戳；后台会自动加时间。\n"
+        "5. 只能输出 add/update/delete JSON，不要解释，不要输出 target。\n"
+        "6. 没有值得更新的内容时输出 {\"add\":[],\"update\":[],\"delete\":[]}。"
+    )
+    payload = {
+        "turn": {
+            "user_text": user_text,
+            "pet_reply": pet_reply,
+            "route": route,
+            "trigger_categories": trigger_categories,
+        },
+        "selected_memory": [str(item) for item in selected_memory[:10] if item],
+        "memory_md": memory_content or "（空）",
+        "output_schema": MEMORY_SUMMARY_SCHEMA,
     }
     return [
         {"role": "system", "content": system_prompt},
