@@ -156,6 +156,7 @@ class RuntimeDispatcher:
                 run.route = decision.route
                 run.context_profile = decision.context_profile
                 run.provider = decision.provider_profile
+                run.sanitized_user_text = user_text[:500]
                 run.set_status("planning")
 
             # Apply tick
@@ -328,6 +329,7 @@ class RuntimeDispatcher:
                     "action": fast_action.action or "",
                     "voice_style": fast_action.voice_style,
                 }
+                run.sanitized_response_text = fast_action.reply[:500]
             # Minimal state update: mood + last_interaction_at only
             final_state = dict(ruled_state)
             if fast_action.mood:
@@ -348,6 +350,7 @@ class RuntimeDispatcher:
                     "animation": action.animation,
                     "voice_style": action.voice_style,
                 }
+                run.sanitized_response_text = action.reply[:500]
             # Compute state delta (deterministic, can be recomputed on CAS retry)
             sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
             if "energy" in action.state_delta:

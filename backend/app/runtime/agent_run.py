@@ -38,6 +38,8 @@ class AgentRun:
     tool_observations: List[Dict[str, Any]] = field(default_factory=list)
     final_action: Optional[Dict[str, Any]] = None
     audio_job_id: Optional[str] = None
+    sanitized_user_text: str = ""
+    sanitized_response_text: str = ""
     timings_ms: Dict[str, int] = field(default_factory=dict)
     status: str = "started"
     error: Optional[str] = None
@@ -65,6 +67,8 @@ class AgentRun:
             "tool_observations": self.tool_observations,
             "final_action": self.final_action,
             "audio_job_id": self.audio_job_id,
+            "sanitized_user_text": _sanitize_text(self.sanitized_user_text),
+            "sanitized_response_text": _sanitize_text(self.sanitized_response_text),
             "timings_ms": dict(self.timings_ms),
             "status": self.status,
             "error": self.error,
@@ -72,6 +76,19 @@ class AgentRun:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+def _sanitize_text(text: str) -> str:
+    """Strip anything that looks like a key or token from debug text."""
+    if not text:
+        return ""
+    result = str(text)
+    for marker in ("sk-", "tp-", "nvapi-", "Bearer ", "token="):
+        idx = result.find(marker)
+        if idx >= 0:
+            result = result[:idx] + "[REDACTED]"
+            break
+    return result[:500]
 
 
 class AgentRunRegistry:

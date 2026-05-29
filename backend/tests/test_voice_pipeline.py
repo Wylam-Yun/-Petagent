@@ -119,6 +119,32 @@ def test_fast_voice_asr_error_returns_local_recovery():
     assert route["asr_error_code"] == "asr_http_401"
 
 
+def test_fast_voice_low_information_asr_returns_local_recovery():
+    class LowInformationASR:
+        name = "future_asr"
+
+        def transcribe(self, audio_path, content_type):
+            return ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider=self.name,
+                error_code="asr_low_information",
+                error_message="ASR transcript was too short for the uploaded audio",
+            )
+
+    app = create_app(testing=True)
+    app.state.voice_pipeline.asr_provider = LowInformationASR()
+    client = TestClient(app)
+
+    response = post_voice(client)
+
+    assert response.status_code == 200
+    route = response.json()["voice_route"]
+    assert route["selected"] == "fast_reply"
+    assert route["fallback_reason"] == "asr_low_information"
+    assert route["asr_failed_hint"] == "没听清"
+
+
 def test_thinking_voice_uses_audio_understanding_when_asr_empty():
     """V1.3: thinking mode uses audio_understanding first; ASR empty is irrelevant."""
     app = create_app(testing=True)
