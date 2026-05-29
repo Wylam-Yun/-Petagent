@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from time import sleep
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -8,6 +9,8 @@ import requests
 
 from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
+
+logger = logging.getLogger(__name__)
 
 
 def _timeout_tuple(scalar: int, connect: int = 2) -> tuple:
@@ -112,14 +115,22 @@ class HttpASRProvider:
         if not self.config.base_url:
             return self._error("asr_not_configured", "ASR base URL is not configured")
 
-        attempts = self._max_attempts()
         models = self._model_candidates()
+        attempts = self._max_attempts(models)
         last_transcript = self._error("asr_provider_error", "ASR provider failed")
         for attempt in range(attempts):
-            model = models[attempt % len(models)]
+            model_index = attempt % len(models)
+            model = models[model_index]
             last_transcript = self._transcribe_once(audio_path, content_type, model)
-            if not self._should_retry(last_transcript.error_code, attempt, attempts):
+            if not self._should_retry(last_transcript, attempt, attempts, model_index, len(models)):
                 return last_transcript
+            logger.info(
+                "http_asr_retry provider=%s model=%s reason=%s next_attempt=%d",
+                self.name,
+                model,
+                last_transcript.error_code or "empty_transcript",
+                attempt + 2,
+            )
             sleep(self._retry_backoff_seconds(attempt))
         return last_transcript
 
@@ -172,12 +183,12 @@ class HttpASRProvider:
                 deduped.append(model)
         return deduped or [self.config.model]
 
-    def _max_attempts(self) -> int:
+    def _max_attempts(self, models: List[str]) -> int:
         try:
             retries = int(self.config.extra.get("transient_retries", 0))
         except (TypeError, ValueError):
             retries = 0
-        return max(1, min(4, retries + 1))
+        return max(1, min(4, max(retries + 1, len(models))))
 
     def _retry_backoff_seconds(self, attempt: int) -> float:
         try:
@@ -186,7 +197,18 @@ class HttpASRProvider:
             base = 0.25
         return max(0.0, min(2.0, base * (attempt + 1)))
 
-    def _should_retry(self, error_code: str, attempt: int, attempts: int) -> bool:
+    def _should_retry(
+        self,
+        transcript: ASRTranscript,
+        attempt: int,
+        attempts: int,
+        model_index: int,
+        model_count: int,
+    ) -> bool:
+        error_code = transcript.error_code
+        if not transcript.text.strip() and not error_code:
+            retry_empty = self.config.extra.get("retry_empty_transcript", True)
+            return bool(retry_empty) and model_index < model_count - 1
         if not error_code or attempt >= attempts - 1:
             return False
         if error_code in {"asr_request_error", "asr_provider_error"}:

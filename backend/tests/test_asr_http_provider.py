@@ -258,6 +258,78 @@ def test_http_asr_uses_fallback_model_for_transient_retry(tmp_path: Path, monkey
     assert transcript.error_code == ""
 
 
+def test_http_asr_uses_fallback_model_when_primary_returns_empty_text(
+    tmp_path: Path, monkeypatch
+):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF real mic wav")
+    config = provider_config()
+    config.extra["retry_backoff_seconds"] = 0
+    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
+    models = []
+
+    class EmptyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": ""}
+
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "真实麦克风录音听清了", "confidence": 0.93}
+
+    def fake_post(url, **kwargs):
+        models.append(kwargs["data"]["model"])
+        return EmptyResponse() if len(models) == 1 else SuccessResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert models == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
+    assert transcript.text == "真实麦克风录音听清了"
+    assert transcript.confidence == 0.93
+    assert transcript.error_code == ""
+
+
+def test_http_asr_empty_text_retry_can_be_disabled(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF real mic wav")
+    config = provider_config()
+    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
+    config.extra["retry_empty_transcript"] = False
+    models = []
+
+    class EmptyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": ""}
+
+    def fake_post(url, **kwargs):
+        models.append(kwargs["data"]["model"])
+        return EmptyResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert models == ["parakeet-ctc-0.6b-zh-cn"]
+    assert transcript.text == ""
+    assert transcript.error_code == ""
+
+
 def test_http_asr_does_not_retry_client_errors(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
