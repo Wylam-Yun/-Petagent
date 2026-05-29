@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
-import wave
 from pathlib import Path
 from time import sleep
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -125,58 +123,6 @@ def _contains_script(text: str, ranges: Tuple[Tuple[str, str], ...]) -> bool:
     return any(start <= char <= end for char in text for start, end in ranges)
 
 
-_LOW_INFORMATION_TEXTS = {
-    "你", "哦", "噢", "喔", "嗯", "恩", "啊", "阿", "呃", "额",
-    "诶", "唉", "哎", "呀", "哟", "呐", "呢", "吧", "啦", "哈", "嘿",
-    "嗯嗯", "哦哦", "啊啊", "呃呃",
-}
-_TEXT_PUNCT_RE = re.compile(r"[\s,，.。!！?？、~～…·:：;；\"'“”‘’（）()【】\[\]{}<>《》]+")
-
-
-def _normalized_asr_text(text: str) -> str:
-    return _TEXT_PUNCT_RE.sub("", str(text or "").strip())
-
-
-def _audio_duration_seconds(audio_path: Path) -> Optional[float]:
-    if audio_path.suffix.lower() != ".wav":
-        return None
-    try:
-        with wave.open(str(audio_path), "rb") as wav:
-            rate = wav.getframerate()
-            if rate <= 0:
-                return None
-            return float(wav.getnframes()) / float(rate)
-    except Exception:
-        return None
-
-
-def _is_low_information_text(
-    text: str,
-    *,
-    audio_duration_s: Optional[float],
-    min_audio_seconds: float,
-    max_cjk_chars: int,
-    reject_short_cjk_text: bool,
-    extra_low_information_texts: Iterable[str],
-) -> bool:
-    if audio_duration_s is None or audio_duration_s < min_audio_seconds:
-        return False
-    normalized = _normalized_asr_text(text)
-    if not normalized:
-        return False
-    low_information = set(_LOW_INFORMATION_TEXTS)
-    low_information.update(
-        _normalized_asr_text(item) for item in extra_low_information_texts if item
-    )
-    if normalized in low_information:
-        return True
-    if not reject_short_cjk_text:
-        return False
-    cjk_count = sum(1 for char in normalized if _contains_script(char, _CJK_RANGES))
-    non_cjk_count = len(normalized) - cjk_count
-    return cjk_count <= max_cjk_chars and non_cjk_count == 0
-
-
 class HttpASRProvider:
     def __init__(self, config: ProviderConfig) -> None:
         self.config = config
@@ -221,12 +167,7 @@ class HttpASRProvider:
                 text_paths=self.config.extra.get("transcript_paths") or [],
                 confidence_paths=self.config.extra.get("confidence_paths") or [],
             )
-            text, rejected_reason = self._validated_text(text, audio_path)
-            if rejected_reason == "low_information":
-                return self._error(
-                    "asr_low_information",
-                    "ASR transcript was too short for the uploaded audio",
-                )
+            text = self._validated_text(text)
             return ASRTranscript(text=text, confidence=confidence, provider=self.name)
         except requests.Timeout:
             return self._error("asr_timeout", "ASR HTTP request timed out")
@@ -285,11 +226,6 @@ class HttpASRProvider:
         model_count: int,
     ) -> bool:
         error_code = transcript.error_code
-        if error_code == "asr_low_information":
-            retry_low_information = self.config.extra.get(
-                "retry_low_information_transcript", True
-            )
-            return bool(retry_low_information) and model_index < model_count - 1
         if not transcript.text.strip() and not error_code:
             retry_empty = self.config.extra.get("retry_empty_transcript", True)
             return bool(retry_empty) and model_index < model_count - 1
@@ -305,63 +241,20 @@ class HttpASRProvider:
             return 500 <= status <= 599
         return False
 
-    def _validated_text(self, text: str, audio_path: Path) -> Tuple[str, str]:
+    def _validated_text(self, text: str) -> str:
         text = str(text or "").strip()
         required_script = str(self.config.extra.get("required_text_script") or "").lower()
-        if not text:
-            return text, ""
-        if required_script in {"zh", "cjk"}:
-            if not (
-                _contains_script(text, _CJK_RANGES)
-                and not _contains_script(text, _NON_ZH_SCRIPT_RANGES)
-            ):
-                logger.info(
-                    "http_asr_reject_text provider=%s required_script=%s text_len=%d reason=script_mismatch",
-                    self.name,
-                    required_script,
-                    len(text),
-                )
-                return "", "script_mismatch"
-        if self._rejects_low_information_text(text, audio_path):
-            logger.info(
-                "http_asr_reject_text provider=%s text_len=%d reason=low_information",
-                self.name,
-                len(text),
-            )
-            return "", "low_information"
-        return text, ""
-
-    def _rejects_low_information_text(self, text: str, audio_path: Path) -> bool:
-        if self.config.extra.get("reject_low_information_text", True) is False:
-            return False
-        try:
-            min_audio_seconds = float(
-                self.config.extra.get("low_information_min_audio_seconds", 1.5)
-            )
-        except (TypeError, ValueError):
-            min_audio_seconds = 1.5
-        try:
-            max_cjk_chars = int(
-                self.config.extra.get("low_information_max_cjk_chars", 1)
-            )
-        except (TypeError, ValueError):
-            max_cjk_chars = 1
-        extra_texts = self.config.extra.get("low_information_texts") or []
-        if isinstance(extra_texts, str):
-            extra_texts = [extra_texts]
-        if not isinstance(extra_texts, list):
-            extra_texts = []
-        reject_short_cjk_text = bool(
-            self.config.extra.get("reject_short_cjk_text", False)
+        if not text or required_script not in {"zh", "cjk"}:
+            return text
+        if _contains_script(text, _CJK_RANGES) and not _contains_script(text, _NON_ZH_SCRIPT_RANGES):
+            return text
+        logger.info(
+            "http_asr_reject_text provider=%s required_script=%s text_len=%d reason=script_mismatch",
+            self.name,
+            required_script,
+            len(text),
         )
-        return _is_low_information_text(
-            text,
-            audio_duration_s=_audio_duration_seconds(audio_path),
-            min_audio_seconds=max(0.0, min_audio_seconds),
-            max_cjk_chars=max(0, max_cjk_chars),
-            reject_short_cjk_text=reject_short_cjk_text,
-            extra_low_information_texts=[str(item) for item in extra_texts],
-        )
+        return ""
 
     def _error(self, code: str, message: str) -> ASRTranscript:
         return ASRTranscript(

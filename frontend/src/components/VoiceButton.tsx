@@ -107,9 +107,7 @@ export function VoiceButton({
       if (uploadRunRef.current !== uploadRun) return;
       onVoiceResponse(response);
       const fallbackReason = response.voice_route?.fallback_reason;
-      if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
-        onError("豆豆没太听清，再说一次？");
-      } else if (fallbackReason === "asr_timeout") {
+      if (fallbackReason === "asr_timeout") {
         onError("语音识别有点慢，再说一次？");
       } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
         onError("语音识别暂时不太灵，但豆豆还在听。");

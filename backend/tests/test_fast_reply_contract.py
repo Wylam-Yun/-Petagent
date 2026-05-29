@@ -121,6 +121,108 @@ def test_fast_reply_response_has_route_and_action():
     assert response.behavior_plan is None
 
 
+def test_fast_reply_dedupes_repeated_reply_before_tts():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def repeated_reply(messages):
+        return {
+            "reply": "嗯…主人在叫豆豆嘛～可是现在好困，眼皮在打架呢…",
+            "mood": "sleepy",
+            "action": "nap",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = repeated_reply
+
+    first = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "你好豆豆"},
+        }
+    )
+    second = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "今天还好吗"},
+        }
+    )
+
+    assert first.reply == "嗯…主人在叫豆豆嘛～可是现在好困，眼皮在打架呢…"
+    assert second.reply == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
+    assert second.action == "confused"
+
+
+def test_fast_reply_dedupes_similar_reply_with_generic_similarity():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+    replies = [
+        "豆豆竖起耳朵在听，主人慢慢说。",
+        "豆豆竖起耳朵听着呢，主人再说。",
+    ]
+
+    def similar_reply(messages):
+        return {
+            "reply": replies.pop(0),
+            "mood": "thinking",
+            "action": "listen",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = similar_reply
+
+    first = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "你好豆豆"},
+        }
+    )
+    second = app.state.dispatcher.handle_event(
+        {
+            "type": "voice_message",
+            "source": "voice_fast_reply",
+            "payload": {"user_text": "你听见了吗"},
+        }
+    )
+
+    assert first.reply == "豆豆竖起耳朵在听，主人慢慢说。"
+    assert second.reply == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
+    assert second.action == "confused"
+
+
+def test_fast_reply_rotates_duplicate_recovery_reply():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    def repeated_reply(messages):
+        return {
+            "reply": "豆豆竖起耳朵在听，主人慢慢说。",
+            "mood": "thinking",
+            "action": "listen",
+            "voice_style": "soft",
+        }
+
+    provider.complete_json = repeated_reply
+
+    replies = [
+        app.state.dispatcher.handle_event(
+            {
+                "type": "voice_message",
+                "source": "voice_fast_reply",
+                "payload": {"user_text": f"第{i}句"},
+            }
+        ).reply
+        for i in range(3)
+    ]
+
+    assert replies[0] == "豆豆竖起耳朵在听，主人慢慢说。"
+    assert replies[1] == "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？"
+    assert replies[2] == "这句豆豆有点接歪了，主人再说清楚一点点？"
+
+
 def test_thinking_response_has_route():
     """Thinking mode PetResponse includes route='thinking'."""
     app = create_app(testing=True)

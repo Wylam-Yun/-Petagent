@@ -88,7 +88,21 @@ def test_fast_voice_asr_failure_returns_local_recovery():
     assert body["voice_route"]["selected"] == "fast_reply"
     assert body["voice_route"]["fallback_reason"] == "asr_empty"
     assert body["voice_route"]["asr_failed_hint"] == "没听清"
-    assert body["reply"]  # fallback reply is present
+    assert body["reply"] == "没听清，再说一次嘛~"
+
+
+def test_fast_voice_asr_failure_recovery_reply_rotates():
+    app = create_app(testing=True)
+    app.state.asr_provider.text = ""
+    client = TestClient(app)
+
+    first = post_voice(client).json()
+    second = post_voice(client).json()
+
+    assert first["voice_route"]["fallback_reason"] == "asr_empty"
+    assert second["voice_route"]["fallback_reason"] == "asr_empty"
+    assert first["reply"] == "没听清，再说一次嘛~"
+    assert second["reply"] == "刚刚那句声音有点糊，主人再说一遍？"
 
 
 def test_fast_voice_asr_error_returns_local_recovery():

@@ -402,95 +402,9 @@ def test_http_asr_returns_empty_when_all_required_script_candidates_fail(
     assert transcript.error_code == ""
 
 
-def _write_silent_wav(path: Path, duration_seconds: float = 2.0) -> None:
-    import wave
-
-    sample_rate = 16000
-    frame_count = int(sample_rate * duration_seconds)
-    with wave.open(str(path), "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
-        wav.writeframes(b"\x00\x00" * frame_count)
-
-
-def test_http_asr_retries_low_information_text_for_long_audio(
-    tmp_path: Path, monkeypatch
-):
+def test_http_asr_allows_single_character_text(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
-    _write_silent_wav(audio, duration_seconds=3.0)
-    config = provider_config()
-    config.extra["retry_backoff_seconds"] = 0
-    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
-    config.extra["required_text_script"] = "zh"
-    models = []
-
-    class LowInformationResponse:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"text": "哦。", "confidence": 1.0}
-
-    class SuccessResponse:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"text": "豆豆我想和你说话", "confidence": 0.83}
-
-    def fake_post(url, **kwargs):
-        models.append(kwargs["data"]["model"])
-        return LowInformationResponse() if len(models) == 1 else SuccessResponse()
-
-    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
-
-    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
-
-    assert models == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
-    assert transcript.text == "豆豆我想和你说话"
-    assert transcript.error_code == ""
-
-
-def test_http_asr_returns_low_information_error_when_all_candidates_are_too_short(
-    tmp_path: Path, monkeypatch
-):
-    audio = tmp_path / "voice.wav"
-    _write_silent_wav(audio, duration_seconds=3.0)
-    config = provider_config()
-    config.extra["retry_backoff_seconds"] = 0
-    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
-    models = []
-
-    class LowInformationResponse:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"text": "你。", "confidence": 1.0}
-
-    def fake_post(url, **kwargs):
-        models.append(kwargs["data"]["model"])
-        return LowInformationResponse()
-
-    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
-
-    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
-
-    assert models == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
-    assert transcript.text == ""
-    assert transcript.error_code == "asr_low_information"
-
-
-def test_http_asr_allows_single_character_for_short_audio(tmp_path: Path, monkeypatch):
-    audio = tmp_path / "voice.wav"
-    _write_silent_wav(audio, duration_seconds=0.8)
+    audio.write_bytes(b"RIFF real mic wav")
     config = provider_config()
 
     class SingleCharacterResponse:
@@ -514,61 +428,60 @@ def test_http_asr_allows_single_character_for_short_audio(tmp_path: Path, monkey
     assert transcript.error_code == ""
 
 
-def test_http_asr_allows_meaningful_single_character_for_long_audio(
+def test_http_asr_allows_confirmation_word_without_fixed_blocklist(
     tmp_path: Path, monkeypatch
 ):
     audio = tmp_path / "voice.wav"
-    _write_silent_wav(audio, duration_seconds=3.0)
+    audio.write_bytes(b"RIFF real mic wav")
     config = provider_config()
 
-    class SingleCharacterResponse:
+    class ConfirmationResponse:
         status_code = 200
 
         def raise_for_status(self):
             return None
 
         def json(self):
-            return {"text": "不", "confidence": 0.8}
+            return {"text": "是", "confidence": 0.8}
 
     monkeypatch.setattr(
         "app.providers.asr_http.requests.post",
-        lambda url, **kwargs: SingleCharacterResponse(),
+        lambda url, **kwargs: ConfirmationResponse(),
     )
 
     transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert transcript.text == "不"
+    assert transcript.text == "是"
     assert transcript.confidence == 0.8
     assert transcript.error_code == ""
 
 
-def test_http_asr_can_reject_any_short_cjk_text_when_configured(
+def test_http_asr_allows_music_symbol_text_without_fixed_blocklist(
     tmp_path: Path, monkeypatch
 ):
     audio = tmp_path / "voice.wav"
-    _write_silent_wav(audio, duration_seconds=3.0)
+    audio.write_bytes(b"RIFF real mic wav")
     config = provider_config()
-    config.extra["fallback_models"] = []
-    config.extra["reject_short_cjk_text"] = True
 
-    class SingleCharacterResponse:
+    class NoiseResponse:
         status_code = 200
 
         def raise_for_status(self):
             return None
 
         def json(self):
-            return {"text": "不", "confidence": 0.8}
+            return {"text": "🎼到这里来。忙二。", "confidence": 0.8}
 
     monkeypatch.setattr(
         "app.providers.asr_http.requests.post",
-        lambda url, **kwargs: SingleCharacterResponse(),
+        lambda url, **kwargs: NoiseResponse(),
     )
 
     transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert transcript.text == ""
-    assert transcript.error_code == "asr_low_information"
+    assert transcript.text == "🎼到这里来。忙二。"
+    assert transcript.confidence == 0.8
+    assert transcript.error_code == ""
 
 
 def test_http_asr_empty_text_retry_can_be_disabled(tmp_path: Path, monkeypatch):

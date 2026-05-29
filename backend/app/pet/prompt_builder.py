@@ -231,6 +231,8 @@ def build_fast_reply_messages(
     if event.type == "voice_message":
         system_prompt += (
             "\n6. 如果识别置信度低，可以说刚刚有点没听清。"
+            "\n7. 如果你不确定识别结果是否可靠，不要强行猜测，简短请用户再说一遍。"
+            "\n8. 不要连续复用最近一次回复的句式、动作或意象。"
         )
 
     # Build minimal payload — only essential fields

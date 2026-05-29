@@ -54,17 +54,6 @@ providers:
     language_field: language
     language_code: zh
     required_text_script: zh
-    reject_low_information_text: true
-    retry_low_information_transcript: true
-    reject_short_cjk_text: false
-    low_information_min_audio_seconds: 1.5
-    low_information_max_cjk_chars: 1
-    low_information_texts:
-      - 你
-      - 哦
-      - 嗯
-      - 啊
-      - 呃
     auth_scheme: bearer
     proxy_url_env:
       - SILICONFLOW_PROXY_URL

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict
@@ -17,6 +18,14 @@ from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
 
 logger = logging.getLogger(__name__)
+
+FAST_ASR_RECOVERY_REPLIES = (
+    "没听清，再说一次嘛~",
+    "刚刚那句声音有点糊，主人再说一遍？",
+    "豆豆听到一点点，但不敢乱猜，再讲一次嘛。",
+    "这句没识别完整，主人说长一点好不好？",
+    "豆豆刚刚没接准，换个说法再来一次？",
+)
 
 
 def _now_ms(start: float) -> int:
@@ -50,6 +59,8 @@ class VoicePipeline:
         self.slow_brain_provider_name = slow_brain_provider_name
         self.activation_manager = activation_manager
         self.provider_gate = provider_gate
+        self._fast_asr_recovery_index = 0
+        self._fast_asr_recovery_lock = threading.Lock()
 
     def handle(
         self,
@@ -169,8 +180,9 @@ class VoicePipeline:
             elif not thinking_mode:
                 # Fast reply: ASR failed, return local recovery instead of heavy fallback
                 timings["total"] = _now_ms(started)
+                recovery_reply = self._next_fast_asr_recovery_reply()
                 fallback_response = PetResponse(
-                    reply="没听清，再说一次嘛~",
+                    reply=recovery_reply,
                     mood="idle",
                     face_type="idle",
                     animation="breathing",
@@ -456,6 +468,14 @@ class VoicePipeline:
 
     def _asr_name(self) -> str:
         return str(getattr(self.asr_provider, "name", "unknown_asr"))
+
+    def _next_fast_asr_recovery_reply(self) -> str:
+        with self._fast_asr_recovery_lock:
+            reply = FAST_ASR_RECOVERY_REPLIES[
+                self._fast_asr_recovery_index % len(FAST_ASR_RECOVERY_REPLIES)
+            ]
+            self._fast_asr_recovery_index += 1
+            return reply
 
     def _transcribe_with_gate(self, audio_path: Path, content_type: str) -> ASRTranscript:
         acquired = False

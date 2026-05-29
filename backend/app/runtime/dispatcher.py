@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from difflib import SequenceMatcher
 from datetime import datetime
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -14,7 +15,7 @@ from app.pet.guard import guard_action, guard_fast_reply_action
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
-from app.runtime.actions import PetResponse
+from app.runtime.actions import FastReplyAction, PetResponse
 from app.runtime.agent_run import AgentRun
 from app.runtime.context import build_runtime_context
 from app.runtime.context_manager import ContextManager
@@ -27,6 +28,16 @@ from app.runtime.memory_triggers import detect_memory_triggers
 
 logger = logging.getLogger(__name__)
 
+FAST_DUPLICATE_RECOVERY_REPLIES = (
+    "刚刚那句好像没接准，主人换个说法再跟豆豆说一遍？",
+    "这句豆豆有点接歪了，主人再说清楚一点点？",
+    "豆豆怕自己听偏了，换一句再告诉我好不好？",
+    "这轮声音有点糊，主人说长一点我再接。",
+    "豆豆先不乱答，主人再讲一遍好不好？",
+)
+
+FAST_REPLY_REPEAT_SIMILARITY = 0.72
+
 _PROFILE_TO_GATE = {
     "fast_llm": "llm_fast",
     "slow_llm": "llm_slow",
@@ -35,6 +46,103 @@ _PROFILE_TO_GATE = {
 
 def _profile_to_gate_type(provider_profile: str) -> str:
     return _PROFILE_TO_GATE.get(provider_profile, "llm_slow")
+
+
+def _normalize_reply_for_repeat(reply: str) -> str:
+    return "".join(
+        char
+        for char in str(reply or "")
+        if char not in " \t\r\n，。,.！？!?～~…"
+    )
+
+
+def _reply_similarity(left: str, right: str) -> float:
+    left_norm = _normalize_reply_for_repeat(left)
+    right_norm = _normalize_reply_for_repeat(right)
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm == right_norm:
+        return 1.0
+    return SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def _is_duplicate_fast_reply(reply: str, cognition_context: Optional[Dict[str, Any]]) -> bool:
+    normalized = _normalize_reply_for_repeat(reply)
+    if not normalized or not cognition_context:
+        return False
+    recent_events = (
+        cognition_context.get("recent_reply_history")
+        or cognition_context.get("recent_exact_events")
+        or []
+    )
+    for event in recent_events[-5:]:
+        if not isinstance(event, dict):
+            continue
+        recent_reply = str(event.get("pet") or "")
+        if _reply_similarity(reply, recent_reply) >= FAST_REPLY_REPEAT_SIMILARITY:
+            return True
+    return False
+
+
+def _select_duplicate_recovery_reply(cognition_context: Optional[Dict[str, Any]]) -> str:
+    recent = []
+    if cognition_context:
+        recent_events = (
+            cognition_context.get("recent_reply_history")
+            or cognition_context.get("recent_exact_events")
+            or []
+        )
+        recent = [
+            _normalize_reply_for_repeat(str(event.get("pet") or ""))
+            for event in recent_events[-5:]
+            if isinstance(event, dict)
+        ]
+    for reply in FAST_DUPLICATE_RECOVERY_REPLIES:
+        if _normalize_reply_for_repeat(reply) not in recent:
+            return reply
+    return FAST_DUPLICATE_RECOVERY_REPLIES[0]
+
+
+def _dedupe_fast_reply(
+    fast_action: FastReplyAction,
+    cognition_context: Optional[Dict[str, Any]],
+) -> FastReplyAction:
+    if not _is_duplicate_fast_reply(fast_action.reply, cognition_context):
+        return fast_action
+    return FastReplyAction(
+        reply=_select_duplicate_recovery_reply(cognition_context),
+        mood="concerned",
+        action="confused",
+        voice_style=fast_action.voice_style,
+    )
+
+
+def _dedupe_context_from_recent_events(
+    cognition_context: Optional[Dict[str, Any]],
+    event_log_store: Any,
+    episode_id: str,
+) -> Optional[Dict[str, Any]]:
+    if event_log_store is None or not episode_id:
+        return cognition_context
+    try:
+        raw_events = event_log_store.recent_events(episode_id=episode_id, limit=5)
+    except Exception:
+        return cognition_context
+    recent_exact_events = []
+    for event in raw_events:
+        entry: Dict[str, Any] = {}
+        if event.get("user_text"):
+            entry["user"] = event["user_text"]
+        if event.get("pet_reply"):
+            entry["pet"] = event["pet_reply"]
+        if entry:
+            recent_exact_events.append(entry)
+    recent_exact_events.reverse()
+    if not recent_exact_events:
+        return cognition_context
+    merged = dict(cognition_context or {})
+    merged["recent_exact_events"] = recent_exact_events
+    return merged
 
 
 
@@ -322,6 +430,14 @@ class RuntimeDispatcher:
         fast_action = None
         if is_fast_reply:
             fast_action = guard_fast_reply_action(raw_action)
+            fast_action = _dedupe_fast_reply(
+                fast_action,
+                _dedupe_context_from_recent_events(
+                    cognition_context,
+                    self.event_log_store,
+                    episode_id,
+                ),
+            )
             if run:
                 run.final_action = {
                     "reply": fast_action.reply[:200],
