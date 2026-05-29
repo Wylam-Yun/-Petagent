@@ -11,9 +11,9 @@ import type {
   VoiceChatResponse
 } from "./types";
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(url: string, init?: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
   const maxRetries = 2;
-  const timeoutMs = 8_000;
+  const timeoutMs = options.timeoutMs ?? 8_000;
   let lastError: Error | undefined;
 
   const method = (init?.method ?? "GET").toUpperCase();
@@ -179,10 +179,14 @@ export function uploadVoice(
   const formData = new FormData();
   formData.append("file", blob, `voice.${extensionForType(blob.type)}`);
   formData.append("thinking_mode", options.thinkingMode ? "true" : "false");
-  return requestJson<VoiceChatResponse>("/api/voice/chat", {
-    method: "POST",
-    body: formData
-  });
+  return requestJson<VoiceChatResponse>(
+    "/api/voice/chat",
+    {
+      method: "POST",
+      body: formData
+    },
+    { timeoutMs: options.thinkingMode ? 20_000 : 10_000 }
+  );
 }
 
 export function wakeMomo(phrase: string, confidence: number): Promise<ActivationResponse> {

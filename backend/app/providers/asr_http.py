@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import sleep
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
@@ -9,9 +10,11 @@ from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
 
-def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
+def _timeout_tuple(scalar: int, connect: int = 3) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
-    return (connect, max(scalar - connect, connect))
+    scalar = max(1, int(scalar))
+    connect_timeout = min(connect, scalar)
+    return (connect_timeout, max(scalar - connect_timeout, 1))
 
 
 def parse_transcript_json(
@@ -109,8 +112,20 @@ class HttpASRProvider:
         if not self.config.base_url:
             return self._error("asr_not_configured", "ASR base URL is not configured")
 
+        attempts = self._max_attempts()
+        models = self._model_candidates()
+        last_transcript = self._error("asr_provider_error", "ASR provider failed")
+        for attempt in range(attempts):
+            model = models[attempt % len(models)]
+            last_transcript = self._transcribe_once(audio_path, content_type, model)
+            if not self._should_retry(last_transcript.error_code, attempt, attempts):
+                return last_transcript
+            sleep(self._retry_backoff_seconds(attempt))
+        return last_transcript
+
+    def _transcribe_once(self, audio_path: Path, content_type: str, model: str) -> ASRTranscript:
         try:
-            request_kwargs = self._request_kwargs(audio_path, content_type)
+            request_kwargs = self._request_kwargs(audio_path, content_type, model)
             file_handles = request_kwargs.pop("_file_handles", [])
             response = requests.post(
                 self._url(),
@@ -143,6 +158,47 @@ class HttpASRProvider:
             for handle in locals().get("file_handles", []):
                 handle.close()
 
+    def _model_candidates(self) -> List[str]:
+        models = [self.config.model]
+        fallback_models = self.config.extra.get("fallback_models") or []
+        if isinstance(fallback_models, str):
+            fallback_models = [fallback_models]
+        if isinstance(fallback_models, list):
+            models.extend(str(model) for model in fallback_models)
+        deduped: List[str] = []
+        for model in models:
+            model = str(model or "").strip()
+            if model and model not in deduped:
+                deduped.append(model)
+        return deduped or [self.config.model]
+
+    def _max_attempts(self) -> int:
+        try:
+            retries = int(self.config.extra.get("transient_retries", 0))
+        except (TypeError, ValueError):
+            retries = 0
+        return max(1, min(4, retries + 1))
+
+    def _retry_backoff_seconds(self, attempt: int) -> float:
+        try:
+            base = float(self.config.extra.get("retry_backoff_seconds", 0.25))
+        except (TypeError, ValueError):
+            base = 0.25
+        return max(0.0, min(2.0, base * (attempt + 1)))
+
+    def _should_retry(self, error_code: str, attempt: int, attempts: int) -> bool:
+        if not error_code or attempt >= attempts - 1:
+            return False
+        if error_code in {"asr_request_error", "asr_provider_error"}:
+            return True
+        if error_code.startswith("asr_http_"):
+            try:
+                status = int(error_code.rsplit("_", 1)[1])
+            except (IndexError, ValueError):
+                return False
+            return 500 <= status <= 599
+        return False
+
     def _error(self, code: str, message: str) -> ASRTranscript:
         return ASRTranscript(
             text="",
@@ -152,7 +208,7 @@ class HttpASRProvider:
             error_message=message,
         )
 
-    def _request_kwargs(self, audio_path: Path, content_type: str) -> Dict[str, Any]:
+    def _request_kwargs(self, audio_path: Path, content_type: str, model: str) -> Dict[str, Any]:
         request_format = str(
             self.config.extra.get("request_format") or "multipart"
         ).lower()
@@ -170,7 +226,7 @@ class HttpASRProvider:
 
         file_field = str(self.config.extra.get("file_field") or "file")
         handle = audio_path.open("rb")
-        common["data"] = self._data()
+        common["data"] = self._data(model)
         common["files"] = {
             file_field: (
                 audio_path.name,
@@ -212,12 +268,12 @@ class HttpASRProvider:
         headers["Authorization"] = "Bearer %s" % self.config.api_key
         return headers
 
-    def _data(self) -> Dict[str, str]:
+    def _data(self, model: str) -> Dict[str, str]:
         data: Dict[str, str] = {}
         model_field = self.config.extra.get("model_field", "model")
         language_field = self.config.extra.get("language_field", "language")
         if model_field:
-            data[str(model_field)] = self.config.model
+            data[str(model_field)] = model
         if language_field:
             data[str(language_field)] = str(
                 self.config.extra.get("language_code") or "zh-CN"

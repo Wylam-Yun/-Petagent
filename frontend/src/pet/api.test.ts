@@ -28,6 +28,26 @@ describe("uploadVoice", () => {
     expect(init.method).toBe("POST");
     expect(body.get("thinking_mode")).toBe("true");
   });
+
+  test("uses a longer timeout for voice uploads than normal requests", async () => {
+    const originalSetTimeout = window.setTimeout;
+    const timeouts: number[] = [];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, timeout?: number) => {
+      timeouts.push(Number(timeout));
+      return originalSetTimeout(handler, 0);
+    }) as typeof window.setTimeout);
+
+    await uploadVoice(new Blob(["voice"], { type: "audio/wav" }), {
+      thinkingMode: false
+    });
+
+    expect(timeouts).toContain(10_000);
+  });
 });
 
 describe("stage 3 API helpers", () => {

@@ -179,3 +179,181 @@ def test_http_asr_reports_sanitized_http_error(tmp_path: Path, monkeypatch):
     assert transcript.error_message == "ASR HTTP request failed with status 401"
     assert "test-key" not in transcript.error_message
     assert "asr.example" not in transcript.error_message
+
+
+def test_http_asr_retries_transient_5xx_then_succeeds(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 1
+    config.extra["retry_backoff_seconds"] = 0
+    calls = []
+
+    class ErrorResponse:
+        status_code = 500
+
+        def raise_for_status(self):
+            error = requests.HTTPError("500 Server Error")
+            error.response = self
+            raise error
+
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "早上好豆豆"}
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return ErrorResponse() if len(calls) == 1 else SuccessResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert len(calls) == 2
+    assert transcript.text == "早上好豆豆"
+    assert transcript.error_code == ""
+
+
+def test_http_asr_uses_fallback_model_for_transient_retry(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 1
+    config.extra["retry_backoff_seconds"] = 0
+    config.extra["fallback_models"] = ["iic/SenseVoiceSmall"]
+    models = []
+
+    class ErrorResponse:
+        status_code = 500
+
+        def raise_for_status(self):
+            error = requests.HTTPError("500 Server Error")
+            error.response = self
+            raise error
+
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "备用模型听清了"}
+
+    def fake_post(url, **kwargs):
+        models.append(kwargs["data"]["model"])
+        return ErrorResponse() if len(models) == 1 else SuccessResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert models == ["parakeet-ctc-0.6b-zh-cn", "iic/SenseVoiceSmall"]
+    assert transcript.text == "备用模型听清了"
+    assert transcript.error_code == ""
+
+
+def test_http_asr_does_not_retry_client_errors(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 2
+    calls = []
+
+    class ErrorResponse:
+        status_code = 400
+
+        def raise_for_status(self):
+            error = requests.HTTPError("400 Client Error")
+            error.response = self
+            raise error
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return ErrorResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert len(calls) == 1
+    assert transcript.error_code == "asr_http_400"
+
+
+def test_http_asr_does_not_retry_timeouts(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 2
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        raise requests.Timeout("read timed out")
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert len(calls) == 1
+    assert transcript.error_code == "asr_timeout"
+
+
+def test_http_asr_does_not_retry_bad_json(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 2
+    calls = []
+
+    class BadJsonResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("not json")
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return BadJsonResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert len(calls) == 1
+    assert transcript.error_code == "asr_bad_response"
+
+
+def test_timeout_tuple_keeps_total_under_scalar(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.timeout_seconds = 6
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "你好"}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert captured["timeout"] == (3, 3)

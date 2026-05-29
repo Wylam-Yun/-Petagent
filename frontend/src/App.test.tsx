@@ -179,7 +179,7 @@ describe("text chat", () => {
       audio_job_id: "aud-text",
       user_text: "帮我写两数之和",
       text_route: {
-        selected: "slow",
+        selected: "thinking",
         thinking_mode: true,
         brain_provider: "test",
         timings_ms: {}
