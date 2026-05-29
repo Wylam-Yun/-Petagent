@@ -495,6 +495,23 @@ def test_full_app_fast_path_uses_cards():
     assert body["user_text"] == "你好"
 
 
+def test_full_app_notebook_paths_are_project_root_resolved():
+    """NotebookManager must not resolve relative card paths from backend cwd."""
+    from app.main import _resolve_project_path, create_app
+
+    app = create_app(testing=True)
+    settings = app.state.settings
+    notebook = app.state.notebook_manager
+
+    assert notebook._user_path.is_absolute()
+    assert notebook._memory_path.is_absolute()
+    assert "/backend/backend/" not in str(notebook._user_path)
+    assert "/backend/backend/" not in str(notebook._memory_path)
+    assert _resolve_project_path(
+        settings, "backend/data/memory_cards/memory.md"
+    ) == settings.project_root / "backend/data/memory_cards/memory.md"
+
+
 def test_old_path_fallback():
     """read_card should fall back to old subdirectory path when new path doesn't exist."""
     tmp = Path(mkdtemp())

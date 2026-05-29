@@ -105,6 +105,13 @@ def _select_memory_summarizer_provider(settings: Settings, testing: bool):
     )
 
 
+def _resolve_project_path(settings: Settings, raw_path: str) -> Path:
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+    return settings.project_root / path
+
+
 def _select_tts_provider(settings: Settings, testing: bool):
     if testing:
         return MockTTSProvider(settings.audio_dir)
@@ -209,8 +216,8 @@ def create_app(testing: bool = False) -> FastAPI:
         str(settings.project_root / "backend/data/memory_cards/memory.md"),
     )
     notebook_manager = NotebookManager(
-        user_path=Path(notebook_user_path),
-        memory_path=Path(notebook_memory_path),
+        user_path=_resolve_project_path(settings, str(notebook_user_path)),
+        memory_path=_resolve_project_path(settings, str(notebook_memory_path)),
     )
     # Run one-time migration on startup (non-testing)
     if not testing:

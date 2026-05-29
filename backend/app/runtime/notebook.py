@@ -311,7 +311,7 @@ class NotebookManager:
         """One-time migration from old format to new. Returns True if migration ran."""
         with self._lock:
             if self._has_v14_marker(self._memory_path):
-                return False
+                return self._ensure_single_notebook_marker()
 
             if self._merge_split_notebooks():
                 logger.info("migrate_if_needed: V1.4 single notebook migration completed")
@@ -321,7 +321,7 @@ class NotebookManager:
             for path in (self._user_path, self._memory_path):
                 if self._has_new_format(path):
                     logger.info("migrate_if_needed: new format detected, skipping")
-                    return False
+                    return self._ensure_single_notebook_marker()
 
             # Convert old-format lines in-place
             migrated = False
@@ -329,9 +329,18 @@ class NotebookManager:
                 if self._convert_old_format(path):
                     migrated = True
 
-            # If canonical files are empty, try old subdirectory paths
-            if not migrated and memory_card_manager is not None:
-                migrated = self._import_from_old_paths(memory_card_manager)
+            if migrated and self._merge_split_notebooks():
+                logger.info("migrate_if_needed: V1.4 single notebook finalized")
+                return True
+
+            # If canonical files are empty or only legacy headers, try old subdirectory paths.
+            if memory_card_manager is not None:
+                imported = self._import_from_old_paths(memory_card_manager)
+                migrated = migrated or imported
+
+            if self._ensure_single_notebook_marker():
+                logger.info("migrate_if_needed: V1.4 single notebook marker ensured")
+                return True
 
             if migrated:
                 logger.info("migrate_if_needed: migration completed")
@@ -442,8 +451,8 @@ class NotebookManager:
 
     def _import_from_old_paths(self, memory_card_manager) -> bool:
         """Import old card paths into canonical memory.md if notebook files are empty."""
-        user_empty = not self._user_path.exists() or self._user_path.stat().st_size == 0
-        mem_empty = not self._memory_path.exists() or self._memory_path.stat().st_size == 0
+        user_empty = self._is_importable_empty(self._user_path)
+        mem_empty = self._is_importable_empty(self._memory_path)
         if not user_empty and not mem_empty:
             return False
 
@@ -478,6 +487,50 @@ class NotebookManager:
             return False
         self._write_text_atomic(self._user_path, _USER_STUB)
         return True
+
+    def _is_importable_empty(self, path: Path) -> bool:
+        if not path.exists() or path.stat().st_size == 0:
+            return True
+        return not self._parse_file(path, max_entries=None)
+
+    def _ensure_single_notebook_marker(self) -> bool:
+        """Finalize canonical memory.md shape even when old cards had no items."""
+        memory_entries = self._parse_file(self._memory_path, max_entries=None)
+        user_entries = self._parse_file(self._user_path, max_entries=None)
+        seen: set[str] = set()
+        merged: List[NotebookEntry] = []
+        for entry in [*user_entries, *memory_entries]:
+            norm = _normalize_text(entry.content)
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            merged.append(entry)
+
+        if (
+            self._has_v14_marker(self._memory_path)
+            and self._read_raw_path(self._user_path) == _USER_STUB
+        ):
+            return False
+
+        self._memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self._backup_file(self._memory_path)
+        self._backup_file(self._user_path)
+
+        lines = [_V14_MARKER]
+        for entry in merged:
+            ts = entry.timestamp or _local_timestamp()
+            lines.append(f"- [{ts}][{entry.category}] {entry.content}")
+        lines.append("")
+        if not self._write_text_atomic(self._memory_path, "\n".join(lines)):
+            return False
+        self._write_text_atomic(self._user_path, _USER_STUB)
+        return True
+
+    def _read_raw_path(self, path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
 
     def _write_imported(self, path: Path, default_category: str, items: List[str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

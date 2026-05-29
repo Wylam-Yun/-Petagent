@@ -231,6 +231,15 @@ def test_append_line_atomic():
     assert "第二行" in lines[1]
 
 
+def test_append_line_preserves_existing_v14_marker():
+    nm, _, memory = _make_nm()
+    memory.write_text("<!-- v1.4_single_notebook -->\n", encoding="utf-8")
+    assert nm.append_line("user.md", "preference", "喜欢短回复") is True
+    content = memory.read_text(encoding="utf-8")
+    assert content.startswith("<!-- v1.4_single_notebook -->")
+    assert "喜欢短回复" in content
+
+
 def test_migrate_old_format():
     nm, user, memory = _make_nm()
     user.write_text(
@@ -247,6 +256,25 @@ def test_migrate_old_format():
     assert "single_notebook_stub" in user.read_text(encoding="utf-8")
 
 
+def test_migrate_header_only_legacy_cards_finalize_v14_notebook():
+    nm, user, memory = _make_nm()
+    user.write_text(
+        "<!-- memory_cards: user_preferences | rebuilt: 2026-05-25T17:49:19 -->\n",
+        encoding="utf-8",
+    )
+    memory.write_text(
+        "<!-- memory_cards: momo_memories | rebuilt: 2026-05-25T17:49:19 -->\n",
+        encoding="utf-8",
+    )
+
+    assert nm.migrate_if_needed() is True
+
+    assert memory.read_text(encoding="utf-8") == "<!-- v1.4_single_notebook -->\n"
+    assert user.read_text(encoding="utf-8") == (
+        "<!-- v1.4_single_notebook_stub: canonical memory is memory.md -->\n"
+    )
+
+
 def test_migrate_v13_new_format_to_single_notebook():
     nm, user, _ = _make_nm()
     user.write_text(
@@ -255,6 +283,42 @@ def test_migrate_v13_new_format_to_single_notebook():
     )
     result = nm.migrate_if_needed()
     assert result is True
+
+
+def test_migrate_new_format_memory_without_marker_finalizes_v14_notebook():
+    nm, user, memory = _make_nm()
+    memory.write_text(
+        "- [2026-05-26 10:00][preference] 喜欢短回复。\n",
+        encoding="utf-8",
+    )
+
+    assert nm.migrate_if_needed() is True
+
+    content = memory.read_text(encoding="utf-8")
+    assert content.startswith("<!-- v1.4_single_notebook -->")
+    assert "喜欢短回复" in content
+    assert "single_notebook_stub" in user.read_text(encoding="utf-8")
+
+
+def test_migrate_existing_v14_marker_merges_legacy_user_file():
+    nm, user, memory = _make_nm()
+    memory.write_text(
+        "<!-- v1.4_single_notebook -->\n"
+        "- [2026-05-26 10:00][preference] 喜欢短回复。\n",
+        encoding="utf-8",
+    )
+    user.write_text(
+        "- [2026-05-26 10:01][identity] 用户叫小明。\n",
+        encoding="utf-8",
+    )
+
+    assert nm.migrate_if_needed() is True
+
+    content = memory.read_text(encoding="utf-8")
+    assert content.count("v1.4_single_notebook") == 1
+    assert "喜欢短回复" in content
+    assert "用户叫小明" in content
+    assert "single_notebook_stub" in user.read_text(encoding="utf-8")
 
 
 def test_old_type_category_mapping():
