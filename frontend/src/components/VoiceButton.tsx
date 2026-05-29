@@ -40,6 +40,8 @@ export function VoiceButton({
   const [localPhase, setLocalPhase] = useState<PetUIPhase>(phase);
   const sessionRef = useRef<VoiceRecordingSession | null>(null);
   const uploadRunRef = useRef(0);
+  const activeUploadRunRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!busy) {
@@ -53,6 +55,7 @@ export function VoiceButton({
 
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       uploadRunRef.current += 1;
       sessionRef.current?.cancel();
     };
@@ -96,6 +99,7 @@ export function VoiceButton({
     changePhase("thinking");
     const uploadRun = uploadRunRef.current + 1;
     uploadRunRef.current = uploadRun;
+    activeUploadRunRef.current = uploadRun;
     setBusy(true);
     try {
       const blob = await session.stop();
@@ -124,7 +128,10 @@ export function VoiceButton({
         onError("呜，刚刚没接住。");
       }
     } finally {
-      if (uploadRunRef.current === uploadRun) {
+      if (activeUploadRunRef.current === uploadRun) {
+        activeUploadRunRef.current = 0;
+      }
+      if (mountedRef.current) {
         setBusy(false);
       }
     }
@@ -139,7 +146,6 @@ export function VoiceButton({
 
   function cancelPendingUpload() {
     uploadRunRef.current += 1;
-    setBusy(false);
     changePhase("idle");
   }
 
@@ -153,7 +159,7 @@ export function VoiceButton({
       <button
         aria-label={label}
         className={`voice-button voice-${effectivePhase}`}
-        disabled={disabled || starting}
+        disabled={disabled || starting || (busy && effectivePhase !== "thinking")}
         type="button"
         onClick={handleTap}
       >

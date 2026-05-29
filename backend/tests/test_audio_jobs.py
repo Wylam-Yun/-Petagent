@@ -73,7 +73,7 @@ def test_audio_job_manager_gates_tts_provider():
             break
         time.sleep(0.02)
 
-    gate.acquire.assert_called_once_with("tts")
+    gate.acquire.assert_called_once_with("tts", blocking=True, timeout_s=60)
     gate.release.assert_called_once_with("tts")
     assert mgr.pending_count() == 0
     mgr.shutdown()

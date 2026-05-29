@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -93,7 +93,7 @@ def _validate_magic_bytes(path: Path, content_type: str) -> None:
         pass  # If we can't read, let the provider handle it
 
 
-async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
+async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Tuple[Path, int]:
     content_type = file.content_type or ""
     if content_type not in allowed_audio_types(settings):
         raise HTTPException(
@@ -126,7 +126,7 @@ async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
     except HTTPException:
         path.unlink(missing_ok=True)
         raise
-    return path
+    return path, total
 
 
 @router.post("/chat")
@@ -143,8 +143,19 @@ async def post_voice_chat(
         )
     settings = request.app.state.settings
     started = datetime.utcnow()
-    path = await _save_upload(settings, settings.upload_dir, file)
+    request_id = "voice-" + uuid4().hex[:8]
+    path, upload_bytes = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+    logger.info(
+        "voice_chat_received request_id=%s content_type=%s upload_bytes=%d upload_save_ms=%d "
+        "thinking_mode=%s route=%s",
+        request_id,
+        file.content_type or "",
+        upload_bytes,
+        upload_save_ms,
+        _as_bool(thinking_mode),
+        route,
+    )
     request.app.state.tick_service.apply_if_due()
     try:
         executor = request.app.state.agent_work_executor
@@ -184,4 +195,15 @@ async def post_voice_chat(
     body["voice_route"] = route_info
     if result.activation is not None:
         body["activation"] = result.activation
+    total_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+    logger.info(
+        "voice_chat_completed request_id=%s selected=%s fallback_reason=%s user_text_len=%d "
+        "audio_job_id=%s total_ms=%d",
+        request_id,
+        route_info.get("selected", ""),
+        route_info.get("fallback_reason") or "none",
+        len(result.user_text or ""),
+        body.get("audio_job_id") or "",
+        total_ms,
+    )
     return body

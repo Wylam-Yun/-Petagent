@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict
@@ -14,6 +15,8 @@ from app.runtime.actions import PetResponse
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
+
+logger = logging.getLogger(__name__)
 
 
 def _now_ms(start: float) -> int:
@@ -91,7 +94,12 @@ class VoicePipeline:
         emotion_source = "asr"
         try:
             transcript = self._transcribe_with_gate(audio_path, content_type)
-        except Exception:
+        except Exception as exc:
+            logger.info(
+                "voice_asr_exception provider=%s error_type=%s",
+                self._asr_name(),
+                type(exc).__name__,
+            )
             transcript = ASRTranscript(
                 text="",
                 confidence=0.0,
@@ -109,6 +117,17 @@ class VoicePipeline:
             fallback_reason = fallback_reason or "asr_empty"
         elif transcript.confidence < self.asr_min_confidence:
             fallback_reason = "asr_low_confidence"
+
+        logger.info(
+            "voice_asr_result selected=%s provider=%s text_len=%d confidence=%.3f "
+            "fallback_reason=%s elapsed_ms=%d",
+            selected,
+            transcript.provider,
+            len(text),
+            transcript.confidence,
+            fallback_reason or "none",
+            timings["asr"],
+        )
 
         if fallback_reason:
             if thinking_mode and self.slow_fallback_enabled:
@@ -250,7 +269,12 @@ class VoicePipeline:
         except ProviderError as exc:
             provider_failure = exc.to_dict()
             understanding = FALLBACK_AUDIO_UNDERSTANDING
-        except Exception:
+            logger.info(
+                "voice_audio_understanding_provider_error provider_failure=%s",
+                provider_failure.get("error_class"),
+            )
+        except Exception as exc:
+            logger.info("voice_audio_understanding_exception error_type=%s", type(exc).__name__)
             understanding = FALLBACK_AUDIO_UNDERSTANDING
         timings["audio_understanding"] = _now_ms(started)
 
@@ -264,15 +288,16 @@ class VoicePipeline:
             asr_start = perf_counter()
             try:
                 transcript = self._transcribe_with_gate(audio_path, content_type)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.info("voice_asr_assist_exception error_type=%s", type(exc).__name__)
             timings["asr_assist"] = _now_ms(asr_start)
         else:
             # Audio understanding failed or returned empty — fall back to ASR
             asr_start = perf_counter()
             try:
                 transcript = self._transcribe_with_gate(audio_path, content_type)
-            except Exception:
+            except Exception as exc:
+                logger.info("voice_asr_fallback_exception error_type=%s", type(exc).__name__)
                 transcript = ASRTranscript(
                     text="",
                     confidence=0.0,
@@ -360,7 +385,12 @@ class VoicePipeline:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             provider_failure = exc.to_dict()
             fallback_reason = fallback_reason or "audio_understanding_error"
-        except Exception:
+            logger.info(
+                "voice_audio_fallback_provider_error provider_failure=%s",
+                provider_failure.get("error_class"),
+            )
+        except Exception as exc:
+            logger.info("voice_audio_fallback_exception error_type=%s", type(exc).__name__)
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             fallback_reason = fallback_reason or "audio_understanding_error"
         timings["audio_understanding"] = _now_ms(started)
@@ -425,7 +455,7 @@ class VoicePipeline:
     def _transcribe_with_gate(self, audio_path: Path, content_type: str) -> ASRTranscript:
         acquired = False
         if self.provider_gate is not None:
-            self.provider_gate.acquire("asr")
+            self.provider_gate.acquire("asr", blocking=True, timeout_s=30)
             acquired = True
         try:
             return self.asr_provider.transcribe(audio_path, content_type)
@@ -436,7 +466,7 @@ class VoicePipeline:
     def _understand_with_gate(self, audio_path: Path, content_type: str) -> AudioUnderstanding:
         acquired = False
         if self.provider_gate is not None:
-            self.provider_gate.acquire("audio_understanding")
+            self.provider_gate.acquire("audio_understanding", blocking=True, timeout_s=60)
             acquired = True
         try:
             return self.audio_provider.understand(audio_path, content_type)

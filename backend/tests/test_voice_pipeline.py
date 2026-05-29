@@ -140,9 +140,9 @@ def test_voice_pipeline_gates_asr_and_audio_understanding():
     seen = []
     original_acquire = gate.acquire
 
-    def track(provider_type):
-        seen.append(provider_type)
-        original_acquire(provider_type)
+    def track(provider_type, **kwargs):
+        seen.append((provider_type, kwargs))
+        original_acquire(provider_type, **kwargs)
 
     gate.acquire = track
     client = TestClient(app)
@@ -152,8 +152,8 @@ def test_voice_pipeline_gates_asr_and_audio_understanding():
 
     assert fast.status_code == 200
     assert slow.status_code == 200
-    assert "asr" in seen
-    assert "audio_understanding" in seen
+    assert ("asr", {"blocking": True, "timeout_s": 30}) in seen
+    assert ("audio_understanding", {"blocking": True, "timeout_s": 60}) in seen
 
 
 def test_voice_chat_uses_configured_upload_limits():

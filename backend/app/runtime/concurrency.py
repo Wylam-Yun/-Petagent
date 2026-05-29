@@ -87,16 +87,36 @@ class ProviderGate:
             self._limits.update(limits)
         self._counters: Dict[str, int] = {k: 0 for k in self._limits}
         self._started_at: Dict[str, float] = {}
-        self._lock = threading.Lock()
+        self._condition = threading.Condition(threading.Lock())
 
-    def acquire(self, provider_type: str) -> None:
+    def acquire(
+        self,
+        provider_type: str,
+        *,
+        blocking: bool = False,
+        timeout_s: Optional[float] = None,
+    ) -> None:
         """Acquire a slot for the given provider type.
 
-        Raises ProviderBusyError if at capacity.
+        Raises ProviderBusyError if at capacity, or if blocking wait times out.
         """
         limit = self._limits.get(provider_type, 1)
-        with self._lock:
+        deadline = perf_counter() + timeout_s if timeout_s is not None else None
+        with self._condition:
             current = self._counters.get(provider_type, 0)
+            while current >= limit:
+                if not blocking:
+                    raise ProviderBusyError(f"Provider {provider_type} is busy ({current}/{limit})")
+                if deadline is None:
+                    self._condition.wait()
+                else:
+                    remaining = deadline - perf_counter()
+                    if remaining <= 0:
+                        raise ProviderBusyError(
+                            f"Provider {provider_type} wait timed out ({current}/{limit})"
+                        )
+                    self._condition.wait(timeout=remaining)
+                current = self._counters.get(provider_type, 0)
             if current >= limit:
                 raise ProviderBusyError(f"Provider {provider_type} is busy ({current}/{limit})")
             if current == 0:
@@ -105,16 +125,17 @@ class ProviderGate:
 
     def release(self, provider_type: str) -> None:
         """Release a slot for the given provider type."""
-        with self._lock:
+        with self._condition:
             current = self._counters.get(provider_type, 0)
             next_value = max(0, current - 1)
             self._counters[provider_type] = next_value
             if next_value == 0:
                 self._started_at.pop(provider_type, None)
+            self._condition.notify_all()
 
     def inflight_age_s(self, provider_type: Optional[str] = None) -> float:
         """Oldest active provider age, or -1 when no matching provider is active."""
-        with self._lock:
+        with self._condition:
             if provider_type is not None:
                 started = self._started_at.get(provider_type)
                 if started is None:
@@ -128,12 +149,12 @@ class ProviderGate:
     def is_available(self, provider_type: str) -> bool:
         """Check if a slot is available for the given provider type."""
         limit = self._limits.get(provider_type, 1)
-        with self._lock:
+        with self._condition:
             return self._counters.get(provider_type, 0) < limit
 
     def get_usage(self) -> Dict[str, Dict[str, int]]:
         """Get current usage for all provider types."""
-        with self._lock:
+        with self._condition:
             return {
                 ptype: {
                     "current": self._counters.get(ptype, 0),

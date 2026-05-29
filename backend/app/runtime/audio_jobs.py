@@ -259,7 +259,7 @@ class AudioJobManager:
         gate_acquired = False
         try:
             if self.provider_gate is not None:
-                self.provider_gate.acquire("tts")
+                self.provider_gate.acquire("tts", blocking=True, timeout_s=60)
                 gate_acquired = True
             voice_url = self.tts_provider.synthesize(job.text, job.voice_style)
             tts_ms = int((datetime.utcnow() - tts_start).total_seconds() * 1000)
@@ -283,6 +283,14 @@ class AudioJobManager:
                 self._adjust_pending_locked(-1)
                 snapshot = dict(current.__dict__)
 
+            logger.info(
+                "audio_job_failed job_id=%s provider=%s error_class=%s tts_ms=%d queue_ms=%d",
+                job_id,
+                self.provider_name,
+                audio_err_class,
+                tts_ms,
+                queue_ms,
+            )
             self._save_job_snapshot(job_id, snapshot)
 
             if self.on_complete:
@@ -317,6 +325,14 @@ class AudioJobManager:
             self._adjust_pending_locked(-1)
             snapshot = dict(current.__dict__)
 
+        logger.info(
+            "audio_job_finished job_id=%s provider=%s status=%s tts_ms=%d queue_ms=%d",
+            job_id,
+            self.provider_name,
+            "ready" if voice_url else "failed",
+            tts_ms,
+            queue_ms,
+        )
         self._save_job_snapshot(job_id, snapshot)
 
         if self.on_complete:

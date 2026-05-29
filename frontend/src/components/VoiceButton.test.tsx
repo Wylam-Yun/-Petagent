@@ -111,6 +111,47 @@ describe("VoiceButton", () => {
     expect(screen.getByRole("button", { name: "点一下说话" })).toBeInTheDocument();
   });
 
+  test("cannot start another recording while canceled upload is still in flight", async () => {
+    let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
+    const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploadVoice = vi.fn().mockReturnValue(uploadPromise);
+    const createRecorder = recorderFactory();
+
+    render(
+      <VoiceButton
+        disabled={false}
+        phase="idle"
+        recorderFactory={createRecorder}
+        thinkingMode={false}
+        uploadVoice={uploadVoice}
+        onError={vi.fn()}
+        onPhaseChange={vi.fn()}
+        onVoiceResponse={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+    await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
+    await waitFor(() => expect(uploadVoice).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "取消发送" }));
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+
+    expect(createRecorder).toHaveBeenCalledTimes(1);
+    expect(uploadVoice).toHaveBeenCalledTimes(1);
+
+    resolveUpload(voiceResponse);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+    await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(2));
+  });
+
   test("cancel button discards active recording", async () => {
     const session = {
       stop: vi.fn().mockResolvedValue(new Blob(["voice"], { type: "audio/webm" })),
