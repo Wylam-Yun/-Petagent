@@ -1,0 +1,35 @@
+Generate a NEW visible sprite animation contact sheet using the attached single-frame cat as the strict character reference.
+
+Action: happy
+
+The output must be one horizontal row with exactly six same-size frames. Each frame contains the same cute desktop-pet kitten in one animation pose.
+
+Background: use a perfectly flat solid #ff00ff chroma-key background. No shadows, gradients, texture, floor, lighting variation, or border. Do not use #ff00ff anywhere in the kitten.
+
+Preserve the attached character identity:
+- chubby white-gray kitten;
+- huge glossy black eyes with yellow crescent highlights;
+- pink inner ears;
+- thick black outline;
+- upright gray tail;
+- tiny body and short legs;
+- simplified chibi pixel-art / desktop pet look.
+
+Frame sequence, left to right:
+1. neutral happy start, eyes open, tiny smile, tail raised.
+2. slight squash downward, cheeks lift, tail begins wagging.
+3. small upward bounce, both front paws lift a little, eyes bright.
+4. peak happy pose, body slightly higher, eyes closed as happy crescents, pink cheeks visible, tail wagging.
+5. soft landing, paws come down, eyes open, smile remains.
+6. returns near frame 1 for a seamless loop, still happy and tail raised.
+
+Hard constraints:
+- exactly six visible kittens, one per frame;
+- one row only, horizontal sprite strip;
+- no text, labels, frame numbers, watermark, extra characters, or background scene;
+- no props unless the action explicitly requires one;
+- consistent scale, baseline, and character proportions across frames;
+- leave padding around ears and tail, no cropping;
+- the six frames must be consecutive animation frames, not unrelated poses.
+
+Return only the image.

@@ -1,0 +1,4 @@
+- status: ✅ saved
+  file: 📁 ~/Documents/workspace/Petagent/plan/V1.4/generated/actions/self_groom/chatgpt_1779988423847.png
+  link: 🔗 https://chatgpt.com/c/6a1877ba-ea1c-83ec-a093-48af50cf16b0
+

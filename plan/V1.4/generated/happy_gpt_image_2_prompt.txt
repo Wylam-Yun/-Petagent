@@ -1,0 +1,34 @@
+Use the attached single-frame cat as the strict character reference.
+
+Create a visible 2D sprite animation contact sheet for a HAPPY action. The sheet must contain exactly six same-size cells arranged in a 3 columns x 2 rows grid. Each cell contains the same cute desktop-pet kitten in one animation frame.
+
+Character identity to preserve from reference:
+- chubby white-gray kitten
+- huge glossy black eyes with yellow crescent highlights
+- pink inner ears
+- thick black outline
+- upright gray tail
+- tiny body and short legs
+- simplified chibi pixel-art / desktop pet look
+
+Frame sequence, reading left-to-right then top-to-bottom:
+1. standing happy, eyes open, tiny smile, tail raised.
+2. slight squash downward, cheeks lift, tail begins wagging.
+3. small upward bounce, both front paws lift a little, eyes bright.
+4. peak happy pose, body slightly higher, eyes closed as happy crescents, pink cheeks visible, tail wagging.
+5. soft landing, paws come down, eyes open, smile remains.
+6. returns near frame 1 for a seamless loop, still happy and tail raised.
+
+Canvas and layout:
+- normal visible PNG image, not transparent
+- solid white background
+- thin light-gray separators between cells
+- no text, no labels, no numbers, no watermark
+- one kitten per cell, six kittens total
+- keep consistent scale, baseline, and proportions across all six frames
+- leave padding around ears and tail, no cropping
+
+Style:
+- match the attached character closely
+- keep the thick outline and cute simple sprite style
+- no props, no food, no hearts, no stars, no extra characters, no background scene

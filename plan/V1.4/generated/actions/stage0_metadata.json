@@ -1,0 +1,172 @@
+{
+  "happy": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/happy/happy_chatgpt_web_actual.png",
+    "size": [
+      2103,
+      748
+    ],
+    "file_kb": 1174,
+    "non_background_pixels": 245708,
+    "magenta_pixels": 1188531
+  },
+  "greet": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/greet/greet_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1195,
+    "non_background_pixels": 331792,
+    "magenta_pixels": 1130449
+  },
+  "listen": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/listen/listen_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1166,
+    "non_background_pixels": 301111,
+    "magenta_pixels": 1107384
+  },
+  "speak": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/speak/speak_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1202,
+    "non_background_pixels": 391947,
+    "magenta_pixels": 1107234
+  },
+  "comfort": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/comfort/comfort_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1159,
+    "non_background_pixels": 300104,
+    "magenta_pixels": 1137571
+  },
+  "nap": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/nap/nap_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1110,
+    "non_background_pixels": 199631,
+    "magenta_pixels": 1217497
+  },
+  "lazy_idle": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/lazy_idle/lazy_idle_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1154,
+    "non_background_pixels": 358346,
+    "magenta_pixels": 1192572
+  },
+  "sneak_eat": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/sneak_eat/sneak_eat_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1196,
+    "non_background_pixels": 947812,
+    "magenta_pixels": 1109800
+  },
+  "watch_tv": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/watch_tv/watch_tv_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1197,
+    "non_background_pixels": 385686,
+    "magenta_pixels": 1104606
+  },
+  "tease": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/tease/tease_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1184,
+    "non_background_pixels": 322835,
+    "magenta_pixels": 1101672
+  },
+  "remember": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/remember/remember_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1242,
+    "non_background_pixels": 1484591,
+    "magenta_pixels": 40894
+  },
+  "confused": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/confused/confused_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1204,
+    "non_background_pixels": 316001,
+    "magenta_pixels": 1100858
+  },
+  "self_groom": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/self_groom/self_groom_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1156,
+    "non_background_pixels": 307834,
+    "magenta_pixels": 1141640
+  },
+  "wander": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/wander/wander_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1181,
+    "non_background_pixels": 383721,
+    "magenta_pixels": 1119644
+  },
+  "pretend_busy": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/pretend_busy/pretend_busy_chatgpt_web_actual.png",
+    "size": [
+      3072,
+      512
+    ],
+    "file_kb": 1448,
+    "non_background_pixels": 1437294,
+    "magenta_pixels": 328514
+  },
+  "deny": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/deny/deny_chatgpt_web_actual.png",
+    "size": [
+      2172,
+      724
+    ],
+    "file_kb": 1179,
+    "non_background_pixels": 1372373,
+    "magenta_pixels": 1070123
+  },
+  "excited": {
+    "path": "/Users/wylam/Documents/workspace/Petagent/plan/V1.4/generated/actions/excited/excited_chatgpt_web_actual.png",
+    "size": [
+      3072,
+      512
+    ],
+    "file_kb": 1426,
+    "non_background_pixels": 480412,
+    "magenta_pixels": 1014008
+  }
+}

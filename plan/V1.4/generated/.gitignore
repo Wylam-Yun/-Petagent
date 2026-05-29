@@ -1,0 +1,7 @@
+generated_image_data.json
+**/*_image_data.json
+chatgpt_*.png
+actions/*/chatgpt_*.png
+page_*.png
+chatgpt_page*.png
+current_chatgpt_page.png

@@ -1,0 +1,42 @@
+# Action Prompt Template
+
+Use this template for ChatGPT web action generation.
+
+```text
+Generate a NEW visible sprite animation contact sheet using the attached
+single-frame cat as the strict character reference.
+
+Action: <ACTION_NAME>
+
+The output must be one horizontal row with exactly six same-size frames. Each
+frame contains the same cute desktop-pet kitten in one animation pose.
+
+Background: use a perfectly flat solid #ff00ff chroma-key background. No
+shadows, gradients, texture, floor, lighting variation, or border. Do not use
+#ff00ff anywhere in the kitten.
+
+Preserve the attached character identity:
+- chubby white-gray kitten;
+- huge glossy black eyes with yellow crescent highlights;
+- pink inner ears;
+- thick black outline;
+- upright gray tail;
+- tiny body and short legs;
+- simplified chibi pixel-art / desktop pet look.
+
+Frame sequence, left to right:
+<FRAME_SEQUENCE>
+
+Hard constraints:
+- exactly six visible kittens, one per frame;
+- one row only, horizontal sprite strip;
+- no text, labels, frame numbers, watermark, extra characters, or background
+  scene;
+- no props unless the action explicitly requires one;
+- consistent scale, baseline, and character proportions across frames;
+- leave padding around ears and tail, no cropping;
+- the six frames must be consecutive animation frames, not unrelated poses.
+
+Return only the image.
+```
+
