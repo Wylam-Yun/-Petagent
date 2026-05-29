@@ -50,10 +50,22 @@ def test_fast_reply_guard_invalid_mood():
     assert result.mood is None
 
 
-def test_fast_reply_guard_invalid_action():
-    """Invalid action is cleared."""
+def test_fast_reply_guard_invalid_action_uses_mood_default():
+    """Invalid action falls back to a legal mood-specific action."""
     result = guard_fast_reply_action({"reply": "早", "action": "dancing"})
-    assert result.action is None
+    assert result.action == "idle"
+
+
+def test_fast_reply_guard_missing_action_uses_mood_default():
+    result = guard_fast_reply_action({"reply": "早", "mood": "happy"})
+
+    assert result.action == "happy"
+
+
+def test_fast_reply_guard_sleepy_missing_action_uses_nap():
+    result = guard_fast_reply_action({"reply": "困了", "mood": "sleepy"})
+
+    assert result.action == "nap"
 
 
 def test_fast_reply_guard_prompt_leak():

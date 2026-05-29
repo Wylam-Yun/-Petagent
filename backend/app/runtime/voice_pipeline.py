@@ -125,8 +125,6 @@ class VoicePipeline:
         if transcript.error_code:
             if transcript.error_code == "asr_timeout":
                 fallback_reason = "asr_timeout"
-            elif transcript.error_code == "asr_low_information":
-                fallback_reason = "asr_low_information"
             else:
                 fallback_reason = "asr_provider_error"
         elif not text:
@@ -344,6 +342,45 @@ class VoicePipeline:
         activation_event = _classify_activation(understanding.user_text, self.activation_manager)
         activation_info = None
         wake_source = ""
+        if not understanding.user_text.strip():
+            timings["total"] = _now_ms(started)
+            fallback_reason = "audio_understanding_insufficient"
+            if transcript is not None and transcript.error_code:
+                fallback_reason = (
+                    "asr_timeout" if transcript.error_code == "asr_timeout" else "asr_provider_error"
+                )
+            recovery_reply = self._next_fast_asr_recovery_reply()
+            response = PetResponse(
+                reply=recovery_reply,
+                mood="idle",
+                face_type="idle",
+                animation="breathing",
+                vibration="none",
+                pet_state={},
+                runtime={"error_class": "asr_failed"},
+                route="thinking",
+                action="confused",
+            )
+            return VoicePipelineResult(
+                user_text="",
+                audio_understanding=understanding,
+                response=response,
+                route_info=VoiceRouteInfo(
+                    requested=requested,
+                    selected="thinking",
+                    thinking_mode=thinking_mode,
+                    asr_provider=getattr(transcript, "provider", "") if transcript else "",
+                    asr_error_code=getattr(transcript, "error_code", "") if transcript else "",
+                    asr_error_message=getattr(transcript, "error_message", "") if transcript else "",
+                    brain_provider=self.slow_brain_provider_name,
+                    fallback_reason=fallback_reason,
+                    emotion_source=emotion_source,
+                    provider_failure=provider_failure,
+                    asr_failed_hint="没听清",
+                    timings_ms=timings,
+                ),
+                fallback_reason=fallback_reason,
+            )
         if activation_event is not None:
             wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
             activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode

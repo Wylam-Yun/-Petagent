@@ -36,6 +36,23 @@ describe("uploadVoice", () => {
     expect(body.get("thinking_mode")).toBe("true");
   });
 
+  test("passes caller abort signal through voice upload when supported", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await uploadVoice(new Blob(["voice"], { type: "audio/wav" }), {
+      thinkingMode: false,
+      signal: controller.signal
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
   test("uses a longer timeout for voice uploads than normal requests", async () => {
     const originalSetTimeout = window.setTimeout;
     const timeouts: number[] = [];

@@ -144,6 +144,19 @@ FAST_REPLY_FALLBACK = {
     "voice_style": "soft",
 }
 
+FAST_REPLY_MOOD_ACTION_MAP = {
+    "idle": "idle",
+    "happy": "happy",
+    "sad": "comfort",
+    "sleepy": "nap",
+    "angry": "deny",
+    "shy": "self_groom",
+    "thinking": "think",
+    "concerned": "confused",
+    "excited": "excited",
+    "lonely": "comfort",
+}
+
 
 def _parse_action(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
@@ -366,6 +379,8 @@ def guard_fast_reply_action(
     action = data.get("action")
     if action and action not in ALLOWED_BEHAVIOR_ACTIONS:
         action = None
+    if not action:
+        action = FAST_REPLY_MOOD_ACTION_MAP.get(mood or "", FAST_REPLY_FALLBACK["action"])
 
     voice_style = data.get("voice_style", "soft")
     if voice_style not in ALLOWED_VOICE_STYLES:

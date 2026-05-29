@@ -133,32 +133,6 @@ def test_fast_voice_asr_error_returns_local_recovery():
     assert route["asr_error_code"] == "asr_http_401"
 
 
-def test_fast_voice_low_information_asr_returns_local_recovery():
-    class LowInformationASR:
-        name = "future_asr"
-
-        def transcribe(self, audio_path, content_type):
-            return ASRTranscript(
-                text="",
-                confidence=0.0,
-                provider=self.name,
-                error_code="asr_low_information",
-                error_message="ASR transcript was too short for the uploaded audio",
-            )
-
-    app = create_app(testing=True)
-    app.state.voice_pipeline.asr_provider = LowInformationASR()
-    client = TestClient(app)
-
-    response = post_voice(client)
-
-    assert response.status_code == 200
-    route = response.json()["voice_route"]
-    assert route["selected"] == "fast_reply"
-    assert route["fallback_reason"] == "asr_low_information"
-    assert route["asr_failed_hint"] == "没听清"
-
-
 def test_thinking_voice_uses_audio_understanding_when_asr_empty():
     """V1.3: thinking mode uses audio_understanding first; ASR empty is irrelevant."""
     app = create_app(testing=True)
@@ -172,6 +146,23 @@ def test_thinking_voice_uses_audio_understanding_when_asr_empty():
     assert body["voice_route"]["selected"] == "thinking"
     # audio understanding succeeded, so no fallback_reason
     assert body["reply"]
+
+
+def test_thinking_voice_does_not_dispatch_empty_user_text():
+    app = create_app(testing=True)
+    app.state.audio_provider.fail = True
+    app.state.asr_provider.text = ""
+    client = TestClient(app)
+
+    response = post_voice(client, data={"thinking_mode": "true"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_text"] == ""
+    assert body["voice_route"]["fallback_reason"] == "audio_understanding_insufficient"
+    assert body["voice_route"]["asr_failed_hint"] == "没听清"
+    assert body["runtime"]["error_class"] == "asr_failed"
+    assert body["action"] == "confused"
 
 
 def test_voice_pipeline_gates_asr_and_audio_understanding():

@@ -15,7 +15,7 @@ from app.pet.guard import guard_action, guard_fast_reply_action
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
-from app.runtime.actions import FastReplyAction, PetResponse
+from app.runtime.actions import ALLOWED_BEHAVIOR_ACTIONS, FastReplyAction, PetResponse
 from app.runtime.agent_run import AgentRun
 from app.runtime.context import build_runtime_context
 from app.runtime.context_manager import ContextManager
@@ -34,6 +34,14 @@ FAST_DUPLICATE_RECOVERY_REPLIES = (
     "豆豆怕自己听偏了，换一句再告诉我好不好？",
     "这轮声音有点糊，主人说长一点我再接。",
     "豆豆先不乱答，主人再讲一遍好不好？",
+)
+
+PROVIDER_FALLBACK_REPLIES = (
+    "豆豆在这儿，刚刚脑袋卡了一下，主人再说一句？",
+    "刚才那下豆豆没接稳，但还在听你说。",
+    "豆豆慢半拍了，主人换个说法再来一次？",
+    "这轮豆豆有点短路，先陪着你，再说一句嘛。",
+    "豆豆刚刚反应慢了点，主人继续讲，我接着听。",
 )
 
 FAST_REPLY_REPEAT_SIMILARITY = 0.72
@@ -115,6 +123,81 @@ def _dedupe_fast_reply(
         action="confused",
         voice_style=fast_action.voice_style,
     )
+
+
+def _first_behavior_action(action: Any, mood: str) -> str:
+    if action and action.behavior_plan:
+        for step in action.behavior_plan:
+            if isinstance(step, dict):
+                candidate = str(step.get("action") or "")
+                if candidate in ALLOWED_BEHAVIOR_ACTIONS:
+                    return candidate
+    if mood == "happy":
+        return "happy"
+    if mood == "sleepy":
+        return "nap"
+    if mood in {"sad", "lonely", "concerned"}:
+        return "comfort"
+    if mood == "thinking":
+        return "think"
+    if mood == "excited":
+        return "excited"
+    if mood == "angry":
+        return "deny"
+    if mood == "shy":
+        return "self_groom"
+    return "speak"
+
+
+def _provider_fallback_action(raw_action: Any, cognition_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if raw_action is not None:
+        return raw_action
+    reply = _select_distinct_reply(PROVIDER_FALLBACK_REPLIES, cognition_context)
+    return {
+        "reply": reply,
+        "mood": "concerned",
+        "face_type": "concerned",
+        "animation": "tilt",
+        "voice_style": "soft",
+        "vibration": "none",
+        "intent": "provider_fallback",
+        "autonomy_notes": "provider unavailable or invalid output",
+        "state_delta": {},
+        "state_affect": {
+            "interaction_tone": "comforting",
+            "pet_effort": "none",
+            "emotional_effect": "uncertain",
+            "reason": "provider fallback",
+        },
+        "memory_update": {"should_save": False, "content": ""},
+        "behavior_intent": "neutral_companion",
+        "behavior_plan": [
+            {"action": "confused", "slot": "before_speech", "duration_ms": 900},
+            {"action": "speak", "slot": "speech", "duration_ms": 1400},
+        ],
+    }
+
+
+def _select_distinct_reply(
+    replies: tuple[str, ...],
+    cognition_context: Optional[Dict[str, Any]],
+) -> str:
+    recent = []
+    if cognition_context:
+        recent_events = (
+            cognition_context.get("recent_reply_history")
+            or cognition_context.get("recent_exact_events")
+            or []
+        )
+        recent = [
+            _normalize_reply_for_repeat(str(event.get("pet") or ""))
+            for event in recent_events[-5:]
+            if isinstance(event, dict)
+        ]
+    for reply in replies:
+        if _normalize_reply_for_repeat(reply) not in recent:
+            return reply
+    return replies[0]
 
 
 def _dedupe_context_from_recent_events(
@@ -428,6 +511,9 @@ class RuntimeDispatcher:
             run.set_status("action_generated")
 
         fast_action = None
+        if raw_action is None:
+            raw_action = _provider_fallback_action(raw_action, cognition_context)
+
         if is_fast_reply:
             fast_action = guard_fast_reply_action(raw_action)
             fast_action = _dedupe_fast_reply(
@@ -703,6 +789,7 @@ class RuntimeDispatcher:
                 state_affect=action.state_affect.dict(),
                 behavior_intent=action.behavior_intent,
                 behavior_plan=action.behavior_plan,
+                action=_first_behavior_action(action, action.mood),
                 route="thinking",
             )
         if run:

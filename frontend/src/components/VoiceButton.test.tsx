@@ -92,11 +92,14 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
-    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), { thinkingMode: false });
+    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), {
+      thinkingMode: false,
+      signal: expect.any(AbortSignal)
+    });
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
-  test("tap during upload locally cancels the pending response without posting again", async () => {
+  test("tap during upload aborts and ignores the pending response without posting again", async () => {
     let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
     const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {
       resolveUpload = resolve;
@@ -123,6 +126,8 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(uploadVoice).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "取消发送" }));
+    const [, options] = uploadVoice.mock.calls[0];
+    expect(options.signal.aborted).toBe(true);
     resolveUpload(voiceResponse);
 
     await act(async () => {

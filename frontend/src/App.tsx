@@ -8,7 +8,6 @@ import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
 import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import {
-  exitMomo,
   getAudioJob,
   getInteractions,
   getPetState,
@@ -20,22 +19,19 @@ import {
   resetRuntime,
   sendHeartbeat,
   sendTextChat,
-  triggerProactiveEvent,
-  wakeMomo
+  triggerProactiveEvent
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
 import {
   BehaviorDirector,
   FAST_ACTION_MIN_VISIBLE_MS,
 } from "./pet/behaviorDirector";
-import { detectActivationIntent } from "./pet/activation";
 import { getErrorBubble } from "./pet/errorMessages";
 import { shouldApplyProactive } from "./pet/proactive";
 import { useClientConfig } from "./hooks/useClientConfig";
 import { useNetworkState } from "./hooks/useNetworkState";
 import type { DoudouAction } from "./pet/doudouSprites";
 import type {
-  ActivationResponse,
   AudioJob,
   AnimationName,
   InteractionDefinition,
@@ -518,38 +514,6 @@ function App() {
       return;
     }
 
-    const intent = detectActivationIntent(
-      response.user_text,
-      response.audio_understanding.confidence
-    );
-
-    try {
-      if (intent === "wake") {
-        const activation = await wakeMomo(
-          response.user_text,
-          response.audio_understanding.confidence
-        );
-        setActiveSession(activation.active ? activation.session_id : null);
-        applyActivationResponse(activation);
-        return;
-      }
-      if (intent === "exit") {
-        const activation = await exitMomo(
-          response.user_text,
-          response.audio_understanding.confidence
-        );
-        setActiveSession(activation.active ? activation.session_id : null);
-        applyActivationResponse(activation);
-        return;
-      }
-    } catch {
-      setActiveSession(null);
-    }
-
-    applyPetResponse(response);
-  }
-
-  function applyActivationResponse(response: ActivationResponse) {
     applyPetResponse(response);
   }
 

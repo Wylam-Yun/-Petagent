@@ -41,6 +41,7 @@ export function VoiceButton({
   const sessionRef = useRef<VoiceRecordingSession | null>(null);
   const uploadRunRef = useRef(0);
   const activeUploadRunRef = useRef(0);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export function VoiceButton({
     return () => {
       mountedRef.current = false;
       uploadRunRef.current += 1;
+      uploadAbortRef.current?.abort();
       sessionRef.current?.cancel();
     };
   }, []);
@@ -100,10 +102,14 @@ export function VoiceButton({
     const uploadRun = uploadRunRef.current + 1;
     uploadRunRef.current = uploadRun;
     activeUploadRunRef.current = uploadRun;
+    uploadAbortRef.current = typeof AbortController === "undefined" ? null : new AbortController();
     setBusy(true);
     try {
       const blob = await session.stop();
-      const response = await uploadVoice(blob, { thinkingMode });
+      const response = await uploadVoice(blob, {
+        thinkingMode,
+        ...(uploadAbortRef.current ? { signal: uploadAbortRef.current.signal } : {})
+      });
       if (uploadRunRef.current !== uploadRun) return;
       onVoiceResponse(response);
       const fallbackReason = response.voice_route?.fallback_reason;
@@ -129,6 +135,9 @@ export function VoiceButton({
       if (activeUploadRunRef.current === uploadRun) {
         activeUploadRunRef.current = 0;
       }
+      if (uploadAbortRef.current?.signal.aborted || activeUploadRunRef.current === 0) {
+        uploadAbortRef.current = null;
+      }
       if (mountedRef.current) {
         setBusy(false);
       }
@@ -144,6 +153,7 @@ export function VoiceButton({
 
   function cancelPendingUpload() {
     uploadRunRef.current += 1;
+    uploadAbortRef.current?.abort();
     changePhase("idle");
   }
 

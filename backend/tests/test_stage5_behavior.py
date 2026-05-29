@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.runtime.actions import ALLOWED_BEHAVIOR_ACTIONS
 
 
 def test_fast_reply_includes_action():
@@ -18,16 +19,12 @@ def test_fast_reply_includes_action():
 
 def test_fast_reply_action_is_valid():
     """action value, when present, is a valid DoudouAction."""
-    valid_actions = {
-        "idle", "waiting", "review", "waving", "jumping",
-        "failed", "running", "running-left", "running-right",
-    }
     client = TestClient(create_app(testing=True))
     response = client.post("/api/text/chat", json={"text": "你好"})
     body = response.json()
     action = body.get("action")
     if action is not None:
-        assert action in valid_actions, f"Invalid action: {action}"
+        assert action in ALLOWED_BEHAVIOR_ACTIONS, f"Invalid action: {action}"
 
 
 def test_thinking_response_has_behavior_plan():
@@ -42,6 +39,17 @@ def test_thinking_response_has_behavior_plan():
     # behavior_plan may be None if LLM didn't provide one
     assert "behavior_plan" in body
     assert "behavior_intent" in body
+
+
+def test_thinking_response_action_is_valid():
+    client = TestClient(create_app(testing=True))
+    response = client.post(
+        "/api/text/chat",
+        json={"text": "你好", "thinking_mode": True},
+    )
+    assert response.status_code == 200
+    action = response.json().get("action")
+    assert action in ALLOWED_BEHAVIOR_ACTIONS
 
 
 def test_pet_response_has_action_route_fields():

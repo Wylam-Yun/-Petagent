@@ -3,7 +3,7 @@ from pathlib import Path
 import requests
 
 from app.config import ProviderConfig
-from app.providers.asr_http import HttpASRProvider, _contains_script, parse_transcript_json
+from app.providers.asr_http import HttpASRProvider, parse_transcript_json
 
 
 def provider_config() -> ProviderConfig:
@@ -49,15 +49,6 @@ def test_parse_transcript_json_uses_configured_paths_for_nested_provider():
         text_paths=["payload.speech.text"],
         confidence_paths=["payload.speech.confidence_score"],
     ) == ("豆豆我回来啦", 0.64)
-
-
-def test_contains_script_detects_cjk_without_accepting_kana():
-    cjk_ranges = (("\u4e00", "\u9fff"),)
-    kana_ranges = (("\u3040", "\u30ff"),)
-
-    assert _contains_script("豆豆你好", cjk_ranges)
-    assert not _contains_script("おふ？", cjk_ranges)
-    assert _contains_script("おふ？", kana_ranges)
 
 
 def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypatch):
@@ -309,7 +300,7 @@ def test_http_asr_uses_fallback_model_when_primary_returns_empty_text(
     assert transcript.error_code == ""
 
 
-def test_http_asr_rejects_non_chinese_script_and_continues_fallback(
+def test_http_asr_accepts_provider_text_without_script_blocking(
     tmp_path: Path, monkeypatch
 ):
     audio = tmp_path / "voice.wav"
@@ -317,7 +308,6 @@ def test_http_asr_rejects_non_chinese_script_and_continues_fallback(
     config = provider_config()
     config.extra["retry_backoff_seconds"] = 0
     config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall", "iic/SenseVoiceSmall"]
-    config.extra["required_text_script"] = "zh"
     models = []
 
     class EmptyResponse:
@@ -329,7 +319,7 @@ def test_http_asr_rejects_non_chinese_script_and_continues_fallback(
         def json(self):
             return {"text": ""}
 
-    class JapaneseResponse:
+    class ProviderResponse:
         status_code = 200
 
         def raise_for_status(self):
@@ -338,22 +328,11 @@ def test_http_asr_rejects_non_chinese_script_and_continues_fallback(
         def json(self):
             return {"text": "おふ？", "confidence": 1.0}
 
-    class ChineseResponse:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"text": "豆豆你好", "confidence": 0.88}
-
     def fake_post(url, **kwargs):
         models.append(kwargs["data"]["model"])
         if len(models) == 1:
             return EmptyResponse()
-        if len(models) == 2:
-            return JapaneseResponse()
-        return ChineseResponse()
+        return ProviderResponse()
 
     monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
 
@@ -362,14 +341,13 @@ def test_http_asr_rejects_non_chinese_script_and_continues_fallback(
     assert models == [
         "parakeet-ctc-0.6b-zh-cn",
         "FunAudioLLM/SenseVoiceSmall",
-        "iic/SenseVoiceSmall",
     ]
-    assert transcript.text == "豆豆你好"
-    assert transcript.confidence == 0.88
+    assert transcript.text == "おふ？"
+    assert transcript.confidence == 1.0
     assert transcript.error_code == ""
 
 
-def test_http_asr_returns_empty_when_all_required_script_candidates_fail(
+def test_http_asr_ignores_removed_required_script_option(
     tmp_path: Path, monkeypatch
 ):
     audio = tmp_path / "voice.wav"
@@ -377,7 +355,6 @@ def test_http_asr_returns_empty_when_all_required_script_candidates_fail(
     config = provider_config()
     config.extra["retry_backoff_seconds"] = 0
     config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
-    config.extra["required_text_script"] = "zh"
     models = []
 
     class JapaneseResponse:
@@ -397,8 +374,8 @@ def test_http_asr_returns_empty_when_all_required_script_candidates_fail(
 
     transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert models == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
-    assert transcript.text == ""
+    assert models == ["parakeet-ctc-0.6b-zh-cn"]
+    assert transcript.text == "おふ？"
     assert transcript.error_code == ""
 
 
