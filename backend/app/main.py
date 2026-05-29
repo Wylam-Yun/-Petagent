@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -11,6 +12,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+
+def _configure_app_logging() -> None:
+    level_name = os.environ.get("PETAGENT_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+    app_logger.propagate = False
+    for handler in app_logger.handlers:
+        if getattr(handler, "_petagent_handler", False):
+            handler.setLevel(level)
+            return
+    handler = logging.StreamHandler()
+    handler._petagent_handler = True  # type: ignore[attr-defined]
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    app_logger.addHandler(handler)
+
+
+_configure_app_logging()
 logger = logging.getLogger(__name__)
 
 from app.api import activation as activation_api

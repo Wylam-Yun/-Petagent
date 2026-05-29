@@ -1,10 +1,12 @@
 """Tests for STAB-008: Startup/manager backoff flags."""
 from __future__ import annotations
 
+import logging
+
 from fastapi.testclient import TestClient
 from pathlib import Path
 
-from app.main import create_app
+from app.main import _configure_app_logging, create_app
 
 
 def test_core_ready_true_after_lifespan():
@@ -36,6 +38,19 @@ def test_watchdog_includes_core_ready():
         resp = client.get("/api/health/watchdog")
         assert resp.status_code == 200
         assert resp.json()["core_ready"] is True
+
+
+def test_app_logging_defaults_to_info_without_duplicate_handlers():
+    app_logger = logging.getLogger("app")
+    before = len([h for h in app_logger.handlers if getattr(h, "_petagent_handler", False)])
+
+    _configure_app_logging()
+    _configure_app_logging()
+
+    petagent_handlers = [h for h in app_logger.handlers if getattr(h, "_petagent_handler", False)]
+    assert app_logger.level == logging.INFO
+    assert app_logger.propagate is False
+    assert len(petagent_handlers) == max(1, before)
 
 
 def test_deep_health_includes_providers_ready():
