@@ -60,12 +60,13 @@ class TextPipeline:
 
     def handle(self, text: str, *, thinking_mode: bool = False) -> TextPipelineResult:
         user_text = text.strip()
+        effective_thinking_mode = False
         started = perf_counter()
         decision = decide_route(
             event_type="text_message",
             event_source="text",
             user_text=user_text,
-            thinking_mode=thinking_mode,
+            thinking_mode=effective_thinking_mode,
         )
         brain = self.slow_brain if decision.brain == "slow" else self.fast_brain
         selected = decision.route
@@ -78,7 +79,7 @@ class TextPipeline:
         activation_info = None
         if activation_event is not None:
             activation_event["source"] = source
-            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            activation_event.setdefault("payload", {})["thinking_mode"] = effective_thinking_mode
             response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
@@ -86,7 +87,7 @@ class TextPipeline:
                 {
                     "type": "text_message",
                     "source": source,
-                    "payload": {"user_text": user_text, "thinking_mode": thinking_mode},
+                    "payload": {"user_text": user_text, "thinking_mode": effective_thinking_mode},
                 },
                 brain=brain,
             )
@@ -95,7 +96,7 @@ class TextPipeline:
             response=response,
             route_info=TextRouteInfo(
                 selected=selected,
-                thinking_mode=thinking_mode,
+                thinking_mode=effective_thinking_mode,
                 brain_provider=provider_name,
                 route_reason=decision.reason,
                 timings_ms={"total": _now_ms(started)},

@@ -36,8 +36,12 @@ class ContextManager:
         notebook_manager: Any = None,
     ) -> Dict[str, Any]:
         """Build a cognition context dict with budget control."""
-        # Profile-specific budget overrides
-        profile = context_profile or "default"
+        # V1.5 foreground chat uses one stable context profile.
+        profile = (
+            "unified"
+            if context_profile in {"fast_reply", "thinking", "recall", "unified"}
+            else (context_profile or "default")
+        )
         effective_recent_turns = self.recent_exact_turns
         effective_memory_items = self.relevant_memory_items
         effective_episode_summaries = self.recent_episode_summaries
@@ -45,7 +49,13 @@ class ContextManager:
         include_episode_summaries = True
         include_important_quotes = True
 
-        if profile in ("fast_reply", "fast_companion", "tool"):
+        if profile == "unified":
+            effective_recent_turns = 5
+            effective_memory_items = 0
+            include_daily_digest = False
+            include_episode_summaries = False
+            include_important_quotes = False
+        elif profile in ("fast_reply", "fast_companion", "tool"):
             effective_recent_turns = 1 if profile == "fast_reply" else min(self.recent_exact_turns, 4)
             effective_memory_items = 0  # cards replace scored memories
             include_daily_digest = False
@@ -86,9 +96,14 @@ class ContextManager:
                 "event_count": episode.get("event_count", 0),
             }
 
-        # Recent exact events from current episode
+        # Recent exact events from durable local history.
         recent_exact_events: List[Dict[str, Any]] = []
-        if episode and event_log_store:
+        if profile == "unified" and event_log_store:
+            try:
+                recent_exact_events = event_log_store.recent_dialogue_turns(limit=5)
+            except Exception:
+                recent_exact_events = []
+        elif episode and event_log_store:
             raw_events = event_log_store.recent_events(
                 episode_id=episode.get("episode_id"),
                 limit=effective_recent_turns,
@@ -155,7 +170,12 @@ class ContextManager:
 
         # V1.4: NotebookManager single canonical memory.md selection.
         selected_card_items = None
-        if notebook_manager is not None and profile in ("fast_reply", "thinking"):
+        if notebook_manager is not None and profile == "unified":
+            try:
+                selected_card_items = notebook_manager.prompt_memory_lines(limit=10)
+            except Exception:
+                selected_card_items = []
+        elif notebook_manager is not None and profile in ("fast_reply", "thinking"):
             try:
                 if profile == "fast_reply":
                     selected_card_items = notebook_manager.select_for_fast_reply()

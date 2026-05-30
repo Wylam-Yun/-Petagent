@@ -60,8 +60,8 @@ def test_event_log_capacity_cleanup_summarized_first():
 
     assert log.count() == 5
     deleted = log.cleanup_if_needed(max_rows=3, current_episode_id="ep-cap")
-    assert deleted == 2
-    assert log.count() == 3
+    assert deleted == 0
+    assert log.count() == 5
 
 
 def test_event_log_hard_limit_cleanup():
@@ -83,8 +83,8 @@ def test_event_log_hard_limit_cleanup():
     assert log.count() == 6
     # Set max to 4, current episode is ep-current
     deleted = log.cleanup_if_needed(max_rows=4, current_episode_id="ep-current")
-    assert deleted >= 1
-    assert log.count() <= 4
+    assert deleted == 0
+    assert log.count() == 6
 
 
 def test_debug_desensitizes_secrets():

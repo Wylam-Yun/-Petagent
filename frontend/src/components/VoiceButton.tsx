@@ -9,15 +9,13 @@ import {
 } from "../pet/audio";
 import { uploadVoice as defaultUploadVoice } from "../pet/api";
 import type { PetUIPhase, VoiceChatResponse } from "../pet/types";
-import type { UploadVoiceOptions } from "../pet/api";
 
 type VoiceButtonProps = {
   disabled: boolean;
   phase: PetUIPhase;
-  thinkingMode?: boolean;
   pressToRecordDelayMs?: number;
   recorderFactory?: () => Promise<VoiceRecordingSession>;
-  uploadVoice?: (blob: Blob, options?: UploadVoiceOptions) => Promise<VoiceChatResponse>;
+  uploadVoice?: (blob: Blob) => Promise<VoiceChatResponse>;
   onInterrupt?: () => void;
   onPhaseChange: (phase: PetUIPhase) => void;
   onVoiceResponse: (response: VoiceChatResponse) => void;
@@ -27,7 +25,6 @@ type VoiceButtonProps = {
 export function VoiceButton({
   disabled,
   phase,
-  thinkingMode = false,
   recorderFactory = createVoiceRecordingSession,
   uploadVoice = defaultUploadVoice,
   onInterrupt,
@@ -99,7 +96,7 @@ export function VoiceButton({
     setBusy(true);
     try {
       const blob = await session.stop();
-      const response = await uploadVoice(blob, { thinkingMode });
+      const response = await uploadVoice(blob);
       if (uploadRunRef.current !== uploadRun) return;
       if (response.ok === false || response.error_class) {
         onError(messageForVoiceFailure(response.error_class ?? response.voice_route?.fallback_reason));

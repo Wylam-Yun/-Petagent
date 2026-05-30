@@ -179,7 +179,7 @@ class HttpASRProvider:
             retries = int(self.config.extra.get("transient_retries", 0))
         except (TypeError, ValueError):
             retries = 0
-        return max(1, min(4, max(retries + 1, len(models))))
+        return max(1, min(3, max(retries + 1, len(models))))
 
     def _retry_backoff_seconds(self, attempt: int) -> float:
         try:

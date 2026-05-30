@@ -15,7 +15,7 @@ def test_text_chat_uses_fast_route_by_default():
     assert response.status_code == 200
     body = response.json()
     assert body["user_text"] == "我今天有点累"
-    assert body["text_route"]["selected"] == "fast_reply"
+    assert body["text_route"]["selected"] == "unified"
     assert body["text_route"]["thinking_mode"] is False
     assert body["text_route"]["brain_provider"] == "mock_fast_llm"
     assert body["voice_url"] is None
@@ -23,7 +23,7 @@ def test_text_chat_uses_fast_route_by_default():
     assert body["runtime"]["event_id"]
 
 
-def test_text_chat_uses_slow_route_when_thinking_mode_is_enabled():
+def test_text_chat_ignores_thinking_mode():
     client = TestClient(create_app(testing=True))
 
     response = client.post(
@@ -33,9 +33,9 @@ def test_text_chat_uses_slow_route_when_thinking_mode_is_enabled():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["text_route"]["selected"] == "thinking"
-    assert body["text_route"]["thinking_mode"] is True
-    assert body["text_route"]["brain_provider"] == "mock_slow_llm"
+    assert body["text_route"]["selected"] == "unified"
+    assert body["text_route"]["thinking_mode"] is False
+    assert body["text_route"]["brain_provider"] == "mock_fast_llm"
 
 
 def test_text_chat_rejects_empty_text():

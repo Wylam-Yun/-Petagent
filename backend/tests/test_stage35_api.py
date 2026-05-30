@@ -20,7 +20,7 @@ def test_context_refresh_endpoint():
     assert body["reply"]  # has a reply string
 
 
-def test_context_refresh_creates_new_episode():
+def test_context_refresh_keeps_current_episode():
     app = create_app(testing=True)
     client = TestClient(app)
 
@@ -32,20 +32,19 @@ def test_context_refresh_creates_new_episode():
     r2 = client.post("/api/context/refresh")
     ep2 = r2.json()["episode"]["episode_id"]
 
-    assert ep1 != ep2
+    assert ep1 == ep2
 
 
-def test_context_refresh_logs_event():
+def test_context_refresh_does_not_log_event():
     app = create_app(testing=True)
     client = TestClient(app)
 
     client.post("/api/context/refresh")
 
-    # Check that context_refresh event was logged
     log = app.state.event_log_store
     events = log.recent_events(limit=5)
     types = [e["event_type"] for e in events]
-    assert "context_refresh" in types
+    assert "context_refresh" not in types
 
 
 def test_context_debug_endpoint_requires_debug_enabled():

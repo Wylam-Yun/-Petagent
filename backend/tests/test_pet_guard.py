@@ -1,4 +1,6 @@
-from app.pet.guard import DEFAULT_STATE_DELTA_LIMITS, guard_action
+import pytest
+
+from app.pet.guard import DEFAULT_STATE_DELTA_LIMITS, InvalidActionError, guard_action
 
 
 def test_guard_replaces_invalid_mood_and_limits_delta():
@@ -21,11 +23,9 @@ def test_guard_replaces_invalid_mood_and_limits_delta():
     assert action.state_delta["loneliness"] == -10
 
 
-def test_guard_uses_fallback_for_invalid_json():
-    action = guard_action("not json")
-
-    assert action.reply == "嗯嗯，豆豆在这儿。"
-    assert action.mood == "happy"
+def test_guard_raises_for_invalid_json():
+    with pytest.raises(InvalidActionError):
+        guard_action("not json")
 
 
 def test_guard_allows_natural_length_replies_up_to_configured_limit():
@@ -101,16 +101,15 @@ def test_guard_strips_english_markdown_reasoning_markers():
     assert action.reply == "Morning,豆豆在这里。"
 
 
-def test_guard_uses_fallback_when_reply_is_only_reasoning():
-    action = guard_action(
-        {
-            "reply": "内部分析：用户在测试模型是否泄漏思考过程。",
-            "mood": "thinking",
-        },
-        max_reply_chars=500,
-    )
-
-    assert action.reply == "嗯嗯，豆豆在这儿。"
+def test_guard_raises_when_reply_is_only_reasoning():
+    with pytest.raises(InvalidActionError):
+        guard_action(
+            {
+                "reply": "内部分析：用户在测试模型是否泄漏思考过程。",
+                "mood": "thinking",
+            },
+            max_reply_chars=500,
+        )
 
 
 def test_guard_drops_reasoning_appended_after_visible_reply():
@@ -184,11 +183,11 @@ def test_sanitize_prompt_leak_removes_internal_fields():
     assert "天气不错" in result
 
 
-def test_sanitize_prompt_leak_all_leaked_returns_fallback():
-    from app.pet.guard import _sanitize_prompt_leak, FALLBACK_ACTION
+def test_sanitize_prompt_leak_all_leaked_returns_empty():
+    from app.pet.guard import _sanitize_prompt_leak
     reply = "state_delta: {energy: 5}\nmemory_update: {should_save: true}"
     result = _sanitize_prompt_leak(reply)
-    assert result == FALLBACK_ACTION["reply"]
+    assert result == ""
 
 
 def test_guard_action_strips_prompt_leak():

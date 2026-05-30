@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from app.config import ProviderConfig
+from app.pet.guard import InvalidActionError
 from app.providers.llm_mimo import FallbackLLMProvider
 from app.providers.llm_mimo import MockLLMProvider
 from app.providers.llm_mimo import MiMoLLMProvider
@@ -23,9 +26,8 @@ def test_mock_llm_provider_returns_valid_action():
 
 
 def test_mock_llm_invalid_json_falls_back():
-    action = guard_action("{broken json")
-
-    assert action.reply == "嗯嗯，豆豆在这儿。"
+    with pytest.raises(InvalidActionError):
+        guard_action("{broken json")
 
 
 def test_mimo_llm_provider_forwards_no_thinking_option(monkeypatch):

@@ -171,8 +171,8 @@ def test_dispatcher_uses_provider_gate_for_llm():
     mock_gate.release.assert_called_once_with("llm_fast")
 
 
-def test_dispatcher_provider_gate_slow_profile():
-    """Dispatcher should use llm_slow gate for thinking_mode events."""
+def test_dispatcher_provider_gate_ignores_thinking_mode():
+    """Dispatcher should keep legacy thinking_mode on the unified fast gate."""
     from fastapi.testclient import TestClient
     from app.main import create_app
 
@@ -190,5 +190,5 @@ def test_dispatcher_provider_gate_slow_profile():
     })
     assert resp.status_code == 200
 
-    mock_gate.acquire.assert_called_once_with("llm_slow")
-    mock_gate.release.assert_called_once_with("llm_slow")
+    mock_gate.acquire.assert_called_once_with("llm_fast")
+    mock_gate.release.assert_called_once_with("llm_fast")

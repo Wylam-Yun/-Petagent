@@ -42,8 +42,8 @@ def test_text_chat_catches_provider_auth_error():
     assert resp.status_code == 200
     body = resp.json()
     assert body["error_class"] == "provider_auth_failed"
-    assert body["reply"]  # has fallback reply
-    assert body["mood"] == "tired"
+    assert body["reply"] == ""
+    assert body["mood"] == "idle"
 
 
 def test_text_chat_catches_provider_timeout():

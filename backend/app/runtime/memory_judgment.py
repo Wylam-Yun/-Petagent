@@ -148,6 +148,7 @@ class MemoryJudgmentQueue:
 
     def _process_turn_summary(self, job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         from app.pet.prompt_builder import build_memory_summary_messages
+        from app.providers.retry import retry_provider_call
 
         memory_content = ""
         if self._notebook_manager is not None:
@@ -160,16 +161,17 @@ class MemoryJudgmentQueue:
             memory_content=memory_content,
             trigger_categories=list(job.get("trigger_categories") or []),
         )
-        result = self._provider.complete_json(messages)
-        operations = self._validate_operations(result)
-        if operations is None:
-            return {"should_write": False, "operations": None}
-        return {
-            "should_write": bool(
-                operations["add"] or operations["update"] or operations["delete"]
-            ),
-            "operations": operations,
-        }
+        result = retry_provider_call(
+            lambda: self._provider.complete_json(messages),
+            provider=str(getattr(self._provider, "name", "memory_summarizer")),
+        )
+        memories = self._validate_memories(result)
+        if memories is None:
+            return {"should_write": False, "memories": None}
+        wrote = False
+        if self._notebook_manager is not None:
+            wrote = self._notebook_manager.overwrite_memory_lines(memories)
+        return {"should_write": wrote, "memories": memories}
 
     def pending_count(self) -> int:
         with self._lock:
@@ -238,3 +240,20 @@ class MemoryJudgmentQueue:
                     "reason": str(item.get("reason") or ""),
                 })
         return operations
+
+    def _validate_memories(self, result: Any) -> Optional[List[Dict[str, str]]]:
+        if not isinstance(result, dict):
+            return None
+        raw_items = result.get("memories")
+        if not isinstance(raw_items, list) or len(raw_items) > 10:
+            return None
+        memories: List[Dict[str, str]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                return None
+            category = str(item.get("category") or "")
+            content = str(item.get("content") or "").strip()
+            if category not in _CATEGORY_WHITELIST or not content:
+                return None
+            memories.append({"category": category, "content": content})
+        return memories

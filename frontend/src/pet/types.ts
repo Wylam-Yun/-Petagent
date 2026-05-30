@@ -165,7 +165,7 @@ export type VoiceChatResponse = PetResponse & {
 export type TextChatResponse = PetResponse & {
   user_text: string;
   text_route: {
-    selected: "fast_reply" | "thinking";
+    selected: "unified" | "fast_reply" | "thinking";
     thinking_mode: boolean;
     brain_provider: string;
     timings_ms: Record<string, number>;
@@ -180,7 +180,7 @@ export type TextChatResponse = PetResponse & {
 
 export type VoiceRouteInfo = {
   requested: "auto" | "fast_reply" | "thinking";
-  selected: "fast_reply" | "thinking";
+  selected: "unified" | "fast_reply" | "thinking";
   thinking_mode: boolean;
   asr_provider: string;
   asr_error_code?: string;

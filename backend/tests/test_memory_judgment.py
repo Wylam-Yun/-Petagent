@@ -153,9 +153,7 @@ def test_process_one_clears_seen_on_process():
 
 def test_enqueue_turn_summary_processes_operations():
     provider = MockProvider(result={
-        "add": [{"category": "preference", "content": "喜欢短回复"}],
-        "update": [],
-        "delete": [],
+        "memories": [{"category": "preference", "content": "喜欢短回复"}],
     })
     tmp = Path(mkdtemp())
     notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
@@ -172,16 +170,12 @@ def test_enqueue_turn_summary_processes_operations():
 
     assert result is not None
     assert result["should_write"] is True
-    assert result["operations"]["add"] == [{
-        "target": "memory.md",
-        "category": "preference",
-        "content": "喜欢短回复",
-    }]
+    assert result["memories"] == [{"category": "preference", "content": "喜欢短回复"}]
     assert provider.last_messages is not None
 
 
 def test_explicit_turn_summary_evicts_oldest_normal_job_when_full():
-    provider = MockProvider(result={"add": [], "update": [], "delete": []})
+    provider = MockProvider(result={"memories": []})
     q = MemoryJudgmentQueue(provider=provider, max_pending=2)
 
     assert q.enqueue_turn_summary("普通1", "回复1", "fast_reply") is True
@@ -209,4 +203,4 @@ def test_invalid_turn_summary_output_is_ignored_safely():
 
     result = q.process_one()
 
-    assert result == {"should_write": False, "operations": {"add": [], "update": [], "delete": []}}
+    assert result == {"should_write": False, "memories": None}

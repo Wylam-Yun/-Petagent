@@ -51,7 +51,7 @@ from app.runtime.concurrency import AgentWorkExecutor, ProviderGate
 from app.runtime.maintenance_worker import MaintenanceWorker
 from app.runtime.proactive_scheduler import ProactiveScheduler
 from app.runtime.context_manager import ContextManager
-from app.runtime.context_store import EpisodeStore, EventLogStore
+from app.runtime.context_store import EpisodeStore, EventLogStore, SuccessfulTurnStore
 from app.runtime.dispatcher import RuntimeDispatcher
 from app.runtime.agent_run import AgentRunRegistry
 from app.runtime.agent_run_store import AgentRunStore
@@ -94,14 +94,22 @@ def _select_llm_provider(
 
 
 def _select_memory_summarizer_provider(settings: Settings, testing: bool):
-    config = settings.memory_summarizer or settings.llm_fallback or settings.llm
-    return _select_llm_provider(
-        settings,
-        testing,
-        config,
-        "mock_memory_summarizer",
-        fallback_config=None,
-    )
+    if testing:
+        return MockLLMProvider("mock_memory_summarizer")
+    config = settings.memory_summarizer
+    if config is None or not config.api_key or not config.base_url:
+        return DisabledMemoryProvider("mimo_memory_not_configured")
+    return MiMoLLMProvider(settings, config)
+
+
+class DisabledMemoryProvider:
+    name = "mimo_memory_not_configured"
+
+    def __init__(self, reason: str = "mimo_memory_not_configured") -> None:
+        self.reason = reason
+
+    def complete_json(self, messages):
+        raise RuntimeError(self.reason)
 
 
 def _resolve_project_path(settings: Settings, raw_path: str) -> Path:
@@ -156,6 +164,7 @@ def create_app(testing: bool = False) -> FastAPI:
     # Stage 3.5: Cognition Context stores
     episode_manager = EpisodeStore(state_store.connection)
     event_log_store = EventLogStore(state_store.connection)
+    successful_turn_store = SuccessfulTurnStore(state_store.connection)
     cc_config = settings.app_config.get("cognition_context", {})
     context_manager = ContextManager(cc_config)
 
@@ -250,7 +259,7 @@ def create_app(testing: bool = False) -> FastAPI:
     )
 
     memory_curator = MemoryCurator(
-        brain_provider=slow_llm_provider,
+        brain_provider=_select_memory_summarizer_provider(settings, testing),
         memory_manager=memory_manager,
         max_batch=memory_config.get("curator_batch_size", 8),
     )
@@ -265,7 +274,7 @@ def create_app(testing: bool = False) -> FastAPI:
     from app.runtime.nightly_cleanup import NightlyCleanupRunner
     nightly_cleanup_runner = NightlyCleanupRunner(
         notebook_manager=notebook_manager,
-        provider=slow_llm_provider,
+        provider=_select_memory_summarizer_provider(settings, testing),
         event_log_store=event_log_store,
         maintenance_state=maintenance_state,
         provider_gate=None,
@@ -355,6 +364,7 @@ def create_app(testing: bool = False) -> FastAPI:
         incident_store=incident_store,
         memory_judgment_queue=memory_judgment_queue,
         notebook_manager=notebook_manager,
+        successful_turn_store=successful_turn_store,
     )
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
@@ -486,6 +496,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.proactive_brain = proactive_brain
     app.state.episode_manager = episode_manager
     app.state.event_log_store = event_log_store
+    app.state.successful_turn_store = successful_turn_store
     app.state.context_manager = context_manager
     app.state.memory_manager = memory_manager
     app.state.memory_candidate_store = memory_candidate_store

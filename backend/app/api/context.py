@@ -13,41 +13,14 @@ router = APIRouter()
 
 @router.post("/api/context/refresh")
 def context_refresh(request: Request) -> Dict[str, Any]:
-    """换话题：关闭当前 episode，创建新 episode，记录 context_refresh 事件."""
-    dispatcher = request.app.state.dispatcher
-
-    # Use dispatcher's event lock to serialize with voice/touch events
-    with dispatcher._event_lock:
-        episode_manager = request.app.state.episode_manager
-        event_log_store = request.app.state.event_log_store
-        summary_job_store = request.app.state.summary_job_store
-
-        # Close old episode and create new one
-        new_episode, closed_episode_id = episode_manager.refresh_topic()
-
-        # Enqueue summary job for the closed episode
-        if closed_episode_id and summary_job_store is not None:
-            summary_job_store.enqueue(closed_episode_id)
-
-        # Record context_refresh event in the event log and update episode count
-        if event_log_store is not None:
-            from app.runtime.events import PetEvent
-
-            refresh_event = PetEvent(type="context_refresh", source="ui")
-            event_log_store.record(
-                event_id=refresh_event.id,
-                episode_id=new_episode["episode_id"],
-                event_type="context_refresh",
-                source="ui",
-                user_text="",
-                pet_reply="",
-            )
-            episode_manager.update_event_count(new_episode["episode_id"])
-
+    """Compatibility-only endpoint. V1.5 keeps one long-running session."""
+    episode = request.app.state.episode_manager.peek_current()
+    if episode is None:
+        episode, _ = request.app.state.episode_manager.get_or_create_current()
     return {
         "ok": True,
-        "episode": new_episode,
-        "reply": "好呀，我们换个轻一点的话题。",
+        "episode": episode,
+        "reply": "豆豆继续听你说。",
     }
 
 

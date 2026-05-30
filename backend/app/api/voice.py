@@ -178,13 +178,13 @@ async def post_voice_chat(
         logger.warning("voice_chat provider error: %s", exc.to_dict())
         body: Dict[str, Any] = {
             "ok": False,
-            "reply": "豆豆有点累了，稍后再试试吧~",
-            "mood": "tired",
-            "face_type": "tired",
-            "animation": "slowBlink",
+            "reply": "",
+            "mood": "idle",
+            "face_type": "idle",
+            "animation": "breathing",
             "vibration": "none",
             "pet_state": request.app.state.state_store.get_state(),
-            "runtime": {},
+            "runtime": {"error_class": exc.error_class, "context_profile": "unified"},
             "error_class": exc.error_class,
         }
         return body
@@ -197,6 +197,8 @@ async def post_voice_chat(
     body["error_class"] = error_class
     if failed:
         body["pet_state"] = request.app.state.state_store.get_state()
+        body["audio_job_id"] = None
+        body["voice_url"] = None
     body["audio_understanding"] = result.audio_understanding.dict()
     route_info = result.route_info.dict()
     route_info["timings_ms"] = dict(route_info.get("timings_ms", {}))

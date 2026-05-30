@@ -74,7 +74,6 @@ describe("uploadVoice", () => {
     });
 
     expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.fast);
-    expect(timeouts).not.toContain(VOICE_UPLOAD_TIMEOUT_MS.thinking);
   });
 });
 

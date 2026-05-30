@@ -8,6 +8,7 @@ from app.pet.prompt_builder import (
     build_pet_messages,
     build_skill_plan_messages,
     build_thinking_messages,
+    build_unified_foreground_messages,
 )
 from app.providers.llm_mimo import LLMProvider
 from app.runtime.context import RuntimeContext
@@ -24,11 +25,11 @@ class PetBrain:
         return self.provider.complete_json(messages)
 
     def generate_fast_reply_action(self, event: PetEvent, context: RuntimeContext) -> Dict[str, Any]:
-        messages = build_fast_reply_messages(self.settings, event, context)
+        messages = build_unified_foreground_messages(self.settings, event, context)
         return self.provider.complete_json(messages)
 
     def generate_thinking_action(self, event: PetEvent, context: RuntimeContext) -> Dict[str, Any]:
-        messages = build_thinking_messages(self.settings, event, context)
+        messages = build_unified_foreground_messages(self.settings, event, context)
         return self.provider.complete_json(messages)
 
     def generate_skill_plan(

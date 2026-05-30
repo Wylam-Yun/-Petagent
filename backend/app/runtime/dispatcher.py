@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from time import perf_counter
 
 from app.pet.brain import PetBrain
-from app.pet.guard import guard_action, guard_fast_reply_action
+from app.pet.guard import InvalidActionError, guard_action, guard_fast_reply_action
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
@@ -66,6 +66,7 @@ class RuntimeDispatcher:
         incident_store=None,
         memory_judgment_queue=None,
         notebook_manager=None,
+        successful_turn_store=None,
     ) -> None:
         self.state_store = state_store
         self.brain = brain
@@ -92,6 +93,7 @@ class RuntimeDispatcher:
         self.incident_store = incident_store
         self.memory_judgment_queue = memory_judgment_queue
         self.notebook_manager = notebook_manager
+        self.successful_turn_store = successful_turn_store
         self._event_lock = threading.RLock()
         # Health counters (lock-free, read by /api/health/watchdog)
         self.event_loop_tick: float = perf_counter()
@@ -144,7 +146,7 @@ class RuntimeDispatcher:
 
         # ===== PHASE 1: LOCKED SNAPSHOT =====
         with self._event_lock:
-            thinking_mode = bool(event.payload.get("thinking_mode", False))
+            thinking_mode = False
             user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
             decision = decide_route(
                 event_type=event.type,
@@ -274,10 +276,11 @@ class RuntimeDispatcher:
         )
 
         # Generate action (LLM call — the slowest part, gated by provider concurrency)
-        is_fast_reply = decision and decision.route == "fast_reply"
+        is_fast_reply = decision is None or decision.route in {"fast_reply", "unified"}
         provider_type = _profile_to_gate_type(decision.provider_profile if decision else "slow_llm")
         llm_start = perf_counter()
         raw_action = None
+        llm_error_class = ""
         gate_acquired = False
         try:
             if self.provider_gate is not None:
@@ -291,9 +294,11 @@ class RuntimeDispatcher:
                 else:
                     raw_action = active_brain.generate_action(event, context)
             except Exception:
+                llm_error_class = "llm_provider_error"
                 raw_action = None
         except ProviderBusyError:
-            logger.warning("Provider %s busy, returning fallback", provider_type)
+            logger.warning("Provider %s busy, returning explicit failure", provider_type)
+            llm_error_class = "provider_busy"
             raw_action = None
         finally:
             if gate_acquired and self.provider_gate is not None:
@@ -314,62 +319,87 @@ class RuntimeDispatcher:
                     })
                 except Exception:
                     pass
-            run.error = "LLM provider exception"
+            run.error = llm_error_class or "LLM provider exception"
+            return self._failure_response(
+                event=event,
+                pet_state=ruled_state,
+                run=run,
+                episode_id=episode_id,
+                cognition_context=cognition_context,
+                error_class=llm_error_class or "llm_provider_error",
+                provider=decision.provider_profile if decision else provider_type,
+                pipeline_start=pipeline_start,
+            )
         if run and run.status not in {"failed", "superseded"}:
             run.set_status("action_generated")
 
         fast_action = None
-        if is_fast_reply:
-            fast_action = guard_fast_reply_action(raw_action)
+        try:
+            if is_fast_reply:
+                fast_action = guard_fast_reply_action(raw_action)
+                if run:
+                    run.final_action = {
+                        "reply": fast_action.reply[:200],
+                        "mood": fast_action.mood or "idle",
+                        "action": fast_action.action or "",
+                        "voice_style": fast_action.voice_style,
+                    }
+                # Minimal state update: mood + last_interaction_at only
+                final_state = dict(ruled_state)
+                if fast_action.mood:
+                    final_state["mood"] = fast_action.mood
+                final_state["mode"] = "idle"
+                final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+            else:
+                action = guard_action(
+                    raw_action,
+                    max_reply_chars=self._max_reply_chars(active_brain),
+                    event_type=event.type,
+                )
+                if run:
+                    run.final_action = {
+                        "reply": action.reply[:200],
+                        "mood": action.mood,
+                        "face_type": action.face_type,
+                        "animation": action.animation,
+                        "voice_style": action.voice_style,
+                    }
+                # Compute state delta (deterministic, can be recomputed on CAS retry)
+                sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
+                if "energy" in action.state_delta:
+                    logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
+                final_state = apply_state_delta(ruled_state, sanitized_delta)
+                pre_llm_energy = int(ruled_state.get("energy", 0))
+                effort = action.state_affect.pet_effort
+                if effort == "medium":
+                    final_state["energy"] = min(
+                        int(final_state.get("energy", 0)) - 2,
+                        pre_llm_energy - 2,
+                    )
+                elif effort == "high":
+                    final_state["energy"] = min(
+                        int(final_state.get("energy", 0)) - 5,
+                        pre_llm_energy - 4,
+                    )
+                    final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
+                final_state = clamp_state(final_state)
+                final_state["mood"] = action.mood
+                final_state["mode"] = "idle"
+                final_state["last_interaction_at"] = datetime.utcnow().isoformat()
+        except InvalidActionError as exc:
             if run:
-                run.final_action = {
-                    "reply": fast_action.reply[:200],
-                    "mood": fast_action.mood or "idle",
-                    "action": fast_action.action or "",
-                    "voice_style": fast_action.voice_style,
-                }
-            # Minimal state update: mood + last_interaction_at only
-            final_state = dict(ruled_state)
-            if fast_action.mood:
-                final_state["mood"] = fast_action.mood
-            final_state["mode"] = "idle"
-            final_state["last_interaction_at"] = datetime.utcnow().isoformat()
-        else:
-            action = guard_action(
-                raw_action,
-                max_reply_chars=self._max_reply_chars(active_brain),
-                event_type=event.type,
+                run.set_status("failed")
+                run.error = exc.error_class
+            return self._failure_response(
+                event=event,
+                pet_state=ruled_state,
+                run=run,
+                episode_id=episode_id,
+                cognition_context=cognition_context,
+                error_class=exc.error_class,
+                provider=decision.provider_profile if decision else provider_type,
+                pipeline_start=pipeline_start,
             )
-            if run:
-                run.final_action = {
-                    "reply": action.reply[:200],
-                    "mood": action.mood,
-                    "face_type": action.face_type,
-                    "animation": action.animation,
-                    "voice_style": action.voice_style,
-                }
-            # Compute state delta (deterministic, can be recomputed on CAS retry)
-            sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
-            if "energy" in action.state_delta:
-                logger.debug("Stripped energy from LLM state_delta (effort handles energy)")
-            final_state = apply_state_delta(ruled_state, sanitized_delta)
-            pre_llm_energy = int(ruled_state.get("energy", 0))
-            effort = action.state_affect.pet_effort
-            if effort == "medium":
-                final_state["energy"] = min(
-                    int(final_state.get("energy", 0)) - 2,
-                    pre_llm_energy - 2,
-                )
-            elif effort == "high":
-                final_state["energy"] = min(
-                    int(final_state.get("energy", 0)) - 5,
-                    pre_llm_energy - 4,
-                )
-                final_state["sleepiness"] = int(final_state.get("sleepiness", 0)) + 1
-            final_state = clamp_state(final_state)
-            final_state["mood"] = action.mood
-            final_state["mode"] = "idle"
-            final_state["last_interaction_at"] = datetime.utcnow().isoformat()
 
         # ===== PHASE 3: LOCKED COMMIT =====
         with self._event_lock:
@@ -478,7 +508,7 @@ class RuntimeDispatcher:
             self._collect_memory_candidates(event, action, episode_id)
 
         reply_text = fast_action.reply if is_fast_reply else action.reply
-        route = "fast_reply" if is_fast_reply else "thinking"
+        route = "unified"
 
         # V1.4: after-turn memory summary is queued only. The summarizer LLM is
         # called later by maintenance, never before returning the response.
@@ -491,7 +521,18 @@ class RuntimeDispatcher:
                     memory_ack = "我先记到小本本"
             except Exception:
                 trigger_categories = []
-        if user_text and self.memory_judgment_queue is not None:
+        keyword_trigger = bool(trigger_categories)
+        turn_result = None
+        if self.successful_turn_store is not None:
+            try:
+                turn_result = self.successful_turn_store.record_successful_turn(
+                    event.id,
+                    keyword_trigger=keyword_trigger,
+                )
+            except Exception:
+                logger.warning("successful turn counter failed", exc_info=True)
+        should_enqueue_memory = bool(turn_result.should_enqueue_memory) if turn_result else keyword_trigger
+        if should_enqueue_memory and user_text and self.memory_judgment_queue is not None:
             try:
                 selected_memory = []
                 if cognition_context:
@@ -524,13 +565,6 @@ class RuntimeDispatcher:
                     user_text=str(event.payload.get("user_text", "")),
                 )
 
-        if self.event_log_store is not None:
-            max_rows = self.context_manager.raw_max_rows if self.context_manager else 3000
-            self.event_log_store.cleanup_if_needed(
-                max_rows=max_rows,
-                current_episode_id=episode_id or None,
-            )
-
         # Finalize AgentRun
         if run:
             if run.status not in {"failed", "superseded"}:
@@ -557,13 +591,17 @@ class RuntimeDispatcher:
                     "event_id": event.id,
                     "skills_used": [],
                     "episode_id": episode_id,
+                    "context_profile": "unified",
+                    "recent_dialogue_count": len((cognition_context or {}).get("recent_exact_events") or []),
+                    "memory_line_count": len((cognition_context or {}).get("selected_card_items") or []),
+                    "provider": decision.provider_profile if decision else "",
                 },
                 audio_job_id=audio_job_id,
                 state_affect=None,
                 behavior_intent=None,
                 behavior_plan=None,
                 action=fast_action.action,
-                route="fast_reply",
+                route=route,
                 memory_ack_hint=memory_ack,
             )
         else:
@@ -579,23 +617,65 @@ class RuntimeDispatcher:
                     "event_id": event.id,
                     "skills_used": [item.get("skill_id") for item in skill_results],
                     "episode_id": episode_id,
+                    "context_profile": "unified",
+                    "recent_dialogue_count": len((cognition_context or {}).get("recent_exact_events") or []),
+                    "memory_line_count": len((cognition_context or {}).get("selected_card_items") or []),
+                    "provider": decision.provider_profile if decision else "",
                 },
                 audio_job_id=audio_job_id,
                 state_affect=action.state_affect.dict(),
                 behavior_intent=action.behavior_intent,
                 behavior_plan=action.behavior_plan,
-                route="thinking",
+                route=route,
             )
         if run:
             response.runtime["run_id"] = run.run_id
             if decision:
-                response.runtime["context_profile"] = decision.context_profile
+                response.runtime["context_profile"] = "unified"
                 response.runtime["route_decision"] = decision.reason
             response.runtime["route"] = run.route
             response.runtime["provider"] = run.provider
             response.runtime["status"] = run.status
             response.runtime["timings_ms"] = dict(run.timings_ms)
         return response
+
+    def _failure_response(
+        self,
+        *,
+        event,
+        pet_state: Dict[str, Any],
+        run: AgentRun = None,
+        episode_id: str = "",
+        cognition_context: Optional[Dict[str, Any]] = None,
+        error_class: str = "llm_invalid_output",
+        provider: str = "",
+        pipeline_start: float = 0.0,
+    ) -> PetResponse:
+        if run:
+            run.timings_ms["total"] = int((perf_counter() - pipeline_start) * 1000)
+            if episode_id:
+                run.episode_id = episode_id
+            if self.agent_run_registry is not None:
+                self.agent_run_registry.persist_if_terminal(run)
+        return PetResponse(
+            reply="",
+            mood=str(pet_state.get("mood") or "idle"),
+            face_type=str(pet_state.get("mood") or "idle"),
+            animation="breathing",
+            vibration="none",
+            pet_state=dict(pet_state),
+            runtime={
+                "event_id": event.id,
+                "episode_id": episode_id,
+                "error_class": error_class,
+                "context_profile": "unified",
+                "recent_dialogue_count": len((cognition_context or {}).get("recent_exact_events") or []),
+                "memory_line_count": len((cognition_context or {}).get("selected_card_items") or []),
+                "provider": provider,
+                "status": "failed",
+            },
+            route="unified",
+        )
 
     def _collect_memory_candidates(self, event, action, episode_id: str) -> None:
         """Route memory_update to candidate store. V1.3: explicit commands handled by trigger system."""

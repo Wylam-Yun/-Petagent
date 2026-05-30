@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -347,6 +348,33 @@ class EventLogStore:
             for row in rows
         ]
 
+    def recent_dialogue_turns(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Return latest durable foreground dialogue turns across episodes."""
+        safe_limit = max(1, int(limit or 5))
+        with self.connection.locked():
+            rows = self.connection.execute(
+                """
+                SELECT event_id, event_type, source, user_text, pet_reply, created_at_utc
+                FROM raw_event_log
+                WHERE event_type IN ('text_message', 'voice_message')
+                  AND user_text IS NOT NULL AND TRIM(user_text) != ''
+                  AND pet_reply IS NOT NULL AND TRIM(pet_reply) != ''
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        result = [
+            {
+                "user": row["user_text"],
+                "pet": row["pet_reply"],
+                "created_at": row["created_at_utc"],
+            }
+            for row in rows
+        ]
+        result.reverse()
+        return result
+
     def recent_events_bounded(
         self, limit: int = 200, max_bytes: int = 20480
     ) -> List[Dict[str, Any]]:
@@ -414,48 +442,141 @@ class EventLogStore:
     def cleanup_if_needed(
         self, max_rows: int = 3000, current_episode_id: Optional[str] = None
     ) -> int:
-        """Delete excess rows. Returns number of rows deleted."""
-        current = self.count()
-        if current <= max_rows:
-            return 0
-        deleted = 0
-        excess = current - max_rows
+        """V1.5 keeps raw history durable until explicit archival exists."""
+        return 0
+
+
+@dataclass(frozen=True)
+class SuccessfulTurnResult:
+    incremented: bool
+    should_enqueue_memory: bool
+    total: int
+    since_memory_summary: int
+    trigger_reason: str = ""
+
+
+class SuccessfulTurnStore:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+        self.initialize()
+
+    def initialize(self) -> None:
         with self.connection.locked():
-            # First: delete summarized rows
-            cursor = self.connection.execute(
+            self.connection.execute(
                 """
-                DELETE FROM raw_event_log
-                WHERE id IN (
-                    SELECT id FROM raw_event_log
-                    WHERE summary_status = 'summarized'
-                    ORDER BY created_at_utc ASC
-                    LIMIT ?
+                CREATE TABLE IF NOT EXISTS successful_turn_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
-                """,
-                (excess,),
+                """
             )
-            deleted += cursor.rowcount
-            excess = current - deleted - max_rows
-            if excess > 0:
-                # Hard limit: delete oldest low-importance non-current-episode records
-                exclude_clause = ""
-                if current_episode_id:
-                    exclude_clause = "AND episode_id != ?"
-                    params: list = [current_episode_id, excess]
-                else:
-                    params: list = [excess]
-                cursor = self.connection.execute(
-                    """
-                    DELETE FROM raw_event_log
-                    WHERE id IN (
-                        SELECT id FROM raw_event_log
-                        WHERE importance_hint <= 1 {exclude}
-                        ORDER BY created_at_utc ASC
-                        LIMIT ?
-                    )
-                    """.format(exclude=exclude_clause),
-                    params,
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS successful_turn_event (
+                    event_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
                 )
-                deleted += cursor.rowcount
+                """
+            )
             self.connection.commit()
-        return deleted
+
+    def record_successful_turn(
+        self, event_id: str, keyword_trigger: bool = False
+    ) -> SuccessfulTurnResult:
+        event_id = str(event_id or "").strip()
+        if not event_id:
+            snap = self.snapshot()
+            return SuccessfulTurnResult(
+                incremented=False,
+                should_enqueue_memory=False,
+                total=snap["successful_turn_count_total"],
+                since_memory_summary=snap["successful_turn_count_since_memory_summary"],
+            )
+        now = datetime.utcnow().isoformat()
+        with self.connection.locked():
+            try:
+                self.connection.execute(
+                    "INSERT INTO successful_turn_event (event_id, created_at) VALUES (?, ?)",
+                    (event_id, now),
+                )
+            except sqlite3.IntegrityError:
+                snap = self._snapshot_locked()
+                return SuccessfulTurnResult(
+                    incremented=False,
+                    should_enqueue_memory=False,
+                    total=snap["successful_turn_count_total"],
+                    since_memory_summary=snap["successful_turn_count_since_memory_summary"],
+                )
+
+            total = self._get_int_locked("successful_turn_count_total") + 1
+            since = self._get_int_locked("successful_turn_count_since_memory_summary") + 1
+            trigger_reason = ""
+            should_enqueue = False
+            if keyword_trigger:
+                should_enqueue = True
+                trigger_reason = "keyword"
+            elif since >= 10:
+                should_enqueue = True
+                trigger_reason = "ten_turns"
+            self._set_locked("successful_turn_count_total", str(total))
+            self._set_locked(
+                "successful_turn_count_since_memory_summary",
+                "0" if should_enqueue else str(since),
+            )
+            self._set_locked("last_successful_turn_event_id", event_id)
+            if should_enqueue:
+                self._set_locked("last_memory_summary_event_id", event_id)
+                self._set_locked("last_memory_summary_at", now)
+            self.connection.commit()
+            return SuccessfulTurnResult(
+                incremented=True,
+                should_enqueue_memory=should_enqueue,
+                total=total,
+                since_memory_summary=0 if should_enqueue else since,
+                trigger_reason=trigger_reason,
+            )
+
+    def mark_memory_summary_enqueued(self, event_id: str) -> None:
+        with self.connection.locked():
+            self._set_locked("last_memory_summary_event_id", str(event_id or ""))
+            self._set_locked("last_memory_summary_at", datetime.utcnow().isoformat())
+            self.connection.commit()
+
+    def snapshot(self) -> Dict[str, int]:
+        with self.connection.locked():
+            return self._snapshot_locked()
+
+    def clear_all(self) -> None:
+        with self.connection.locked():
+            self.connection.execute("DELETE FROM successful_turn_state")
+            self.connection.execute("DELETE FROM successful_turn_event")
+            self.connection.commit()
+
+    def _snapshot_locked(self) -> Dict[str, int]:
+        return {
+            "successful_turn_count_total": self._get_int_locked("successful_turn_count_total"),
+            "successful_turn_count_since_memory_summary": self._get_int_locked(
+                "successful_turn_count_since_memory_summary"
+            ),
+        }
+
+    def _get_int_locked(self, key: str) -> int:
+        row = self.connection.execute(
+            "SELECT value FROM successful_turn_state WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if row is None:
+            return 0
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return 0
+
+    def _set_locked(self, key: str, value: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO successful_turn_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )

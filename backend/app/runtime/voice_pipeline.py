@@ -62,20 +62,14 @@ class VoicePipeline:
         requested_route: str = "auto",
         thinking_mode: bool = False,
     ) -> VoicePipelineResult:
-        requested = requested_route if requested_route in {"auto", "fast_reply", "thinking"} else "auto"
-        if thinking_mode or requested == "thinking":
-            return self._run_audio_understanding_route(
-                audio_path,
-                content_type,
-                requested=requested,
-                thinking_mode=thinking_mode,
-            )
+        requested = "auto"
+        effective_thinking_mode = False
         return self._run_asr_route(
             audio_path,
             content_type,
             requested=requested,
-            selected="fast_reply",
-            thinking_mode=thinking_mode,
+            selected="unified",
+            thinking_mode=effective_thinking_mode,
             brain=self.fast_brain,
             brain_provider_name=self.fast_brain_provider_name,
         )
@@ -169,7 +163,7 @@ class VoicePipeline:
         wake_source = ""
         if activation_event is not None:
             wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
-            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            activation_event.setdefault("payload", {})["thinking_mode"] = False
             response = self.dispatcher.handle_event(activation_event, brain=brain)
             activation_info = self._build_activation_info(activation_event["type"])
         else:
@@ -180,7 +174,7 @@ class VoicePipeline:
                     "payload": {
                         "user_text": understanding.user_text,
                         "audio_understanding": understanding.dict(),
-                        "thinking_mode": thinking_mode,
+                        "thinking_mode": False,
                     },
                 },
                 brain=brain,

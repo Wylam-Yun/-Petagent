@@ -61,5 +61,4 @@ def test_fast_reply_route_value():
     response = client.post("/api/text/chat", json={"text": "你好"})
     assert response.status_code == 200
     body = response.json()
-    # route should be fast_reply or thinking depending on routing
-    assert body.get("route") in ("fast_reply", "thinking", None)
+    assert body.get("route") in ("unified", None)

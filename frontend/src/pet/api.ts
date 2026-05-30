@@ -12,8 +12,7 @@ import type {
 } from "./types";
 
 export const VOICE_UPLOAD_TIMEOUT_MS = {
-  fast: 30_000,
-  thinking: 60_000
+  fast: 30_000
 } as const;
 
 async function requestJson<T>(url: string, init?: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
@@ -195,14 +194,13 @@ export function uploadVoice(
 ): Promise<VoiceChatResponse> {
   const formData = new FormData();
   formData.append("file", blob, `voice.${extensionForType(blob.type)}`);
-  formData.append("thinking_mode", options.thinkingMode ? "true" : "false");
   return requestJson<VoiceChatResponse>(
     "/api/voice/chat",
     {
       method: "POST",
       body: formData
     },
-    { timeoutMs: options.thinkingMode ? VOICE_UPLOAD_TIMEOUT_MS.thinking : VOICE_UPLOAD_TIMEOUT_MS.fast }
+    { timeoutMs: VOICE_UPLOAD_TIMEOUT_MS.fast }
   );
 }
 
@@ -264,10 +262,7 @@ export function sendTextChat(
   return requestJson<TextChatResponse>("/api/text/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      text,
-      thinking_mode: options.thinkingMode === true
-    })
+    body: JSON.stringify({ text })
   });
 }
 

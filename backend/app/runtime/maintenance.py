@@ -94,40 +94,15 @@ class MaintenanceService:
         self.maintenance_state.set("last_tick_at", datetime.utcnow().isoformat())
 
         # Priority 1: Process pending memory candidates (curator)
-        try:
-            if self.candidate_store.count_pending() > 0:
-                curator_result = self.curator.curate_batch(self.candidate_store)
-                result.update(curator_result)
-                if curator_result.get("saved", 0) > 0 and self.memory_card_manager:
-                    try:
-                        card_result = self.memory_card_manager.rebuild("curator_saved")
-                        result["cards_rebuilt"] = card_result.get("items_written", 0)
-                    except Exception:
-                        logger.warning("Card rebuild after curator save failed", exc_info=True)
-                return result
-        except Exception:
-            logger.warning("Curator batch failed", exc_info=True)
-            result["curator_error"] = 1
+        # V1.5: prompt-facing memory.md is maintained only by the MiMo-only
+        # memory judgment queue. Legacy memory table curation is disabled here.
 
         # Priority 1.3: Process after-turn memory summary queue.
         try:
             if self.memory_judgment_queue and self.memory_judgment_queue.pending_count() > 0:
                 judgment = self.memory_judgment_queue.process_one()
-                if (
-                    judgment
-                    and judgment.get("operations") is not None
-                    and self.notebook_manager
-                ):
-                    stats = self.notebook_manager.apply_cleanup_operations(
-                        judgment["operations"]
-                    )
-                    if any(v > 0 for v in stats.values()):
-                        result.update({"memory_summary_%s" % k: v for k, v in stats.items()})
-                elif judgment and judgment.get("should_write") and self.notebook_manager:
-                    self.notebook_manager.append_line(
-                        judgment["target"], judgment["category"], judgment["content"]
-                    )
-                    result["memory_judgment_written"] = 1
+                if judgment and judgment.get("memories") is not None:
+                    result["memory_summary_rewrite"] = 1 if judgment.get("should_write") else 0
         except Exception:
             logger.warning("Memory judgment processing failed", exc_info=True)
 

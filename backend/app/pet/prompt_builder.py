@@ -213,58 +213,47 @@ FAST_REPLY_SCHEMA = {
 }
 
 
+def _foreground_pet_state(context: RuntimeContext) -> Dict[str, Any]:
+    return {
+        "mood": context.pet_state.get("mood", "idle"),
+        "energy": context.pet_state.get("energy", 50),
+        "intimacy": context.pet_state.get("intimacy", 0),
+        "sleepiness": context.pet_state.get("sleepiness", 0),
+    }
+
+
+def build_unified_foreground_messages(
+    settings: Settings, event: PetEvent, context: RuntimeContext
+) -> List[Dict[str, str]]:
+    system_prompt = settings.persona_config.get("system_prompt", "")
+    system_prompt += (
+        "\n\nV1.5 统一对话规则："
+        "\n1. 你是豆豆，直接回复用户，不输出思考过程。"
+        "\n2. 文本和 ASR 成功后的语音都使用同一上下文。"
+        "\n3. 不要提示用户打开思考模式或回忆模式。"
+        "\n4. 严格输出 JSON，reply 必须是给用户看的自然回复。"
+    )
+    cognition = context.cognition_context or {}
+    payload = {
+        "user_input": str(event.payload.get("user_text") or event.payload.get("text") or ""),
+        "recent_dialogue": list(cognition.get("recent_exact_events") or [])[-5:],
+        "long_term_memory": _selected_notebook_lines(
+            cognition.get("selected_card_items"),
+            10,
+        ),
+        "pet_state": _foreground_pet_state(context),
+        "response_schema": FAST_REPLY_SCHEMA,
+    }
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
 def build_fast_reply_messages(
     settings: Settings, event: PetEvent, context: RuntimeContext
 ) -> List[Dict[str, str]]:
-    """Build minimal prompt for fast reply mode. Only includes essential context."""
-    system_prompt = settings.persona_config.get("system_prompt", "")
-
-    system_prompt += (
-        "\n\n快速回复模式："
-        "\n1. 用 1-2 句简短自然的话回复，不超过 80 字。"
-        "\n2. 输出一个 action 表示豆豆的动作/表情。"
-        "\n3. 不要输出 state_delta、memory_update、behavior_plan 等字段。"
-        "\n4. 不要输出思考过程。"
-        "\n5. 保持豆豆的语气，温柔、可爱、自然。"
-    )
-
-    if event.type == "voice_message":
-        system_prompt += (
-            "\n6. 如果识别置信度低，可以说刚刚有点没听清。"
-        )
-
-    # Build minimal payload — only essential fields
-    cognition = context.cognition_context or {}
-    recent_events = cognition.get("recent_exact_events", [])[-1:]  # latest 1 turn only
-    # Select 1 item from each canonical notebook file.
-    # V1.3 does not fall back to legacy memory_cards projection.
-    memory_hints = _selected_notebook_lines(
-        cognition.get("selected_card_items"),
-        10,
-    )
-
-    user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
-
-    payload = {
-        "user_input": user_text,
-        "recent_dialogue": recent_events,
-        "pet_state": {
-            "mood": context.pet_state.get("mood", "idle"),
-            "energy": context.pet_state.get("energy", 50),
-            "intimacy": context.pet_state.get("intimacy", 0),
-            "sleepiness": context.pet_state.get("sleepiness", 0),
-        },
-        "memory_hints": memory_hints,
-        "response_schema": FAST_REPLY_SCHEMA,
-    }
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": json.dumps(payload, ensure_ascii=False),
-        },
-    ]
+    return build_unified_foreground_messages(settings, event, context)
 
 
 THINKING_RESPONSE_SCHEMA = {
@@ -298,42 +287,7 @@ THINKING_RESPONSE_SCHEMA = {
 def build_thinking_messages(
     settings: Settings, event: PetEvent, context: RuntimeContext
 ) -> List[Dict[str, str]]:
-    """Build V1.3 Thinking Mode prompt with bounded notebook-only context."""
-    system_prompt = settings.persona_config.get("system_prompt", "")
-    system_prompt += (
-        "\n\n思考模式："
-        "\n1. 用户显式打开了思考模式，可以比快速回复更完整，但仍要简洁。"
-        "\n2. 只参考小本本里的 notebook_memory。"
-        "\n3. 不调用工具，不回答设备事实或天气事实，不输出思考过程。"
-        "\n4. 不输出 memory_update；记忆写入由后台触发器和夜间整理负责。"
-    )
-    if event.type == "voice_message":
-        system_prompt += "\n5. 语音输入可能不完整，低置信内容要温柔确认。"
-
-    cognition = context.cognition_context or {}
-    notebook_memory = _selected_notebook_lines(
-        cognition.get("selected_card_items"),
-        20,
-    )
-
-    user_text = str(event.payload.get("user_text") or event.payload.get("text") or "")
-    payload = {
-        "user_input": user_text,
-        "recent_dialogue": cognition.get("recent_exact_events", [])[-6:],
-        "pet_state": {
-            "mood": context.pet_state.get("mood", "idle"),
-            "energy": context.pet_state.get("energy", 50),
-            "intimacy": context.pet_state.get("intimacy", 0),
-            "sleepiness": context.pet_state.get("sleepiness", 0),
-        },
-        "notebook_memory": notebook_memory,
-        "response_schema": THINKING_RESPONSE_SCHEMA,
-    }
-
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-    ]
+    return build_unified_foreground_messages(settings, event, context)
 
 
 def build_skill_plan_messages(
@@ -376,14 +330,8 @@ MEMORY_JUDGMENT_SCHEMA = {
 
 
 MEMORY_SUMMARY_SCHEMA = {
-    "add": [
-        {"category": "identity/preference/relationship/project/temporary", "content": "新记忆一句话"}
-    ],
-    "update": [
-        {"old": "原始行全文（含 - [timestamp][category]）", "new_category": "新分类", "new_content": "新内容一句话"}
-    ],
-    "delete": [
-        {"old": "原始行全文（含 - [timestamp][category]）", "reason": "删除原因"}
+    "memories": [
+        {"category": "identity/preference/relationship/project/temporary", "content": "保留下来的记忆一句话"}
     ],
 }
 
@@ -427,9 +375,9 @@ def build_memory_summary_messages(
         "1. 只记录会让豆豆以后更懂主人的信息。\n"
         "2. 明确说“记住/别忘了/写进小本本”的内容优先判断。\n"
         "3. 不记录普通寒暄、短暂情绪、重复信息、密钥、口令、token 或大段原话。\n"
-        "4. 不输出时间戳；后台会自动加时间。\n"
-        "5. 只能输出 add/update/delete JSON，不要解释，不要输出 target。\n"
-        "6. 没有值得更新的内容时输出 {\"add\":[],\"update\":[],\"delete\":[]}。"
+        "4. 输出完整替换后的 memories 列表，0 到 10 条，不输出时间戳。\n"
+        "5. 当前对话证据最高优先级，现有 memory.md 次之，旧历史最低。\n"
+        "6. 没有值得保留的内容时输出 {\"memories\":[]}。"
     )
     payload = {
         "turn": {

@@ -35,21 +35,21 @@ def test_low_effort_no_fatigue():
     assert response.pet_state["energy"] >= 0
 
 
-def test_medium_effort_reduces_energy():
+def test_medium_effort_is_ignored_in_unified_foreground_reply():
     response_before, _ = _dispatch_with_effort("none")
     response_after, _ = _dispatch_with_effort("medium")
-    assert response_after.pet_state["energy"] <= response_before.pet_state["energy"]
+    assert response_after.pet_state["energy"] == response_before.pet_state["energy"]
 
 
-def test_high_effort_text_message_lowers_energy():
+def test_high_effort_is_ignored_in_unified_foreground_reply():
     response_before, _ = _dispatch_with_effort("none")
     response_after, _ = _dispatch_with_effort("high")
-    assert response_after.pet_state["energy"] < response_before.pet_state["energy"]
-    assert response_after.pet_state["sleepiness"] >= response_before.pet_state["sleepiness"]
+    assert response_after.pet_state["energy"] == response_before.pet_state["energy"]
+    assert response_after.pet_state["sleepiness"] == response_before.pet_state["sleepiness"]
 
 
-def test_high_effort_overrides_positive_energy_delta():
-    """Even if LLM outputs energy=+8, pet_effort=high must guarantee net decrease."""
+def test_unified_foreground_ignores_positive_energy_delta():
+    """Unified foreground replies do not apply LLM state_delta."""
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     original = provider.complete_json
@@ -80,11 +80,10 @@ def test_high_effort_overrides_positive_energy_delta():
             "payload": {"user_text": "帮我写代码", "thinking_mode": True},
         }
     )
-    # Energy must be lower than baseline despite LLM's +8
-    assert response.pet_state["energy"] < baseline_energy
+    assert response.pet_state["energy"] == baseline_energy
 
 
-def test_event_log_stores_state_affect():
+def test_event_log_does_not_store_state_affect_for_unified_fast_schema():
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     original = provider.complete_json
@@ -111,8 +110,7 @@ def test_event_log_stores_state_affect():
     recent = app.state.event_log_store.recent_events(limit=1)
     assert len(recent) >= 1
     last = recent[0]
-    assert last["state_affect"]["pet_effort"] == "medium"
-    assert last["state_affect"]["interaction_tone"] == "affectionate"
+    assert last["state_affect"] is None
 
 
 def test_event_log_stores_state_before_after():

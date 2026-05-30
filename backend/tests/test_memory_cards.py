@@ -195,8 +195,8 @@ def test_fast_path_uses_cards():
         memory_card_manager=mcm,
     )
 
-    assert context["memory_cards"] is not None
-    assert "喜欢短回复" in context["memory_cards"]["user_preferences"]
+    assert context["context_profile"] == "unified"
+    assert context["memory_cards"] is None
     assert context["relevant_memories"] == []
 
 
@@ -233,7 +233,7 @@ def test_v14_profiles_use_single_notebook_selection_without_legacy_cards():
             notebook_manager=notebook,
         )
         assert context["memory_cards"] is None
-        assert context["selected_card_items"] == ["正在修 V1.4"]
+        assert context["selected_card_items"] == ["- [2026-05-26 10:00][project] 正在修 V1.4"]
 
 
 def test_fast_path_no_daily_summary():
@@ -577,7 +577,8 @@ def test_fast_reply_no_temporal_recall():
 
     assert context["temporal_recall_events"] == []
     assert context["relevant_memories"] == []
-    assert context["memory_cards"] is not None
+    assert context["memory_cards"] is None
+    assert any("昨天聊了天气" in item.get("user", "") for item in context["recent_exact_events"])
 
 
 def test_tool_profile_no_deep_memory():
@@ -617,7 +618,7 @@ def test_tool_profile_no_deep_memory():
 
     assert context["relevant_memories"] == []
     assert context["important_quotes"] == []
-    assert context["memory_cards"] is not None
+    assert context["memory_cards"] is None
     assert context["episode_summaries"] == []
     assert context["daily_digest"] is None
 

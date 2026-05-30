@@ -5,70 +5,69 @@ from app.runtime.route_policy import RECALL_KEYWORDS, RouteDecision, decide_rout
 
 def test_button_event_fast_reply():
     d = decide_route("pet_head", "runtime", "")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
     assert d.provider_profile == "fast_llm"
     assert d.allow_tools is False
 
 
 def test_recall_keyword_non_thinking_stays_fast_reply():
-    """Recall keywords in non-thinking mode should stay on fast_reply path."""
+    """Recall keywords do not create a separate recall path."""
     d = decide_route("text_message", "text_fast", "昨天我说了什么")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
     assert d.provider_profile == "fast_llm"
 
 
-def test_recall_keyword_thinking_mode_goes_thinking():
-    """Recall keywords with thinking_mode should route to thinking."""
+def test_recall_keyword_thinking_mode_is_ignored():
     d = decide_route("text_message", "text_fast", "昨天说了什么", thinking_mode=True)
-    assert d.route == "thinking"
-    assert d.context_profile == "thinking"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
 
 
 def test_all_recall_keywords_non_thinking():
     """All RECALL_KEYWORDS should stay fast_reply when thinking_mode=False."""
     for kw in RECALL_KEYWORDS:
         d = decide_route("text_message", "text_fast", f"我们{kw}什么")
-        assert d.route == "fast_reply", f"keyword '{kw}' unexpectedly routed to thinking"
-        assert d.context_profile == "fast_reply"
+        assert d.route == "unified", f"keyword '{kw}' unexpectedly changed route"
+        assert d.context_profile == "unified"
 
 
 def test_weather_keyword_no_tools():
     """V1.3: tool keywords route to fast_reply with no tools."""
     d = decide_route("text_message", "text_fast", "今天适合出门吗")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
     assert d.allow_tools is False
     assert d.max_tool_calls == 0
 
 
 def test_thinking_mode():
     d = decide_route("text_message", "text_fast", "你好", thinking_mode=True)
-    assert d.route == "thinking"
-    assert d.context_profile == "thinking"
-    assert d.provider_profile == "slow_llm"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
+    assert d.provider_profile == "fast_llm"
     assert d.allow_tools is False
 
 
 def test_proactive_event():
     d = decide_route("morning", "proactive", "")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "proactive"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
     assert d.allow_tools is False
 
 
 def test_normal_text_fast_reply():
     d = decide_route("text_message", "text_fast", "你好呀")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
 
 
 def test_code_keyword_fast_reply():
     """V1.3: complex keywords route to fast_reply (suggest Thinking Mode in prompt)."""
     d = decide_route("text_message", "text_fast", "帮我写一个排序算法")
-    assert d.route == "fast_reply"
-    assert d.context_profile == "fast_reply"
+    assert d.route == "unified"
+    assert d.context_profile == "unified"
     assert d.allow_tools is False
 
 
@@ -84,7 +83,7 @@ def test_route_only_fast_reply_or_thinking():
     ]
     for args in cases:
         d = decide_route(*args)
-        assert d.route in ("fast_reply", "thinking"), f"route={d.route} for {args}"
+        assert d.route == "unified", f"route={d.route} for {args}"
 
 
 def test_all_decisions_have_required_fields():
@@ -100,10 +99,10 @@ def test_all_decisions_have_required_fields():
 
 
 def test_brain_field_matches_route():
-    """brain field should be 'slow' when route is 'thinking', 'fast' otherwise."""
+    """Client thinking mode no longer changes provider choice."""
     cases = [
         ("text_message", "text_fast", "你好", False, "fast"),
-        ("text_message", "text_fast", "你好", True, "slow"),
+        ("text_message", "text_fast", "你好", True, "fast"),
         ("text_message", "text_fast", "帮我写一个排序算法", False, "fast"),
         ("morning", "proactive", "", False, "fast"),
     ]

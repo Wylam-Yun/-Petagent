@@ -59,7 +59,7 @@ def test_thinking_prompt_excludes_forbidden_fields():
 
     assert payload["user_input"] == "认真帮我想想"
     assert "notebook_user" not in payload
-    assert payload["notebook_memory"] == ["用户喜欢短回复", "正在修 PetAgent V1.4"]
+    assert payload["long_term_memory"] == ["用户喜欢短回复", "正在修 PetAgent V1.4"]
     assert payload["recent_dialogue"] == [{"user": "前一句", "pet": "回应"}]
     assert "memory_update" not in json.dumps(payload, ensure_ascii=False)
 
@@ -143,4 +143,4 @@ def test_thinking_prompt_caps_notebook_memory_to_20():
     messages = build_thinking_messages(load_settings(), event, context)
     payload = json.loads(messages[1]["content"])
 
-    assert payload["notebook_memory"] == [f"记忆{i}" for i in range(20)]
+    assert payload["long_term_memory"] == [f"记忆{i}" for i in range(10)]

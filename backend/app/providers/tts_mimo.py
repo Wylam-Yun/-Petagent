@@ -20,6 +20,7 @@ from app.providers.errors import (
     ProviderUnavailableError,
     wrap_provider_error,
 )
+from app.providers.retry import retry_provider_call
 
 
 def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
@@ -155,8 +156,7 @@ class MiMoTTSProvider:
             voice=self.settings.tts.voice or "冰糖",
             audio_format=self.settings.tts.audio_format or "wav",
         )
-        start = perf_counter()
-        try:
+        def operation() -> bytes:
             response = requests.post(
                 self.settings.tts.base_url.rstrip("/") + "/chat/completions",
                 headers=self._headers(api_key),
@@ -165,40 +165,47 @@ class MiMoTTSProvider:
                 timeout=_timeout_tuple(self.settings.tts.timeout_seconds),
             )
             response.raise_for_status()
-            audio_bytes = extract_audio_bytes(response.json())
-        except requests.Timeout as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderTimeoutError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
-        except requests.ConnectionError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
-        except requests.HTTPError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            resp = getattr(exc, "response", None)
-            status = getattr(resp, "status_code", None)
-            if status in (401, 403):
-                raise ProviderAuthError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
+            return extract_audio_bytes(response.json())
+
+        def wrapped_operation() -> bytes:
+            start = perf_counter()
+            try:
+                return operation()
+            except requests.Timeout as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderTimeoutError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
                 ) from exc
-            if status == 429:
-                raise ProviderQuotaError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
+            except requests.ConnectionError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+            except requests.HTTPError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                resp = getattr(exc, "response", None)
+                status = getattr(resp, "status_code", None)
+                if status in (401, 403):
+                    raise ProviderAuthError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                if status == 429:
+                    raise ProviderQuotaError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                if status is not None and status >= 500:
+                    raise ProviderUnavailableError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+            except (_json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderBadResponseError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
                 ) from exc
-            if status is not None and status >= 500:
-                raise ProviderUnavailableError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
-                ) from exc
-            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
-        except (_json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderBadResponseError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
+
+        audio_bytes = retry_provider_call(wrapped_operation, provider=self.name)
         return self._write_audio(audio_bytes)
 
     def _synthesize_openai_speech(
@@ -214,8 +221,7 @@ class MiMoTTSProvider:
         speed = self.settings.tts.extra.get("speed")
         if speed is not None:
             payload["speed"] = speed
-        start = perf_counter()
-        try:
+        def operation() -> bytes:
             response = requests.post(
                 self.settings.tts.base_url.rstrip("/") + "/" + endpoint.lstrip("/"),
                 headers=self._headers(api_key),
@@ -224,18 +230,24 @@ class MiMoTTSProvider:
                 timeout=_timeout_tuple(self.settings.tts.timeout_seconds),
             )
             response.raise_for_status()
-            audio_bytes = response.content
-        except requests.Timeout as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderTimeoutError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
-        except requests.ConnectionError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
-        except requests.HTTPError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+            return response.content
+
+        def wrapped_operation() -> bytes:
+            start = perf_counter()
+            try:
+                return operation()
+            except requests.Timeout as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderTimeoutError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
+                ) from exc
+            except requests.ConnectionError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+            except requests.HTTPError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+        audio_bytes = retry_provider_call(wrapped_operation, provider=self.name)
         return self._write_audio(audio_bytes)
 
     def _speech_input(self, text: str, voice_style: str) -> str:

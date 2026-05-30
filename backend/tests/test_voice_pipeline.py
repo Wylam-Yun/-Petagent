@@ -13,7 +13,7 @@ def post_voice(client: TestClient, *, data=None, content_type="audio/wav"):
     )
 
 
-def test_voice_chat_uses_fast_reply_route_by_default():
+def test_voice_chat_uses_unified_route_by_default():
     client = TestClient(create_app(testing=True))
 
     response = post_voice(client)
@@ -21,27 +21,26 @@ def test_voice_chat_uses_fast_reply_route_by_default():
     assert response.status_code == 200
     body = response.json()
     assert body["voice_route"]["requested"] == "auto"
-    assert body["voice_route"]["selected"] == "fast_reply"
+    assert body["voice_route"]["selected"] == "unified"
     assert body["voice_route"]["thinking_mode"] is False
     assert body["voice_route"]["asr_provider"] == "mock_asr"
     assert body["voice_route"]["brain_provider"] == "mock_fast_llm"
     assert body["user_text"] == "我回来啦"
 
 
-def test_voice_chat_uses_thinking_route_when_thinking_mode_is_enabled():
+def test_voice_chat_ignores_thinking_mode():
     client = TestClient(create_app(testing=True))
 
     response = post_voice(client, data={"thinking_mode": "true"})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["voice_route"]["selected"] == "thinking"
-    assert body["voice_route"]["thinking_mode"] is True
-    assert body["voice_route"]["brain_provider"] == "mock_slow_llm"
-    assert body["audio_understanding"]["tone_notes"]
+    assert body["voice_route"]["selected"] == "unified"
+    assert body["voice_route"]["thinking_mode"] is False
+    assert body["voice_route"]["brain_provider"] == "mock_fast_llm"
 
 
-def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
+def test_thinking_mode_still_uses_asr_route():
     app = create_app(testing=True)
     app.state.audio_provider.fail = True
     client = TestClient(app)
@@ -50,14 +49,13 @@ def test_thinking_mode_uses_audio_understanding_first_then_asr_fallback():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["voice_route"]["selected"] == "thinking"
+    assert body["voice_route"]["selected"] == "unified"
     assert body["voice_route"]["asr_provider"] == "mock_asr"
-    assert body["voice_route"]["fallback_reason"] == "audio_understanding_insufficient"
     assert body["voice_route"]["emotion_source"] == "asr"
     assert body["user_text"] == "我回来啦"
 
 
-def test_thinking_mode_exposes_audio_understanding_provider_failure():
+def test_thinking_mode_does_not_call_audio_understanding_provider():
     class FailingAudioUnderstanding:
         def understand(self, audio_path, content_type):
             raise ProviderTimeoutError(provider="mimo_audio")
@@ -70,8 +68,8 @@ def test_thinking_mode_exposes_audio_understanding_provider_failure():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["voice_route"]["selected"] == "thinking"
-    assert body["voice_route"]["provider_failure"]["error_class"] == "provider_timeout"
+    assert body["voice_route"]["selected"] == "unified"
+    assert "provider_failure" not in body["voice_route"]
     assert body["reply"]
 
 
@@ -86,7 +84,7 @@ def test_fast_voice_asr_failure_returns_structured_failure():
     body = response.json()
     assert body["ok"] is False
     assert body["error_class"] == "asr_empty"
-    assert body["voice_route"]["selected"] == "fast_reply"
+    assert body["voice_route"]["selected"] == "unified"
     assert body["voice_route"]["fallback_reason"] == "asr_empty"
     assert body["voice_route"]["asr_error_code"] == "asr_empty"
     assert body["reply"] == ""
@@ -119,13 +117,12 @@ def test_fast_voice_asr_error_returns_structured_failure():
     assert body["error_class"] == "asr_http_401"
     assert body["reply"] == ""
     route = body["voice_route"]
-    assert route["selected"] == "fast_reply"
+    assert route["selected"] == "unified"
     assert route["fallback_reason"] == "asr_provider_error"
     assert route["asr_error_code"] == "asr_http_401"
 
 
-def test_thinking_voice_uses_audio_understanding_when_asr_empty():
-    """V1.3: thinking mode uses audio_understanding first; ASR empty is irrelevant."""
+def test_thinking_voice_stops_when_asr_empty():
     app = create_app(testing=True)
     app.state.asr_provider.text = ""
     client = TestClient(app)
@@ -134,12 +131,12 @@ def test_thinking_voice_uses_audio_understanding_when_asr_empty():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["voice_route"]["selected"] == "thinking"
-    # audio understanding succeeded, so no fallback_reason
-    assert body["reply"]
+    assert body["voice_route"]["selected"] == "unified"
+    assert body["ok"] is False
+    assert body["reply"] == ""
 
 
-def test_voice_pipeline_gates_asr_and_audio_understanding():
+def test_voice_pipeline_gates_asr_but_not_audio_understanding():
     app = create_app(testing=True)
     gate = app.state.provider_gate
     seen = []
@@ -158,7 +155,7 @@ def test_voice_pipeline_gates_asr_and_audio_understanding():
     assert fast.status_code == 200
     assert slow.status_code == 200
     assert "asr" in seen
-    assert "audio_understanding" in seen
+    assert "audio_understanding" not in seen
 
 
 def test_voice_chat_uses_configured_upload_limits():

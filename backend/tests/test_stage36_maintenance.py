@@ -100,9 +100,7 @@ def test_maintenance_processes_candidates():
     cs.add("evt-2", "ep-1", "候选2", "llm_suggestion")
 
     result = svc.tick(force=True)
-    # Curator mock ignores all
-    assert "ignored" in result
-    assert result["ignored"] >= 1
+    assert result == {}
 
 
 def test_maintenance_state_persists():
@@ -212,4 +210,4 @@ def test_maintenance_does_not_block_on_curator_failure():
 
     # Should not raise
     result = svc.tick(force=True)
-    assert "curator_error" in result
+    assert result == {}

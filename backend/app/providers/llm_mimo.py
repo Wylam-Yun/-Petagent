@@ -19,6 +19,7 @@ from app.providers.errors import (
     ProviderUnavailableError,
     wrap_provider_error,
 )
+from app.providers.retry import retry_provider_call
 
 
 def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
@@ -145,8 +146,7 @@ class MiMoLLMProvider:
             if key in self.provider_config.extra:
                 payload[key] = self.provider_config.extra[key]
 
-        start = perf_counter()
-        try:
+        def operation() -> Dict[str, Any]:
             response = requests.post(
                 self.provider_config.base_url.rstrip("/") + "/chat/completions",
                 headers=self._headers(api_key),
@@ -160,41 +160,48 @@ class MiMoLLMProvider:
             if isinstance(content, dict):
                 return content
             return json.loads(_extract_json_text(str(content)))
-        except requests.Timeout as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderTimeoutError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
-        except requests.ConnectionError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderNetworkError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
-        except requests.HTTPError as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            resp = getattr(exc, "response", None)
-            status = getattr(resp, "status_code", None)
-            if status in (401, 403):
-                raise ProviderAuthError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
+
+        def wrapped_operation() -> Dict[str, Any]:
+            start = perf_counter()
+            try:
+                return operation()
+            except requests.Timeout as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderTimeoutError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
                 ) from exc
-            if status == 429:
-                raise ProviderQuotaError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
+            except requests.ConnectionError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderNetworkError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
                 ) from exc
-            if status is not None and status >= 500:
-                raise ProviderUnavailableError(
-                    provider=self.name, status=status, latency_ms=latency_ms,
-                    message=str(exc)[:200],
+            except requests.HTTPError as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                resp = getattr(exc, "response", None)
+                status = getattr(resp, "status_code", None)
+                if status in (401, 403):
+                    raise ProviderAuthError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                if status == 429:
+                    raise ProviderQuotaError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                if status is not None and status >= 500:
+                    raise ProviderUnavailableError(
+                        provider=self.name, status=status, latency_ms=latency_ms,
+                        message=str(exc)[:200],
+                    ) from exc
+                raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
+            except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
+                latency_ms = int((perf_counter() - start) * 1000)
+                raise ProviderBadResponseError(
+                    provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
                 ) from exc
-            raise wrap_provider_error(exc, provider=self.name, latency_ms=latency_ms) from exc
-        except (json.JSONDecodeError, KeyError, IndexError, ValueError) as exc:
-            latency_ms = int((perf_counter() - start) * 1000)
-            raise ProviderBadResponseError(
-                provider=self.name, latency_ms=latency_ms, message=str(exc)[:200],
-            ) from exc
+
+        return retry_provider_call(wrapped_operation, provider=self.name)
 
     def _headers(self, api_key: str) -> Dict[str, str]:
         headers = {"content-type": "application/json"}

@@ -53,7 +53,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={recorderFactory()}
-        thinkingMode={false}
         uploadVoice={uploadVoice}
         onError={vi.fn()}
         onPhaseChange={onPhaseChange}
@@ -69,7 +68,7 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
-    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), { thinkingMode: false });
+    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob));
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
@@ -86,7 +85,7 @@ describe("VoiceButton", () => {
       user_text: "",
       voice_route: {
         requested: "auto",
-        selected: "fast_reply",
+        selected: "unified",
         thinking_mode: false,
         asr_provider: "mock_asr",
         asr_error_code: "asr_empty",
@@ -101,7 +100,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={recorderFactory()}
-        thinkingMode={false}
         uploadVoice={uploadVoice}
         onError={onError}
         onPhaseChange={onPhaseChange}
@@ -132,7 +130,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={createRecorder}
-        thinkingMode={true}
         uploadVoice={uploadVoice}
         onError={vi.fn()}
         onPhaseChange={vi.fn()}
@@ -173,7 +170,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={createRecorder}
-        thinkingMode={false}
         uploadVoice={uploadVoice}
         onError={onError}
         onPhaseChange={onPhaseChange}
@@ -200,7 +196,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="speaking"
         recorderFactory={createRecorder}
-        thinkingMode={false}
         uploadVoice={vi.fn()}
         onError={vi.fn()}
         onInterrupt={onInterrupt}
@@ -223,7 +218,6 @@ describe("VoiceButton", () => {
         disabled={false}
         phase="idle"
         recorderFactory={recorderFactory()}
-        thinkingMode={false}
         uploadVoice={vi.fn().mockRejectedValue(new Error("request timeout"))}
         onError={onError}
         onPhaseChange={vi.fn()}

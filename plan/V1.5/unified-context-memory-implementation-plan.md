@@ -1,6 +1,6 @@
 # V1.5 Unified Context And Stable Memory Implementation Plan
 
-> **For agentic workers:** Use one fresh implementation agent per task with review checkpoints, or use the `executing-plans` skill for inline execution. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use one fresh implementation agent per task with review checkpoints, or use the `executing-plans` skill for inline execution. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement V1.5's single foreground conversation pipeline, durable five-turn context, 10-line MiMo-only memory maintenance, explicit failure semantics, and Nubia verification.
 
@@ -147,7 +147,7 @@
 - Modify: `frontend/src/App.test.tsx`
 - Modify: `frontend/src/pet/api.test.ts`
 
-- [ ] **Step 1: Confirm clean baseline**
+- [x] **Step 1: Confirm clean baseline**
 
 Run:
 
@@ -157,7 +157,7 @@ git status --short
 
 Expected: no output.
 
-- [ ] **Step 2: Add failing backend tests for explicit LLM failure**
+- [x] **Step 2: Add failing backend tests for explicit LLM failure**
 
 Create `backend/tests/test_v15_failure_contract.py` with tests that assert:
 
@@ -208,7 +208,7 @@ def test_text_invalid_llm_output_is_not_friendly_fallback():
     assert client.app.state.event_log_store.count() == 0
 ```
 
-- [ ] **Step 3: Add failing backend tests for ignored thinking and route fields**
+- [x] **Step 3: Add failing backend tests for ignored thinking and route fields**
 
 Append to `backend/tests/test_v15_failure_contract.py`:
 
@@ -261,7 +261,7 @@ def test_voice_legacy_route_thinking_is_ignored_on_asr_failure(tmp_path):
     assert client.app.state.event_log_store.count() == 0
 ```
 
-- [ ] **Step 4: Add failing backend tests for unified context selection**
+- [x] **Step 4: Add failing backend tests for unified context selection**
 
 Create `backend/tests/test_v15_unified_context.py`:
 
@@ -300,7 +300,7 @@ def test_recent_dialogue_crosses_episodes_and_filters_non_dialogue(tmp_path):
     assert [row["pet"] for row in rows] == ["答二", "答三", "答四", "答五", "答六"]
 ```
 
-- [ ] **Step 5: Add failing backend tests for turn counter and memory triggers**
+- [x] **Step 5: Add failing backend tests for turn counter and memory triggers**
 
 Create `backend/tests/test_v15_successful_turns.py`:
 
@@ -332,7 +332,7 @@ def test_keyword_trigger_enqueues_without_waiting_for_tenth_turn(tmp_path):
     assert result.should_enqueue_memory is True
 ```
 
-- [ ] **Step 6: Add failing backend tests for 10-line memory invariant**
+- [x] **Step 6: Add failing backend tests for 10-line memory invariant**
 
 Create `backend/tests/test_v15_memory_invariant.py`:
 
@@ -364,7 +364,7 @@ def test_memory_overwrite_accepts_ten_valid_lines(tmp_path):
     assert content.count("[preference]") == 10
 ```
 
-- [ ] **Step 7: Add failing backend tests for provider retry budget**
+- [x] **Step 7: Add failing backend tests for provider retry budget**
 
 Create `backend/tests/test_v15_provider_retry.py`:
 
@@ -400,7 +400,7 @@ def test_provider_retry_does_not_retry_auth_error():
     assert attempts["count"] == 1
 ```
 
-- [ ] **Step 8: Add failing frontend tests**
+- [x] **Step 8: Add failing frontend tests**
 
 Update `frontend/src/App.test.tsx` to assert:
 
@@ -419,7 +419,7 @@ expect(body.has("thinking_mode")).toBe(false);
 expect(JSON.parse(fetchBody as string)).not.toHaveProperty("thinking_mode");
 ```
 
-- [ ] **Step 9: Run targeted tests and confirm they fail**
+- [x] **Step 9: Run targeted tests and confirm they fail**
 
 Run:
 
@@ -435,7 +435,7 @@ cd ../frontend && npm test -- --run src/App.test.tsx src/pet/api.test.ts
 
 Expected: failures for missing `recent_dialogue_turns`, `SuccessfulTurnStore`, `overwrite_memory_lines`, `retry_provider_call`, and old frontend controls/request fields.
 
-- [ ] **Step 10: Commit failing V1.5 contract tests**
+- [x] **Step 10: Commit failing V1.5 contract tests**
 
 ```bash
 git add backend/tests/test_v15_*.py frontend/src/App.test.tsx frontend/src/pet/api.test.ts
@@ -454,7 +454,7 @@ git commit -m "test: add V1.5 unified context contracts"
 - Test: `backend/tests/test_v15_failure_contract.py`
 - Update old tests: `backend/tests/test_pet_guard.py`, `backend/tests/test_fast_reply_contract.py`, `backend/tests/test_provider_mock.py`
 
-- [ ] **Step 1: Add validation result types in guard**
+- [x] **Step 1: Add validation result types in guard**
 
 In `backend/app/pet/guard.py`, add:
 
@@ -467,7 +467,7 @@ class InvalidActionError(ValueError):
 
 Change `_parse_action` so invalid JSON and unsupported raw values raise `InvalidActionError` instead of returning `FALLBACK_ACTION`.
 
-- [ ] **Step 2: Remove synthetic fallback success**
+- [x] **Step 2: Remove synthetic fallback success**
 
 Update `guard_action` and `guard_fast_reply_action`:
 
@@ -481,7 +481,7 @@ After `_strip_reasoning` and `_sanitize_prompt_leak`, if the reply is empty or e
 
 Keep enum repair behavior for mood/action/voice_style.
 
-- [ ] **Step 3: Stop dispatcher before commit on provider failure**
+- [x] **Step 3: Stop dispatcher before commit on provider failure**
 
 In `backend/app/runtime/dispatcher.py`, replace the current `raw_action = None` continuation with an explicit failure response path. The failure path must:
 
@@ -493,7 +493,7 @@ In `backend/app/runtime/dispatcher.py`, replace the current `raw_action = None` 
 - not enqueue memory;
 - return a `PetResponse` with `reply=""`, current `pet_state`, and `runtime.error_class`.
 
-- [ ] **Step 4: Stop dispatcher before commit on invalid guard output**
+- [x] **Step 4: Stop dispatcher before commit on invalid guard output**
 
 Wrap guard calls:
 
@@ -506,11 +506,11 @@ except InvalidActionError as exc:
 
 Use `llm_invalid_output` for invalid JSON, missing reply, empty reply, or fully stripped reply.
 
-- [ ] **Step 5: Normalize API bodies**
+- [x] **Step 5: Normalize API bodies**
 
 In `/api/text/chat` and `/api/voice/chat`, propagate `runtime.error_class` to top-level `error_class`, set `ok:false` for voice failures, and avoid `audio_job_id`.
 
-- [ ] **Step 6: Update old guard tests**
+- [x] **Step 6: Update old guard tests**
 
 Change tests that currently expect fallback replies:
 
@@ -522,7 +522,7 @@ Change tests that currently expect fallback replies:
 
 They should now assert `InvalidActionError`.
 
-- [ ] **Step 7: Run failure tests**
+- [x] **Step 7: Run failure tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -534,7 +534,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/pet/guard.py backend/app/runtime/dispatcher.py backend/app/api/text.py backend/app/api/voice.py backend/tests/test_v15_failure_contract.py backend/tests/test_pet_guard.py backend/tests/test_fast_reply_contract.py backend/tests/test_provider_mock.py
@@ -554,11 +554,11 @@ git commit -m "fix: fail explicitly on invalid foreground LLM output"
 - Test: `backend/tests/test_v15_failure_contract.py`
 - Update old tests: `backend/tests/test_text_chat.py`, `backend/tests/test_voice_pipeline.py`, `backend/tests/test_route_policy.py`, `backend/tests/test_agent_run.py`, `backend/tests/test_phase1_dispatcher.py`, `backend/tests/test_stage3_runtime_integration.py`, `backend/tests/test_skill_execution.py`, `backend/tests/test_thinking_prompt_contract.py`
 
-- [ ] **Step 1: Make route policy unified**
+- [x] **Step 1: Make route policy unified**
 
 Change `decide_route` so `thinking_mode` no longer returns `thinking`. Route decision can still include provider hints, but `context_profile` must be `"unified"` for foreground chat.
 
-- [ ] **Step 2: Force text thinking false at pipeline boundary**
+- [x] **Step 2: Force text thinking false at pipeline boundary**
 
 In `TextPipeline.handle`, keep the parameter but set:
 
@@ -568,7 +568,7 @@ effective_thinking_mode = False
 
 Use that for route decisions, event payloads, and `TextRouteInfo.thinking_mode`.
 
-- [ ] **Step 3: Force voice route to ASR path**
+- [x] **Step 3: Force voice route to ASR path**
 
 In `VoicePipeline.handle`, ignore `requested_route` and `thinking_mode`:
 
@@ -580,11 +580,11 @@ return self._run_asr_route(...)
 
 Do not call `_run_audio_understanding_route` from foreground chat.
 
-- [ ] **Step 4: Preserve compatibility in API schemas**
+- [x] **Step 4: Preserve compatibility in API schemas**
 
 Keep `thinking_mode` and `route` accepted by FastAPI request parsing, but pass ignored values downstream or ignore them before calling the pipeline.
 
-- [ ] **Step 5: Update route and thinking tests**
+- [x] **Step 5: Update route and thinking tests**
 
 Change old tests to assert:
 
@@ -593,7 +593,7 @@ Change old tests to assert:
 - no test expects audio-understanding fallback for foreground voice;
 - no test expects `context_profile="thinking"`.
 
-- [ ] **Step 6: Run targeted tests**
+- [x] **Step 6: Run targeted tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -610,7 +610,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
 
 Expected: pass after test updates.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/runtime/route_policy.py backend/app/runtime/text_pipeline.py backend/app/runtime/voice_pipeline.py backend/app/api/text.py backend/app/api/voice.py backend/tests
@@ -630,7 +630,7 @@ git commit -m "fix: ignore legacy thinking and voice route controls"
 - Test: `backend/tests/test_v15_unified_context.py`
 - Update old tests: `backend/tests/test_fast_reply_contract.py`, `backend/tests/test_thinking_prompt_contract.py`, `backend/tests/test_memory_cards.py`, `backend/tests/test_stage35_context.py`, `backend/tests/test_stage36_context.py`, `backend/tests/test_recall_context_and_summary_jobs.py`
 
-- [ ] **Step 1: Add durable recent dialogue query**
+- [x] **Step 1: Add durable recent dialogue query**
 
 In `EventLogStore`, add:
 
@@ -653,7 +653,7 @@ def recent_dialogue_turns(self, limit: int = 5) -> List[Dict[str, Any]]:
     return result
 ```
 
-- [ ] **Step 2: Add all memory lines selector**
+- [x] **Step 2: Add all memory lines selector**
 
 In `NotebookManager`, add:
 
@@ -664,7 +664,7 @@ def prompt_memory_lines(self, limit: int = 10) -> List[str]:
 
 If product wants content without metadata, use `entry.content`, but keep the plan consistent with tests.
 
-- [ ] **Step 3: Build unified context**
+- [x] **Step 3: Build unified context**
 
 In `ContextManager.build`, when profile is foreground chat, set:
 
@@ -678,7 +678,7 @@ context["temporal_recall_events"] = []
 
 Remove recall-only loading from foreground.
 
-- [ ] **Step 4: Add unified prompt builder**
+- [x] **Step 4: Add unified prompt builder**
 
 In `prompt_builder.py`, add:
 
@@ -706,7 +706,7 @@ def build_unified_foreground_messages(settings, event, context):
 
 Redirect foreground brain generation to this builder.
 
-- [ ] **Step 5: Add required runtime diagnostics**
+- [x] **Step 5: Add required runtime diagnostics**
 
 In dispatcher response runtime, set:
 
@@ -717,11 +717,11 @@ response.runtime["memory_line_count"] = len(cognition_context.get("selected_card
 response.runtime["provider"] = run.provider
 ```
 
-- [ ] **Step 6: Update old context/prompt tests**
+- [x] **Step 6: Update old context/prompt tests**
 
 Old thinking prompt tests should either be removed or changed to assert unified prompt payload. Fast reply contract tests should expect latest 5 and `long_term_memory`.
 
-- [ ] **Step 7: Run targeted tests**
+- [x] **Step 7: Run targeted tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -736,7 +736,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/runtime/context_store.py backend/app/runtime/context_manager.py backend/app/pet/prompt_builder.py backend/app/pet/brain.py backend/app/runtime/dispatcher.py backend/tests
@@ -756,7 +756,7 @@ git commit -m "feat: use unified durable dialogue context"
 - Test: `backend/tests/test_v15_successful_turns.py`
 - Update old tests: `backend/tests/test_fast_reply_contract.py`, `backend/tests/test_memory_judgment.py`, `backend/tests/test_stage36_maintenance.py`
 
-- [ ] **Step 1: Add result dataclass**
+- [x] **Step 1: Add result dataclass**
 
 In `context_store.py`, add:
 
@@ -771,7 +771,7 @@ class SuccessfulTurnResult:
     since_memory_summary: int
 ```
 
-- [ ] **Step 2: Add `SuccessfulTurnStore`**
+- [x] **Step 2: Add `SuccessfulTurnStore`**
 
 Create a SQLite-backed store with table:
 
@@ -797,11 +797,11 @@ clear_all() -> None
 
 Only increment once per event id. `should_enqueue_memory` is true on keyword trigger or when since count reaches 10. Reset since count after enqueue.
 
-- [ ] **Step 3: Wire store in app startup**
+- [x] **Step 3: Wire store in app startup**
 
 In `main.py`, instantiate `SuccessfulTurnStore(state_store.connection)` and attach it to app state and dispatcher.
 
-- [ ] **Step 4: Gate memory queue in dispatcher**
+- [x] **Step 4: Gate memory queue in dispatcher**
 
 After a successful commit, call `record_successful_turn`. Enqueue memory summary only if:
 
@@ -811,15 +811,15 @@ turn_result.should_enqueue_memory is True
 
 Pass the current user text, reply, current `memory.md` lines, and trigger reason to `MemoryJudgmentQueue`.
 
-- [ ] **Step 5: Make memory queue persistent outcome-aware**
+- [x] **Step 5: Make memory queue persistent outcome-aware**
 
 If keeping in-memory queue, the trigger decision must be persistent and idempotent in `SuccessfulTurnStore`. If the queue is full, explicit keyword jobs can evict non-priority jobs; failed MiMo jobs must not retry forever.
 
-- [ ] **Step 6: Update tests that expect every-turn memory enqueue**
+- [x] **Step 6: Update tests that expect every-turn memory enqueue**
 
 Change existing tests to assert no memory job for normal turns 1-9, one job on turn 10, and immediate job on explicit keyword.
 
-- [ ] **Step 7: Run targeted tests**
+- [x] **Step 7: Run targeted tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -829,7 +829,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
   tests/test_stage36_maintenance.py
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/runtime/context_store.py backend/app/runtime/dispatcher.py backend/app/runtime/memory_judgment.py backend/app/runtime/maintenance.py backend/app/main.py backend/tests
@@ -851,7 +851,7 @@ git commit -m "feat: gate memory summaries by persistent turn triggers"
 - Test: `backend/tests/test_v15_memory_invariant.py`
 - Update old tests: `backend/tests/test_notebook.py`, `backend/tests/test_memory_cards.py`, `backend/tests/test_memory_judgment.py`, `backend/tests/test_nightly_cleanup.py`, `backend/tests/test_stage36_curator.py`
 
-- [ ] **Step 1: Add `overwrite_memory_lines`**
+- [x] **Step 1: Add `overwrite_memory_lines`**
 
 In `NotebookManager`, implement:
 
@@ -874,15 +874,15 @@ def overwrite_memory_lines(self, items: List[Dict[str, str]]) -> bool:
         return self._write_text_atomic(self._memory_path, "\n".join(lines) + "\n")
 ```
 
-- [ ] **Step 2: Make append compatibility preserve <=10**
+- [x] **Step 2: Make append compatibility preserve <=10**
 
 Update `append_line` so it refuses to append if canonical memory already has 10 valid entries. Do not silently drop existing entries in append mode.
 
-- [ ] **Step 3: Clamp migration with backup**
+- [x] **Step 3: Clamp migration with backup**
 
 During migration/import, if more than 10 entries are found, keep the top 10 according to existing ranking, create a backup, and write only 10.
 
-- [ ] **Step 4: Change memory summarizer output contract**
+- [x] **Step 4: Change memory summarizer output contract**
 
 Update `build_memory_summary_messages` so the requested schema is a full replacement list:
 
@@ -892,11 +892,11 @@ Update `build_memory_summary_messages` so the requested schema is a full replace
 
 Limit: 0-10 items. Current conversation is highest priority.
 
-- [ ] **Step 5: Apply summary as overwrite**
+- [x] **Step 5: Apply summary as overwrite**
 
 In `MemoryJudgmentQueue._process_turn_summary`, validate `memories` and call `notebook_manager.overwrite_memory_lines`. Remove add/update/delete application for V1.5 foreground memory summary, or keep legacy only for non-foreground disabled paths.
 
-- [ ] **Step 6: Enforce MiMo-only provider**
+- [x] **Step 6: Enforce MiMo-only provider**
 
 In `main.py`, change `_select_memory_summarizer_provider`:
 
@@ -911,11 +911,11 @@ return MiMoLLMProvider(settings, config)
 
 Do not pass `settings.llm` as fallback.
 
-- [ ] **Step 7: Disable or MiMo-isolate legacy memory-writing paths**
+- [x] **Step 7: Disable or MiMo-isolate legacy memory-writing paths**
 
 Ensure `MemoryCurator`, nightly cleanup, episode/daily summary, and memory card rebuild paths cannot write prompt-facing `memory.md` via SiliconFlow. Either route them to MiMo-only provider or disable their prompt-facing writes for V1.5.
 
-- [ ] **Step 8: Run targeted tests**
+- [x] **Step 8: Run targeted tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -927,7 +927,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
   tests/test_stage36_curator.py
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/app/runtime/notebook.py backend/app/runtime/memory_judgment.py backend/app/runtime/nightly_cleanup.py backend/app/runtime/memory_curator.py backend/app/runtime/maintenance.py backend/app/main.py backend/app/pet/prompt_builder.py backend/tests
@@ -946,7 +946,7 @@ git commit -m "feat: enforce ten-line MiMo-only memory"
 - Test: `backend/tests/test_v15_provider_retry.py`
 - Update old tests: `backend/tests/test_asr_http_provider.py`, `backend/tests/test_phase2_providers.py`, `backend/tests/test_audio_retry.py`
 
-- [ ] **Step 1: Create retry helper**
+- [x] **Step 1: Create retry helper**
 
 Create `backend/app/providers/retry.py`:
 
@@ -987,15 +987,15 @@ def retry_provider_call(
     raise last_exc  # type: ignore[misc]
 ```
 
-- [ ] **Step 2: Apply retry to LLM**
+- [x] **Step 2: Apply retry to LLM**
 
 Wrap the HTTP request body inside `MiMoLLMProvider.complete_json` with `retry_provider_call`. Do not retry invalid output parsing if the HTTP call succeeded but the model returned unusable content; that is `llm_invalid_output` handled by guard/dispatcher.
 
-- [ ] **Step 3: Apply retry to TTS**
+- [x] **Step 3: Apply retry to TTS**
 
 Wrap both `_synthesize_openai_speech` and chat-completions TTS HTTP operations. Auth/config errors remain non-retryable.
 
-- [ ] **Step 4: Apply total attempt cap to ASR**
+- [x] **Step 4: Apply total attempt cap to ASR**
 
 Change `ASRHTTPProvider._max_attempts` to:
 
@@ -1005,7 +1005,7 @@ return max(1, min(3, max(retries + 1, len(models))))
 
 Ensure fallback model attempts consume the same 3-attempt budget.
 
-- [ ] **Step 5: Run provider retry tests**
+- [x] **Step 5: Run provider retry tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -1015,7 +1015,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
   tests/test_audio_retry.py
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/providers/retry.py backend/app/providers/asr_http.py backend/app/providers/llm_mimo.py backend/app/providers/tts_mimo.py backend/tests
@@ -1036,7 +1036,7 @@ git commit -m "feat: bound provider retries to three attempts"
 - Modify: `frontend/src/pet/api.test.ts`
 - Modify: `frontend/src/components/VoiceButton.test.tsx`
 
-- [ ] **Step 1: Remove UI imports and state**
+- [x] **Step 1: Remove UI imports and state**
 
 In `App.tsx`, remove:
 
@@ -1045,7 +1045,7 @@ In `App.tsx`, remove:
 - `refreshContext` import and handler;
 - "换个话题" button.
 
-- [ ] **Step 2: Stop sending thinking options**
+- [x] **Step 2: Stop sending thinking options**
 
 Call:
 
@@ -1061,13 +1061,13 @@ and:
 
 without passing `thinkingMode`.
 
-- [ ] **Step 3: Update API helpers**
+- [x] **Step 3: Update API helpers**
 
 In `frontend/src/pet/api.ts`, remove `formData.append("thinking_mode", ...)` from `uploadVoice`. Remove `thinking_mode` from `sendTextChat` request body for new calls.
 
 Keep compatibility types only where old test fixtures require them.
 
-- [ ] **Step 4: Delete VoiceModeToggle component and tests**
+- [x] **Step 4: Delete VoiceModeToggle component and tests**
 
 Remove files:
 
@@ -1075,11 +1075,11 @@ Remove files:
 rm frontend/src/components/VoiceModeToggle.tsx frontend/src/components/VoiceModeToggle.test.tsx
 ```
 
-- [ ] **Step 5: Update frontend tests**
+- [x] **Step 5: Update frontend tests**
 
 Update tests to assert no thinking mode control, no topic refresh control, and no `thinking_mode` in new request bodies.
 
-- [ ] **Step 6: Run frontend tests**
+- [x] **Step 6: Run frontend tests**
 
 ```bash
 cd frontend && npm test -- --run
@@ -1087,7 +1087,7 @@ cd frontend && npm test -- --run
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/App.tsx frontend/src/pet/api.ts frontend/src/pet/types.ts frontend/src/App.test.tsx frontend/src/pet/api.test.ts frontend/src/components/VoiceButton.test.tsx
@@ -1106,7 +1106,7 @@ git commit -m "feat: remove user-facing thinking and topic refresh controls"
 - Test: `backend/tests/test_v15_unified_context.py`
 - Update old tests: `backend/tests/test_stage35_event_log.py`, `backend/tests/test_stage35_episode.py`, `backend/tests/test_recall_context_and_summary_jobs.py`
 
-- [ ] **Step 1: Make context refresh compatibility-only**
+- [x] **Step 1: Make context refresh compatibility-only**
 
 Change `/api/context/refresh` so it returns:
 
@@ -1116,7 +1116,7 @@ Change `/api/context/refresh` so it returns:
 
 It must not call `episode_manager.refresh_topic`, must not enqueue summary jobs, and must not record `context_refresh` into `raw_event_log`.
 
-- [ ] **Step 2: Stop dispatcher raw cleanup delete path**
+- [x] **Step 2: Stop dispatcher raw cleanup delete path**
 
 Remove or disable:
 
@@ -1126,15 +1126,15 @@ self.event_log_store.cleanup_if_needed(...)
 
 from foreground dispatcher success path.
 
-- [ ] **Step 3: Preserve old cleanup function only as explicit archive-dependent API**
+- [x] **Step 3: Preserve old cleanup function only as explicit archive-dependent API**
 
 Either mark `cleanup_if_needed` deprecated and unused, or change it to no-op unless an archive implementation is provided.
 
-- [ ] **Step 4: Update tests that expect deletion**
+- [x] **Step 4: Update tests that expect deletion**
 
 Old tests in `test_stage35_event_log.py` should assert that cleanup does not silently delete rows, or should move deletion assertions to an explicit archival feature if implemented.
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q \
@@ -1144,7 +1144,7 @@ cd backend && ../.venv/bin/python -m pytest -q \
   tests/test_recall_context_and_summary_jobs.py
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/api/context.py backend/app/runtime/context_store.py backend/app/runtime/dispatcher.py backend/tests
@@ -1159,7 +1159,7 @@ git commit -m "fix: preserve durable history and neutralize topic refresh"
 - Modify as needed: `plan/V1.5/unified-context-memory-implementation-plan.md`
 - No production changes unless verification finds a defect.
 
-- [ ] **Step 1: Run full backend suite**
+- [x] **Step 1: Run full backend suite**
 
 ```bash
 cd backend && ../.venv/bin/python -m pytest -q
@@ -1167,7 +1167,7 @@ cd backend && ../.venv/bin/python -m pytest -q
 
 Expected: all tests pass. Record final summary in the completion notes.
 
-- [ ] **Step 2: Run full frontend suite**
+- [x] **Step 2: Run full frontend suite**
 
 ```bash
 cd frontend && npm test -- --run
@@ -1175,7 +1175,7 @@ cd frontend && npm test -- --run
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Build frontend and deploy to Nubia**
+- [x] **Step 3: Build frontend and deploy to Nubia**
 
 ```bash
 cd /Users/wylam/Documents/workspace/Petagent
@@ -1184,7 +1184,7 @@ BUILD_FRONTEND=1 ./scripts/deploy_nubia.sh
 
 Expected: deploy completes without error.
 
-- [ ] **Step 4: Start service from Termux/SSH context**
+- [x] **Step 4: Start service from Termux/SSH context**
 
 ```bash
 adb forward tcp:18022 tcp:8022
@@ -1193,7 +1193,7 @@ ssh -i ~/.ssh/nubia_ed25519 -p 18022 localhost 'cd ~/Petagent && scripts/start.s
 
 Expected: backend starts in Termux context with inet group.
 
-- [ ] **Step 5: Verify health and frontend**
+- [x] **Step 5: Verify health and frontend**
 
 ```bash
 adb shell 'curl -sS --connect-timeout 2 --max-time 10 http://127.0.0.1:8000/api/health'
@@ -1202,7 +1202,7 @@ adb shell 'curl -sS --connect-timeout 2 --max-time 10 -I http://127.0.0.1:8000/'
 
 Expected: health `ok:true`, frontend `HTTP/1.1 200 OK`.
 
-- [ ] **Step 6: Verify text success on Nubia**
+- [x] **Step 6: Verify text success on Nubia**
 
 Send a text chat from the web UI. Confirm:
 
@@ -1211,7 +1211,7 @@ Send a text chat from the web UI. Confirm:
 - `recent_dialogue_count` is present;
 - successful-turn counter increments.
 
-- [ ] **Step 7: Verify voice ASR success on Nubia**
+- [x] **Step 7: Verify voice ASR success on Nubia**
 
 Record a clear phrase such as:
 
@@ -1227,7 +1227,7 @@ Confirm:
 - history row is written;
 - successful-turn counter increments.
 
-- [ ] **Step 8: Verify ASR failure on Nubia**
+- [x] **Step 8: Verify ASR failure on Nubia**
 
 Submit silence or force an ASR-empty fixture if available. Confirm:
 
@@ -1238,11 +1238,11 @@ Submit silence or force an ASR-empty fixture if available. Confirm:
 - no successful-turn counter increment;
 - no memory summary enqueue.
 
-- [ ] **Step 9: Verify 10-turn memory trigger on Nubia**
+- [x] **Step 9: Verify 10-turn memory trigger on Nubia**
 
 Complete 10 successful text/button/voice-success turns. Confirm one memory summary attempt is logged. Confirm `memory.md` remains at 10 lines or fewer.
 
-- [ ] **Step 10: Verify MiMo unavailable does not call SiliconFlow**
+- [x] **Step 10: Verify MiMo unavailable does not call SiliconFlow**
 
 Temporarily run with missing/invalid MiMo memory config in a controlled test. Confirm:
 
@@ -1251,7 +1251,7 @@ Temporarily run with missing/invalid MiMo memory config in a controlled test. Co
 - logs show no SiliconFlow call for memory writing;
 - no prompt-facing memory file change is applied.
 
-- [ ] **Step 11: Commit completion notes**
+- [x] **Step 11: Commit completion notes**
 
 Create or update a V1.5 completion note with command summaries and Nubia evidence:
 
@@ -1264,24 +1264,24 @@ git commit -m "docs: record V1.5 verification results"
 
 ## Final Review Checklist
 
-- [ ] Frontend has no Thinking Mode control.
-- [ ] Frontend has no "换个话题" control.
-- [ ] Backend accepts but ignores `thinking_mode`.
-- [ ] Backend accepts but ignores voice `route`.
-- [ ] Voice foreground chat only proceeds after ASR transcript success.
-- [ ] ASR failure is explicit and terminal.
-- [ ] LLM provider failure is explicit and terminal.
-- [ ] Invalid LLM output is explicit and terminal.
-- [ ] Successful foreground prompt shape is unified.
-- [ ] Runtime diagnostics expose `context_profile`, `recent_dialogue_count`, `memory_line_count`, and `provider`.
-- [ ] Recent dialogue comes from durable history across episodes.
-- [ ] Button successes count for memory trigger but do not enter recent dialogue.
-- [ ] Successful-turn counter persists and is idempotent.
-- [ ] Memory summary triggers only on keyword or 10-turn boundaries.
-- [ ] `memory.md` has at most 10 valid memory lines.
-- [ ] Memory-writing maintenance is MiMo-only or disabled.
-- [ ] Provider retries are bounded to 3 total attempts.
-- [ ] Raw history is not silently deleted.
-- [ ] Backend tests pass.
-- [ ] Frontend tests pass.
-- [ ] Nubia deployment and live checks pass.
+- [x] Frontend has no Thinking Mode control.
+- [x] Frontend has no "换个话题" control.
+- [x] Backend accepts but ignores `thinking_mode`.
+- [x] Backend accepts but ignores voice `route`.
+- [x] Voice foreground chat only proceeds after ASR transcript success.
+- [x] ASR failure is explicit and terminal.
+- [x] LLM provider failure is explicit and terminal.
+- [x] Invalid LLM output is explicit and terminal.
+- [x] Successful foreground prompt shape is unified.
+- [x] Runtime diagnostics expose `context_profile`, `recent_dialogue_count`, `memory_line_count`, and `provider`.
+- [x] Recent dialogue comes from durable history across episodes.
+- [x] Button successes count for memory trigger but do not enter recent dialogue.
+- [x] Successful-turn counter persists and is idempotent.
+- [x] Memory summary triggers only on keyword or 10-turn boundaries.
+- [x] `memory.md` has at most 10 valid memory lines.
+- [x] Memory-writing maintenance is MiMo-only or disabled.
+- [x] Provider retries are bounded to 3 total attempts.
+- [x] Raw history is not silently deleted.
+- [x] Backend tests pass.
+- [x] Frontend tests pass.
+- [x] Nubia deployment and live checks pass.

@@ -51,6 +51,7 @@ def _make_runner(**overrides):
         maintenance_state=ms,
         provider_gate=gate,
         dispatcher=dispatcher,
+        enabled=overrides.get("enabled", True),
     )
     runner._get_local_now = MagicMock(return_value=datetime(2026, 5, 26, 0, 30))
     return runner, nm, provider, ms, gate, dispatcher
@@ -258,6 +259,16 @@ def test_should_run_once_per_day():
     # Simulate: cleanup ran today
     ms.get.return_value = runner._today_local()
     assert runner.should_run() is False
+
+
+def test_should_run_disabled_by_default_unless_forced():
+    runner, _, provider, ms, _, _ = _make_runner(enabled=False)
+    ms.get.return_value = None
+
+    assert runner.should_run() is False
+    assert runner.run() == {}
+    provider.complete_json.assert_not_called()
+    assert runner.should_run(force=True) is True
 
 
 def test_should_run_only_inside_midnight_window():

@@ -1,7 +1,8 @@
-"""Nightly Memory Cleanup Runner.
+"""Manual Memory Cleanup Runner.
 
-Runs at local midnight to "整理小本本". LLM proposes add/update/delete
-operations on canonical memory.md. Backend validates and applies atomically.
+V1.5 disables automatic prompt-facing memory cleanup. The runner is kept for
+explicit maintenance/debug calls only, so memory.md is normally changed only by
+keyword or 10-successful-turn summary triggers.
 
 Safety gates: once per day, skip during active responses, skip under
 provider backpressure, skip when event loop stale, 60s timeout.
@@ -32,6 +33,7 @@ class NightlyCleanupRunner:
         dispatcher=None,
         cleanup_window_start: time = time(0, 0),
         cleanup_window_end: time = time(1, 0),
+        enabled: bool = False,
     ) -> None:
         self._notebook = notebook_manager
         self._provider = provider
@@ -41,9 +43,12 @@ class NightlyCleanupRunner:
         self._dispatcher = dispatcher
         self._cleanup_window_start = cleanup_window_start
         self._cleanup_window_end = cleanup_window_end
+        self._enabled = enabled
 
     def should_run(self, force: bool = False) -> bool:
         """Check all safety gates. Returns True if cleanup should proceed."""
+        if not force and not self._enabled:
+            return False
         if not force and not self._is_in_cleanup_window():
             return False
 

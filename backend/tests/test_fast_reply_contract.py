@@ -1,9 +1,11 @@
-"""Tests for V1.3 Fast Reply Contract."""
+"""Tests for the V1.5 unified foreground reply contract."""
 
 from __future__ import annotations
 
+import pytest
+
 from app.main import create_app
-from app.pet.guard import guard_fast_reply_action
+from app.pet.guard import InvalidActionError, guard_fast_reply_action
 from app.runtime.actions import ALLOWED_BEHAVIOR_ACTIONS, ALLOWED_MOODS, FastReplyAction
 
 
@@ -34,14 +36,9 @@ def test_fast_reply_guard_accepts_v14_product_actions():
         assert result.action == action
 
 
-def test_fast_reply_guard_fallback_on_empty():
-    """Empty/invalid LLM output returns safe fallback."""
-    result = guard_fast_reply_action({})
-    assert isinstance(result, FastReplyAction)
-    assert result.reply == "嗯嗯，豆豆在这儿。"
-    assert result.mood == "happy"
-    assert result.action == "idle"
-    assert result.voice_style == "soft"
+def test_fast_reply_guard_raises_on_empty():
+    with pytest.raises(InvalidActionError):
+        guard_fast_reply_action({})
 
 
 def test_fast_reply_guard_invalid_mood():
@@ -80,10 +77,9 @@ def test_fast_reply_guard_strips_structured_reasoning():
     assert result.reply == "早呀主人，豆豆醒啦～"
 
 
-def test_fast_reply_guard_fallbacks_on_reasoning_only():
-    result = guard_fast_reply_action({"reply": "<think>只输出了内部推理"})
-
-    assert result.reply == "嗯嗯，豆豆在这儿。"
+def test_fast_reply_guard_raises_on_reasoning_only():
+    with pytest.raises(InvalidActionError):
+        guard_fast_reply_action({"reply": "<think>只输出了内部推理"})
 
 
 def test_fast_reply_guard_replaces_legacy_pet_name():
@@ -114,7 +110,7 @@ def test_fast_reply_response_has_route_and_action():
             "payload": {"user_text": "你好"},
         }
     )
-    assert response.route == "fast_reply"
+    assert response.route == "unified"
     assert response.action == "waving"
     assert response.state_affect is None
     assert response.behavior_intent is None
@@ -122,7 +118,7 @@ def test_fast_reply_response_has_route_and_action():
 
 
 def test_thinking_response_has_route():
-    """Thinking mode PetResponse includes route='thinking'."""
+    """Thinking mode is accepted but ignored."""
     app = create_app(testing=True)
     response = app.state.dispatcher.handle_event(
         {
@@ -131,7 +127,8 @@ def test_thinking_response_has_route():
             "payload": {"user_text": "你好", "thinking_mode": True},
         }
     )
-    assert response.route == "thinking"
+    assert response.route == "unified"
+    assert response.runtime["context_profile"] == "unified"
 
 
 def test_fast_reply_skips_state_delta():
@@ -229,11 +226,11 @@ def test_fast_reply_prompt_uses_selected_card_items():
 
     messages = build_fast_reply_messages(settings, event, context)
     user_payload = json.loads(messages[1]["content"])
-    hints = user_payload.get("memory_hints", [])
-    assert "我是小明" in hints
-    assert "今天去了公园" in hints
+    memories = user_payload.get("long_term_memory", [])
+    assert "我是小明" in memories
+    assert "今天去了公园" in memories
     # Should NOT fall back to old memory_cards
-    assert "旧数据" not in hints
+    assert "旧数据" not in memories
 
 
 def test_fast_reply_prompt_does_not_fallback_to_legacy_memory_cards():
@@ -261,7 +258,7 @@ def test_fast_reply_prompt_does_not_fallback_to_legacy_memory_cards():
 
     messages = build_fast_reply_messages(settings, event, context)
     user_payload = json.loads(messages[1]["content"])
-    assert user_payload.get("memory_hints") == []
+    assert user_payload.get("long_term_memory") == []
 
 
 def test_fast_reply_prompt_caps_selected_memory_hints_to_10():
@@ -290,7 +287,7 @@ def test_fast_reply_prompt_caps_selected_memory_hints_to_10():
     messages = build_fast_reply_messages(settings, event, context)
     user_payload = json.loads(messages[1]["content"])
 
-    assert user_payload["memory_hints"] == [f"记忆{i}" for i in range(10)]
+    assert user_payload["long_term_memory"] == [f"记忆{i}" for i in range(10)]
 
 
 def test_fast_reply_response_has_memory_ack_hint():
@@ -303,7 +300,7 @@ def test_fast_reply_response_has_memory_ack_hint():
             "payload": {"user_text": "记住我喜欢咖啡"},
         }
     )
-    assert response.route == "fast_reply"
+    assert response.route == "unified"
     assert response.memory_ack_hint == "我先记到小本本"
 
 
@@ -329,7 +326,7 @@ def test_fast_reply_enqueues_memory_summary_without_calling_provider():
 
     def complete_json(messages):
         calls["count"] += 1
-        return {"add": [{"category": "preference", "content": "喜欢短回复"}], "update": [], "delete": []}
+        return {"memories": [{"category": "preference", "content": "喜欢短回复"}]}
 
     provider.complete_json = complete_json
 
@@ -341,7 +338,7 @@ def test_fast_reply_enqueues_memory_summary_without_calling_provider():
         }
     )
 
-    assert response.route == "fast_reply"
+    assert response.route == "unified"
     assert calls["count"] == 0
     assert queue.pending_count() == 1
 
@@ -352,7 +349,7 @@ def test_maintenance_processes_memory_summary_into_notebook():
     provider = queue._provider
 
     def complete_json(messages):
-        return {"add": [{"category": "preference", "content": "偏好安静回应"}], "update": [], "delete": []}
+        return {"memories": [{"category": "preference", "content": "偏好安静回应"}]}
 
     provider.complete_json = complete_json
 
@@ -360,10 +357,10 @@ def test_maintenance_processes_memory_summary_into_notebook():
         {
             "type": "text_message",
             "source": "runtime",
-            "payload": {"user_text": "今天先轻声聊一会"},
+            "payload": {"user_text": "记住今天先轻声聊一会"},
         }
     )
     result = app.state.maintenance_service.tick(force=True)
 
-    assert result.get("memory_summary_adds") == 1
+    assert result.get("memory_summary_rewrite") == 1
     assert "偏好安静回应" in app.state.notebook_manager.read_raw("memory.md")

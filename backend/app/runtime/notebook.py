@@ -157,6 +157,9 @@ class NotebookManager:
         """Select up to 20 canonical memory.md lines for thinking mode."""
         return self._select_n(self.parse_memory(), _THINKING_MAX_ITEMS, _THINKING_MAX_CJK)
 
+    def prompt_memory_lines(self, limit: int = 10) -> List[str]:
+        return [entry.raw for entry in self.parse_memory()[: max(0, int(limit or 10))]]
+
     def _select_one(self, entries: List[NotebookEntry]) -> Optional[str]:
         if not entries:
             return None
@@ -252,11 +255,36 @@ class NotebookManager:
         path = self._memory_path
 
         with self._lock:
+            if len(self._parse_file(path, max_entries=None)) >= 10:
+                logger.warning("append_line: memory.md already has 10 entries")
+                return False
             # Duplicate check
             if self._line_exists(path, content):
                 logger.info("append_line: duplicate skipped for %s", target)
                 return False
             return self._atomic_append(path, line)
+
+    def overwrite_memory_lines(self, items: List[Dict[str, str]]) -> bool:
+        if not isinstance(items, list) or len(items) > 10:
+            return False
+        lines = [_V14_MARKER]
+        for item in items:
+            if not isinstance(item, dict):
+                return False
+            category = str(item.get("category") or "")
+            content = str(item.get("content") or "").strip()
+            if category not in _CATEGORY_WHITELIST or not content:
+                return False
+            if _is_too_long(content) or _is_sensitive(content) or _CONTENT_TIMESTAMP_RE.match(content):
+                return False
+            lines.append(f"- [{_local_timestamp()}][{category}] {content}")
+        with self._lock:
+            self._memory_path.parent.mkdir(parents=True, exist_ok=True)
+            self._backup_file(self._memory_path)
+            if not self._write_text_atomic(self._memory_path, "\n".join(lines) + "\n"):
+                return False
+            self._write_text_atomic(self._user_path, _USER_STUB)
+            return True
 
     def _line_exists(self, path: Path, content: str) -> bool:
         if not path.exists():
@@ -380,7 +408,7 @@ class NotebookManager:
         self._backup_file(self._user_path)
 
         lines = [_V14_MARKER]
-        for entry in merged:
+        for entry in self._rank_entries(merged)[:10]:
             ts = entry.timestamp or _local_timestamp()
             lines.append(f"- [{ts}][{entry.category}] {entry.content}")
         lines.append("")
@@ -477,12 +505,12 @@ class NotebookManager:
         seen: set[str] = set()
         for item in old_user_items:
             norm = _normalize_text(item)
-            if norm and norm not in seen:
+            if norm and norm not in seen and len(lines) < 11:
                 seen.add(norm)
                 lines.append(f"- [{ts}][preference] {item}")
         for item in old_memory_items:
             norm = _normalize_text(item)
-            if norm and norm not in seen:
+            if norm and norm not in seen and len(lines) < 11:
                 seen.add(norm)
                 lines.append(f"- [{ts}][temporary] {item}")
         lines.append("")
@@ -528,7 +556,7 @@ class NotebookManager:
         self._backup_file(self._user_path)
 
         lines = [_V14_MARKER]
-        for entry in merged:
+        for entry in self._rank_entries(merged)[:10]:
             ts = entry.timestamp or _local_timestamp()
             lines.append(f"- [{ts}][{entry.category}] {entry.content}")
         lines.append("")
@@ -806,15 +834,18 @@ class NotebookManager:
         try:
             written = path.read_text(encoding="utf-8")
             parse_failures = 0
+            entry_count = 0
             for wl in written.splitlines():
                 stripped = wl.strip()
                 if stripped.startswith("- ["):
+                    entry_count += 1
                     if self._parse_line(stripped, 0) is None:
                         parse_failures += 1
-            if parse_failures > 0:
+            if parse_failures > 0 or entry_count > 10:
                 logger.warning(
-                    "rewrite_and_validate: %d parse failures, restoring backup",
+                    "rewrite_and_validate: %d parse failures, %d entries, restoring backup",
                     parse_failures,
+                    entry_count,
                 )
                 self._restore_backup(path, backup_path)
                 return False

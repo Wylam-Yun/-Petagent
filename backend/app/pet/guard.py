@@ -145,15 +145,24 @@ FAST_REPLY_FALLBACK = {
 }
 
 
+class InvalidActionError(ValueError):
+    def __init__(self, error_class: str = "llm_invalid_output", message: str = "") -> None:
+        super().__init__(message or error_class)
+        self.error_class = error_class
+
+
 def _parse_action(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
         return dict(raw)
     if isinstance(raw, str):
         try:
-            return json.loads(raw)
+            data = json.loads(raw)
         except json.JSONDecodeError:
-            return dict(FALLBACK_ACTION)
-    return dict(FALLBACK_ACTION)
+            raise InvalidActionError("llm_invalid_output", "LLM output is not valid JSON")
+        if not isinstance(data, dict):
+            raise InvalidActionError("llm_invalid_output", "LLM JSON is not an object")
+        return data
+    raise InvalidActionError("llm_invalid_output", "LLM output is not a JSON object")
 
 
 def _limits_for_event(event_type: str = "") -> Dict[str, tuple]:
@@ -252,7 +261,7 @@ def _strip_reasoning(reply: str) -> str:
     """Remove model thinking traces that accidentally landed in reply."""
     cleaned = str(reply or "").replace("\r\n", "\n").strip()
     if not cleaned:
-        return FALLBACK_ACTION["reply"]
+        return ""
 
     cleaned = _THINK_BLOCK_RE.sub("", cleaned).strip()
 
@@ -279,7 +288,7 @@ def _strip_reasoning(reply: str) -> str:
             cleaned = cleaned[: reasoning_marker.start()].strip()
 
     cleaned = _FINAL_REPLY_RE.sub("", cleaned, count=1).strip()
-    return cleaned or FALLBACK_ACTION["reply"]
+    return cleaned
 
 
 def _sanitize_prompt_leak(reply: str) -> str:
@@ -287,7 +296,7 @@ def _sanitize_prompt_leak(reply: str) -> str:
     lines = reply.split("\n")
     clean = [line for line in lines if not _PROMPT_LEAK_PATTERNS.search(line)]
     result = "\n".join(clean).strip()
-    return result or FALLBACK_ACTION["reply"]
+    return result
 
 
 _LEGACY_PET_NAME_PATTERN = re.compile(r"\bMomo\b|\bmomo\b")
@@ -304,8 +313,8 @@ def guard_action(
     event_type: str = "",
 ) -> PetAction:
     data = _parse_action(raw)
-    if not data.get("reply"):
-        data = dict(FALLBACK_ACTION)
+    if not str(data.get("reply") or "").strip():
+        raise InvalidActionError("llm_invalid_output", "LLM reply is empty")
 
     mood = data.get("mood", "idle")
     if mood not in ALLOWED_MOODS:
@@ -330,7 +339,7 @@ def guard_action(
     reply = _sanitize_prompt_leak(reply)
     reply = _sanitize_pet_name(reply)
     if not reply:
-        reply = FALLBACK_ACTION["reply"]
+        raise InvalidActionError("llm_invalid_output", "LLM reply is empty after sanitization")
     reply = _trim_reply(reply, max_reply_chars)
 
     return PetAction(
@@ -356,8 +365,8 @@ def guard_fast_reply_action(
 ) -> FastReplyAction:
     """Guard a fast reply LLM output into a validated FastReplyAction."""
     data = _parse_action(raw)
-    if not data.get("reply"):
-        data = dict(FAST_REPLY_FALLBACK)
+    if not str(data.get("reply") or "").strip():
+        raise InvalidActionError("llm_invalid_output", "LLM reply is empty")
 
     mood = data.get("mood")
     if mood and mood not in ALLOWED_MOODS:
@@ -375,7 +384,7 @@ def guard_fast_reply_action(
     reply = _sanitize_prompt_leak(reply)
     reply = _sanitize_pet_name(reply)
     if not reply:
-        reply = FAST_REPLY_FALLBACK["reply"]
+        raise InvalidActionError("llm_invalid_output", "LLM reply is empty after sanitization")
     reply = _trim_reply(reply, max_reply_chars)
 
     return FastReplyAction(

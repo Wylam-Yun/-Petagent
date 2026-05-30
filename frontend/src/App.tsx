@@ -6,7 +6,6 @@ import { StatusBar } from "./components/StatusBar";
 import { TextInputBar } from "./components/TextInputBar";
 import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
-import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import {
   exitMomo,
   getAudioJob,
@@ -15,7 +14,6 @@ import {
   getProactiveCheck,
   postAudioRetry,
   postPetEvent,
-  refreshContext,
   reportDeviceState,
   resetRuntime,
   sendHeartbeat,
@@ -84,7 +82,6 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<PetUIPhase>("idle");
   const [activeSession, setActiveSession] = useState<string | null>(null);
-  const [thinkingMode, setThinkingMode] = useState(false);
   const [interactions, setInteractions] = useState<InteractionDefinition[]>([]);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
@@ -439,7 +436,7 @@ function App() {
     } else if (nextPhase === "thinking") {
       setFaceType("thinking");
       setAnimation("blink");
-      setBubbleText(thinkingMode ? "豆豆多想一下。" : "马上回应你。");
+      setBubbleText("豆豆想一下…");
     } else if (nextPhase === "waiting_voice") {
       setFaceType("thinking");
       setAnimation("blink");
@@ -480,21 +477,6 @@ function App() {
     currentPlaybackRef.current = null;
   }
 
-  async function handleRefreshContext() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const response = await refreshContext();
-      setBubbleText(response.reply);
-      setFaceType("idle");
-      setAnimation("breathing");
-    } catch {
-      setBubbleText("换个话题的时候出了点小状况。");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleResetRuntime() {
     if (busy) return;
     const confirmed = window.confirm(
@@ -523,7 +505,7 @@ function App() {
     setAnimation("blink");
     setBubbleText("豆豆想一下…");
     try {
-      const response: TextChatResponse = await sendTextChat(text, { thinkingMode });
+      const response: TextChatResponse = await sendTextChat(text);
       if (response.activation) {
         setActiveSession(response.activation.active ? response.activation.session_id : null);
       }
@@ -566,11 +548,9 @@ function App() {
       </section>
       <div className="control-deck">
         <TextInputBar disabled={isTextDisabled} onSubmit={handleTextSubmit} />
-        <VoiceModeToggle thinkingMode={thinkingMode} onChange={setThinkingMode} />
         <VoiceButton
           disabled={isVoiceDisabled}
           phase={phase}
-          thinkingMode={thinkingMode}
           onError={(message) => setBubbleText(message)}
           onInterrupt={interruptVoiceRun}
           onPhaseChange={handleVoicePhase}
@@ -602,13 +582,6 @@ function App() {
             重试发声
           </button>
         )}
-        <button
-          className="context-refresh-btn"
-          disabled={busy}
-          onClick={handleRefreshContext}
-        >
-          换个话题
-        </button>
         <button
           className="reset-btn"
           disabled={busy}

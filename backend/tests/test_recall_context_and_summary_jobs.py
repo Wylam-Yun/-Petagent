@@ -7,7 +7,7 @@ from app.runtime.events import PetEvent
 from app.runtime.memory_store import SummaryJobStore
 
 
-def test_recall_question_selects_recent_raw_events_from_previous_day():
+def test_recall_profile_is_unified_recent_dialogue_without_temporal_recall():
     state_store = PetStateStore(None)
     episodes = EpisodeStore(state_store.connection)
     event_log = EventLogStore(state_store.connection)
@@ -58,10 +58,11 @@ def test_recall_question_selects_recent_raw_events_from_previous_day():
         context_profile="recall",
     )
 
-    recalled = context.get("temporal_recall_events") or []
-    assert any("天气" in item.get("user", "") for item in recalled)
-    assert any("故事" in item.get("user", "") for item in recalled)
-    assert context["context_budget"]["items_selected"] >= len(recalled)
+    assert context["context_profile"] == "unified"
+    assert context.get("temporal_recall_events") == []
+    recent = context.get("recent_exact_events") or []
+    assert any("天气" in item.get("user", "") for item in recent)
+    assert any("故事" in item.get("user", "") for item in recent)
 
 
 def test_summary_job_records_error_and_is_retryable_until_attempt_limit():

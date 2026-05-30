@@ -39,21 +39,10 @@ def decide_route(
     user_text: str,
     thinking_mode: bool = False,
 ) -> RouteDecision:
-    if thinking_mode:
-        return RouteDecision(
-            route="thinking",
-            context_profile="thinking",
-            provider_profile="slow_llm",
-            brain="slow",
-            allow_tools=False,
-            max_tool_calls=0,
-            reason="thinking_mode enabled",
-        )
-
     if event_source == "proactive" or event_type in PROACTIVE_EVENT_TYPES:
         return RouteDecision(
-            route="fast_reply",
-            context_profile="proactive",
+            route="unified",
+            context_profile="unified",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -63,8 +52,8 @@ def decide_route(
 
     if event_type in BUTTON_EVENT_TYPES:
         return RouteDecision(
-            route="fast_reply",
-            context_profile="fast_reply",
+            route="unified",
+            context_profile="unified",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -74,8 +63,8 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in RECALL_KEYWORDS):
         return RouteDecision(
-            route="fast_reply",
-            context_profile="fast_reply",
+            route="unified",
+            context_profile="unified",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -85,8 +74,8 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in TOOL_KEYWORDS):
         return RouteDecision(
-            route="fast_reply",
-            context_profile="fast_reply",
+            route="unified",
+            context_profile="unified",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -96,8 +85,8 @@ def decide_route(
 
     if user_text and any(kw in user_text for kw in LONG_TASK_KEYWORDS):
         return RouteDecision(
-            route="fast_reply",
-            context_profile="fast_reply",
+            route="unified",
+            context_profile="unified",
             provider_profile="fast_llm",
             brain="fast",
             allow_tools=False,
@@ -106,8 +95,8 @@ def decide_route(
         )
 
     return RouteDecision(
-        route="fast_reply",
-        context_profile="fast_reply",
+        route="unified",
+        context_profile="unified",
         provider_profile="fast_llm",
         brain="fast",
         allow_tools=False,

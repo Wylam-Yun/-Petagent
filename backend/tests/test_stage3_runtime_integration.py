@@ -16,8 +16,8 @@ def test_pet_event_writes_interaction_log():
     assert rows[0]["pet"] == response.json()["reply"]
 
 
-def test_voice_chat_can_persist_memory_update_from_brain():
-    """V1.3: memory_update only processed in thinking mode (fast reply skips it)."""
+def test_voice_chat_ignores_llm_memory_update_in_foreground_path():
+    """V1.5 memory writes are background summaries, not foreground memory_update."""
     app = create_app(testing=True)
 
     class MemoryLLM:
@@ -38,7 +38,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
                 },
             }
 
-    app.state.voice_pipeline.slow_brain.provider = MemoryLLM()
+    app.state.voice_pipeline.fast_brain.provider = MemoryLLM()
 
     # Disable maintenance tick so candidates aren't processed mid-test
     app.state.dispatcher.maintenance_service = None
@@ -54,7 +54,7 @@ def test_voice_chat_can_persist_memory_update_from_brain():
     # Stage 3.6: memory_update goes to candidate store, not directly to memory
     pending = app.state.memory_candidate_store.pending(limit=5)
     texts = [c["candidate_text"] for c in pending]
-    assert "用户今天很累，需要温柔陪伴。" in texts
+    assert "用户今天很累，需要温柔陪伴。" not in texts
 
 
 def test_voice_weather_question_fast_reply_no_skills():
