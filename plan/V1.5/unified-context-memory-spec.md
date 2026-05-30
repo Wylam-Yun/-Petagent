@@ -55,6 +55,9 @@ back to SiliconFlow.
 - Do not use SiliconFlow for memory summarization.
 - Do not remove the `thinking_mode` API field immediately; keep it accepted for
   compatibility, but ignore it.
+- Do not honor legacy `/api/voice/chat route=thinking` or any other client
+  route override. Legacy route fields are accepted for compatibility but ignored
+  by foreground chat.
 - Do not let frontend business APIs automatically retry POST chat requests.
   Provider retries happen inside the backend.
 
@@ -135,6 +138,11 @@ frontend records audio
 ASR failure includes empty transcript, low confidence, timeout, provider error,
 or provider exception. ASR failure does not count as a successful turn.
 
+ASR transcript success is the only foreground voice chat entry point.
+Audio-understanding output must not replace a failed ASR transcript, and the
+legacy `route=thinking` form field must not switch voice into the old
+audio-understanding path.
+
 ### Button Interactions
 
 Button interactions can still produce model-backed replies. If a button
@@ -193,6 +201,11 @@ The latest 5 turns are selected from local history using these filters:
 - exclude button interactions from the prompt context, even though button
   successes count toward the 10-turn memory trigger.
 
+This selection must come from durable local history, not the current episode
+only. The query must cross episode boundaries, order by durable insertion order
+or creation time, and walk backward until it finds 5 qualifying turns with both
+user text and pet reply.
+
 ### Long-Term Memory Rules
 
 `memory.md` is the only prompt-facing memory source. It contains at most 10
@@ -203,6 +216,12 @@ If `memory.md` has fewer than 10 lines, include all existing lines. If it has
 more than 10 because of migration or manual edits, the backend should clamp
 prompt injection to 10 and the next memory maintenance pass should rewrite it
 to at most 10.
+
+The at-most-10 rule is a global invariant, not only a prompt rule. All memory
+write paths, migration paths, append compatibility paths, cleanup operations,
+and summary rewrites must preserve `memory.md` at 10 valid lines or fewer.
+Migration from larger legacy files must create a backup and clamp the canonical
+file to at most 10 lines.
 
 ## Internal Model Selection
 
@@ -246,6 +265,10 @@ Disallowed storage management:
 - deleting old raw history with no archive or trace;
 - losing successful turn counters on restart;
 - clearing history except during explicit runtime reset.
+
+The existing raw-history cleanup path that deletes `raw_event_log` rows without
+archive must not run in V1.5. If size control is needed, archival or compaction
+must be implemented first and covered by tests.
 
 ## Memory File Contract
 
@@ -372,6 +395,19 @@ MIMO_MEMORY_MODEL or default mimo-v2.5
 
 It must not fall back to SiliconFlow.
 
+This MiMo-only rule applies to every maintenance path that can write, rewrite,
+curate, summarize, merge, delete, or otherwise change prompt-facing memory.
+Specifically:
+
+- after-turn memory summarization is MiMo-only;
+- nightly `memory.md` cleanup is MiMo-only or disabled;
+- legacy memory curator paths that can rebuild cards or write memory must be
+  disabled or changed to MiMo-only;
+- episode and daily summaries must not write prompt-facing memory through a
+  SiliconFlow-backed provider;
+- no memory-writing maintenance task may fall back to `settings.llm` if that
+  provider is SiliconFlow.
+
 If MiMo is unavailable:
 
 - current reply remains successful;
@@ -395,11 +431,14 @@ Applies to:
 
 Rules:
 
-- retries are bounded;
+- retries are bounded to 3 total attempts per logical provider operation;
 - retry delay is short and preferably exponential with jitter;
 - auth/configuration errors should not be retried repeatedly;
 - a user's single request must remain one logical request;
-- retries must not create duplicate history rows or duplicate memory jobs.
+- retries must not create duplicate history rows or duplicate memory jobs;
+- fallback providers, if used for foreground chat, count toward the same
+  3-attempt total budget;
+- ASR fallback models count toward the same 3-attempt total budget.
 
 ## Frontend Changes
 
@@ -412,7 +451,8 @@ Frontend request compatibility:
 
 - new frontend does not send `thinking_mode` intentionally;
 - old cached frontend may still send it;
-- backend ignores it and returns normal unified responses.
+- backend ignores it and processes the request through the unified foreground
+  contract.
 
 Voice failure UI remains explicit:
 
@@ -428,6 +468,11 @@ Remove user-visible route semantics for thinking and recall.
 
 The route policy can still label internal provider choice, but prompt context
 selection should not branch into separate user-facing modes.
+
+The API and pipeline boundary must force `thinking_mode=False` and ignore
+legacy route override fields before route policy runs. Old client fields must
+not change provider choice, prompt shape, ASR path, memory behavior, or failure
+semantics.
 
 ### Context Manager
 
@@ -445,6 +490,13 @@ mode in V1.5.
 
 Prompt builder should have one foreground chat prompt shape for text and
 ASR-success voice. It should preserve the system prompt and output schema.
+
+V1.5 foreground chat must use a single unified foreground builder. The old
+`build_fast_reply_messages`, `build_thinking_messages`, and generic
+`build_pet_messages` paths should either be removed from foreground chat or
+redirected to the unified builder. They must not produce different payload
+shapes such as `memory_hints` versus `notebook_memory`, and they must not vary
+recent dialogue limits.
 
 ### Guard And Reply Validation
 
@@ -481,6 +533,8 @@ Dispatcher should:
 - increment persistent successful-turn counters;
 - enqueue memory summary only on keyword trigger or 10-turn trigger;
 - avoid memory enqueue on ASR failures or LLM failures;
+- treat provider failure, provider busy, invalid JSON, and missing/empty reply
+  as terminal foreground failures before commit;
 - keep TTS failure independent from text-turn success.
 
 ### Notebook Manager
@@ -504,6 +558,26 @@ For compatibility, the backend may keep the endpoint temporarily, but V1.5
 requires that it does not close episodes, does not enqueue summaries, does not
 write prompt-facing history, and does not affect latest-5 dialogue selection.
 If no old client depends on it, the endpoint can be removed.
+
+### Runtime Diagnostics
+
+Foreground chat responses must expose enough diagnostics to verify the unified
+contract without parsing private provider mocks. At minimum, successful text and
+ASR-success voice responses include:
+
+```json
+{
+  "runtime": {
+    "context_profile": "unified",
+    "recent_dialogue_count": 5,
+    "memory_line_count": 10,
+    "provider": "provider_name"
+  }
+}
+```
+
+Counts may be lower than 5 or 10 only when the local history or `memory.md` has
+fewer qualifying items.
 
 ## API Compatibility
 
@@ -542,8 +616,8 @@ Responses may include internal diagnostics such as:
 }
 ```
 
-Diagnostic names can vary, but tests should assert the observable contract, not
-private implementation details.
+These diagnostic field names are part of the V1.5 test contract for successful
+foreground chat responses.
 
 ## Test Design
 
@@ -556,26 +630,33 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 - `thinking_mode=True` on text request does not select old thinking prompt.
 - `thinking_mode=True` on voice request does not select audio-understanding
   fallback route.
+- `/api/voice/chat route=thinking` is accepted for compatibility but ignored.
 - recall keywords do not select a separate recall mode.
 - internal provider selection can choose fast or slow provider without changing
   prompt payload shape.
+- old fast/thinking/generic foreground prompt builders no longer produce
+  separate foreground payload shapes.
 
 #### Context Selection
 
 - context includes exactly the latest 5 qualifying `text_message` and
   ASR-success `voice_message` turns.
+- context comes from durable local history and crosses episode boundaries.
 - ASR failure events are absent from recent dialogue.
 - wake and exit phrase events are absent from recent dialogue.
 - proactive events are absent from recent dialogue.
 - button interactions are absent from recent dialogue.
 - button interaction success still counts for the 10-turn memory trigger.
-- context selection crosses old episode boundaries and is not limited by a
-  45-minute idle rollover.
+- context selection is not limited by a 45-minute idle rollover.
 - prompt includes all current `memory.md` lines when there are 0, 3, or 10
   lines.
 - prompt clamps memory injection to 10 lines if a manual file edit creates more
   than 10 lines.
+- migration, append compatibility, cleanup, and summary rewrite paths all keep
+  canonical `memory.md` at 10 valid lines or fewer.
 - system prompt is always present as the first message.
+- successful responses expose `runtime.context_profile`, `runtime.recent_dialogue_count`,
+  `runtime.memory_line_count`, and `runtime.provider`.
 
 #### Successful Turn Counter
 
@@ -626,11 +707,15 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 - provider retry does not create duplicate event log rows.
 - provider retry does not create duplicate memory jobs.
 - memory summarizer without MiMo configuration does not call SiliconFlow.
+- fallback providers and ASR fallback models count toward the same 3-attempt
+  total budget.
 
 #### History Durability
 
 - successful raw history is retained after maintenance cleanup.
 - cleanup no longer silently deletes raw history rows.
+- the old `raw_event_log` deletion cleanup path is not called unless archival or
+  compaction exists.
 - if archival is implemented, archived rows remain recoverable or traceable.
 - runtime reset explicitly clears history, state, counters, and `memory.md`.
 - `/api/context/refresh`, if retained, does not close episodes, write
@@ -652,6 +737,7 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 #### Voice API
 
 - `/api/voice/chat` accepts old `thinking_mode` form field and ignores it.
+- `/api/voice/chat` accepts old `route` form field and ignores route overrides.
 - ASR success returns `ok:true`, `user_text`, and normal pet response.
 - ASR empty returns `ok:false`, `error_class:"asr_empty"`, no TTS job, no
   history write, no counter increment.
@@ -665,6 +751,8 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
   contract.
 - if a manual memory summary endpoint remains, it must require internal auth and
   must use MiMo-only provider policy.
+- every prompt-facing memory-writing maintenance path is either MiMo-only or
+  disabled.
 
 ### Frontend Tests
 
@@ -692,6 +780,8 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
   and turn counter increment.
 - send/produce ASR failure and confirm no history row, no counter increment, and
   explicit frontend error.
+- send voice with legacy `route=thinking` and ASR failure; confirm it still
+  fails explicitly and does not enter audio-understanding fallback.
 - complete 10 successful turns on Nubia and confirm one background memory
   summary attempt is logged.
 - remove or invalidate MiMo config on a test run and confirm memory summary
@@ -703,13 +793,15 @@ V1.5 is complete when:
 
 - frontend no longer exposes Thinking Mode;
 - frontend no longer exposes "换个话题";
-- backend accepts but ignores `thinking_mode`;
+- backend accepts but ignores `thinking_mode` and legacy route override fields;
 - every foreground successful chat uses the unified prompt shape;
 - invalid or missing LLM output fails explicitly instead of using a friendly
   fallback reply;
 - latest dialogue context includes 5 qualifying turns when available;
 - `memory.md` contains at most 10 prompt-facing memories and all are included in
   foreground prompts;
+- every prompt-facing memory write path preserves the `memory.md` at-most-10
+  invariant;
 - no separate Recall Mode remains in routing behavior;
 - local successful history is not silently deleted;
 - memory summary is background-only and triggered only by keywords or every 10
