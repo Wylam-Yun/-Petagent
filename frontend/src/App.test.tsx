@@ -89,6 +89,35 @@ test("App renders 豆豆 and shows kaomoji face", async () => {
   expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(・ω・)");
 });
 
+test("does not render thinking mode or topic refresh controls", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        schema_version: "0.1",
+        name: "豆豆",
+        mood: "idle",
+        energy: 72,
+        intimacy: 40,
+        hunger: 30,
+        cleanliness: 85,
+        loneliness: 35,
+        sleepiness: 15,
+        mode: "idle"
+      })
+    })
+    .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  expect(screen.queryByText(/思考/)).not.toBeInTheDocument();
+  expect(screen.queryByText("换个话题")).not.toBeInTheDocument();
+});
+
 test("local more interaction updates kaomoji without backend post", async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
@@ -193,10 +222,7 @@ describe("text chat", () => {
 
     const [, textInit] = fetchMock.mock.calls[4];
     expect(textInit.method).toBe("POST");
-    expect(JSON.parse(textInit.body as string)).toMatchObject({
-      text: "帮我写两数之和",
-      thinking_mode: false
-    });
+    expect(JSON.parse(textInit.body as string)).toEqual({ text: "帮我写两数之和" });
   });
 
   test("fast reply still starts audio polling while kaomoji remains responsive", async () => {

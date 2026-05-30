@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("uploadVoice", () => {
-  test("sends thinking mode as multipart form data", async () => {
+  test("does not send thinking mode in multipart form data", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true })
@@ -33,7 +33,7 @@ describe("uploadVoice", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = init.body as FormData;
     expect(init.method).toBe("POST");
-    expect(body.get("thinking_mode")).toBe("true");
+    expect(body.has("thinking_mode")).toBe(false);
   });
 
   test("uses a longer timeout for voice uploads than normal requests", async () => {
@@ -56,7 +56,7 @@ describe("uploadVoice", () => {
     expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.fast);
   });
 
-  test("uses a full-chain timeout for thinking voice uploads", async () => {
+  test("ignores thinking option for voice upload timeout", async () => {
     const originalSetTimeout = window.setTimeout;
     const timeouts: number[] = [];
     const fetchMock = vi.fn().mockResolvedValue({
@@ -73,7 +73,8 @@ describe("uploadVoice", () => {
       thinkingMode: true
     });
 
-    expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.thinking);
+    expect(timeouts).toContain(VOICE_UPLOAD_TIMEOUT_MS.fast);
+    expect(timeouts).not.toContain(VOICE_UPLOAD_TIMEOUT_MS.thinking);
   });
 });
 
@@ -163,7 +164,7 @@ describe("audio error copy", () => {
 });
 
 describe("sendTextChat", () => {
-  test("sends text and thinking mode as JSON", async () => {
+  test("sends text without thinking mode as JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ reply: "好呀。" })
@@ -177,9 +178,9 @@ describe("sendTextChat", () => {
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ "content-type": "application/json" });
     expect(JSON.parse(init.body as string)).toEqual({
-      text: "帮我写两数之和",
-      thinking_mode: true
+      text: "帮我写两数之和"
     });
+    expect(JSON.parse(init.body as string)).not.toHaveProperty("thinking_mode");
   });
 });
 
