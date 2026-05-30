@@ -43,6 +43,9 @@ back to SiliconFlow.
 6. **ASR failure is terminal for that request.** ASR failure does not call LLM,
    does not call TTS, does not write dialogue history, and does not trigger
    memory summary.
+7. **Invalid LLM output is terminal for that request.** If the LLM provider does
+   not return a valid foreground reply, the backend must surface a structured
+   failure instead of inventing a normal-looking fallback reply.
 
 ## Non-Goals
 
@@ -69,6 +72,13 @@ The backend currently has `fast_reply`, `thinking`, and recall-like code paths.
 Fast reply only injects the latest 1 turn into the prompt, while thinking uses a
 different prompt shape. Recall keywords are detected in route policy, but the
 true recall context is not actually activated consistently.
+
+### Fallback Replies Hide Failures
+
+The current guard layer can turn missing or invalid LLM output into a normal
+reply such as "嗯嗯，豆豆在这儿。". This makes users believe the software is
+working when the LLM actually failed or returned an unusable payload. V1.5 must
+delete this user-visible fallback behavior for foreground chat.
 
 ### Session And Episode Confusion
 
@@ -302,6 +312,8 @@ Does not count:
 - ASR failure;
 - empty text request rejected before model call;
 - LLM failure;
+- invalid LLM JSON or missing/empty reply;
+- guard-produced synthetic fallback replies;
 - server busy response;
 - wake phrase only;
 - exit phrase only;
@@ -393,6 +405,9 @@ Rules:
 
 Remove the visible Thinking Mode control from the main UI.
 
+Remove the "换个话题" control from the main UI. V1.5 has one continuous local
+session, so the new frontend should not expose a topic-refresh action.
+
 Frontend request compatibility:
 
 - new frontend does not send `thinking_mode` intentionally;
@@ -431,6 +446,33 @@ mode in V1.5.
 Prompt builder should have one foreground chat prompt shape for text and
 ASR-success voice. It should preserve the system prompt and output schema.
 
+### Guard And Reply Validation
+
+The guard layer should validate and sanitize model output, not invent a reply.
+
+Allowed guard behavior:
+
+- parse a dict response;
+- parse a JSON string response;
+- trim overlong replies;
+- strip leaked reasoning or internal prompt fields from an otherwise valid
+  reply;
+- normalize invalid enum fields such as mood, action, voice style, animation,
+  or vibration.
+
+Disallowed guard behavior:
+
+- replacing missing provider output with a friendly fallback reply;
+- replacing invalid JSON with a friendly fallback reply;
+- replacing a missing or empty reply with a friendly fallback reply;
+- treating a fully synthetic fallback reply as a successful turn.
+
+If the provider returns no action, invalid JSON, or a payload with no usable
+reply after sanitization, the foreground request fails with a structured
+`error_class` such as `llm_invalid_output` or `llm_provider_error`. It does not
+write `raw_event_log`, does not increment the successful-turn counter, does not
+enqueue TTS, and does not trigger memory summary.
+
 ### Dispatcher
 
 Dispatcher should:
@@ -453,6 +495,15 @@ Validation should reject:
 - sensitive content;
 - lines that exceed existing length limits;
 - more than 10 output lines.
+
+### Context Refresh API
+
+The new frontend does not call `/api/context/refresh`.
+
+For compatibility, the backend may keep the endpoint temporarily, but V1.5
+requires that it does not close episodes, does not enqueue summaries, does not
+write prompt-facing history, and does not affect latest-5 dialogue selection.
+If no old client depends on it, the endpoint can be removed.
 
 ## API Compatibility
 
@@ -534,6 +585,8 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 - TTS failure after text success still increments the counter once.
 - ASR failure does not increment the counter.
 - LLM failure does not increment the counter.
+- invalid LLM JSON, missing reply, empty reply, or guard-produced synthetic
+  fallback replies do not increment the counter.
 - duplicate processing of the same event id does not double increment.
 - counter state survives app restart or store reinitialization.
 - the 10th successful turn enqueues one memory summary job.
@@ -580,6 +633,8 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 - cleanup no longer silently deletes raw history rows.
 - if archival is implemented, archived rows remain recoverable or traceable.
 - runtime reset explicitly clears history, state, counters, and `memory.md`.
+- `/api/context/refresh`, if retained, does not close episodes, write
+  prompt-facing history, enqueue summaries, or affect latest-5 context.
 
 ### Backend API Contract Tests
 
@@ -591,6 +646,8 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
   requirement.
 - provider failure returns a structured error without incrementing successful
   turn count.
+- invalid LLM output returns a structured error and does not show a friendly
+  fallback reply.
 
 #### Voice API
 
@@ -614,6 +671,7 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 - `VoiceModeToggle` is no longer rendered in `App`.
 - text submit no longer sends `thinking_mode` from new frontend code.
 - voice upload no longer sends `thinking_mode` from new frontend code.
+- the "换个话题" control is no longer rendered in `App`.
 - old API type compatibility does not break tests that construct old responses.
 - ASR failure response displays explicit error bubble and does not call
   `applyPetResponse`.
@@ -644,8 +702,11 @@ V1.5 must include focused tests for behavior, contracts, and Nubia runtime.
 V1.5 is complete when:
 
 - frontend no longer exposes Thinking Mode;
+- frontend no longer exposes "换个话题";
 - backend accepts but ignores `thinking_mode`;
 - every foreground successful chat uses the unified prompt shape;
+- invalid or missing LLM output fails explicitly instead of using a friendly
+  fallback reply;
 - latest dialogue context includes 5 qualifying turns when available;
 - `memory.md` contains at most 10 prompt-facing memories and all are included in
   foreground prompts;
