@@ -48,6 +48,18 @@ def test_voice_chat_rejects_unsupported_audio_type():
     assert "Unsupported audio content type" in response.json()["detail"]
 
 
+def test_voice_chat_accepts_webm_with_codec_content_type():
+    client = TestClient(create_app(testing=True))
+
+    response = client.post(
+        "/api/voice/chat",
+        files={"file": ("hello.webm", WEBM_BYTES, "audio/webm;codecs=opus")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["voice_route"]["asr_provider"] == "mock_asr"
+
+
 def test_voice_chat_rejects_audio_larger_than_limit():
     client = TestClient(create_app(testing=True))
 
@@ -60,7 +72,7 @@ def test_voice_chat_rejects_audio_larger_than_limit():
     assert "Audio file is too large" in response.json()["detail"]
 
 
-def test_voice_chat_falls_back_when_audio_provider_fails():
+def test_voice_chat_returns_structured_failure_when_asr_and_audio_provider_fail():
     app = create_app(testing=True)
     app.state.asr_provider.text = ""
     app.state.audio_provider.fail = True
@@ -74,6 +86,8 @@ def test_voice_chat_falls_back_when_audio_provider_fails():
 
     assert response.status_code == 200
     body = response.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "asr_empty"
     assert body["user_text"] == ""
     assert body["audio_understanding"] == {
         "user_text": "",
@@ -82,10 +96,11 @@ def test_voice_chat_falls_back_when_audio_provider_fails():
         "non_verbal": "",
         "confidence": 0.0,
     }
-    assert body["reply"]
+    assert body["reply"] == ""
+    assert body["audio_job_id"] is None
 
 
-def test_voice_chat_does_not_create_accumulating_debug_log(
+def test_voice_chat_writes_bounded_debug_log(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setenv("PETAGENT_DATA_DIR", str(tmp_path / "data"))
@@ -97,4 +112,26 @@ def test_voice_chat_does_not_create_accumulating_debug_log(
     )
 
     assert response.status_code == 200
-    assert not (tmp_path / "data" / "logs" / "voice_debug.jsonl").exists()
+    log_path = tmp_path / "data" / "logs" / "voice_debug.jsonl"
+    assert log_path.exists()
+    assert '"event": "voice_chat"' in log_path.read_text(encoding="utf-8")
+
+
+def test_voice_chat_asr_empty_does_not_create_audio_job_or_reply():
+    app = create_app(testing=True)
+    app.state.asr_provider.text = ""
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/voice/chat",
+        files={"file": ("hello.webm", WEBM_BYTES, "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "asr_empty"
+    assert body["reply"] == ""
+    assert body["audio_job_id"] is None
+    assert body["voice_url"] is None
+    assert body["user_text"] == ""

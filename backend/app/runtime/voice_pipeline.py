@@ -20,6 +20,12 @@ def _now_ms(start: float) -> int:
     return max(0, int((perf_counter() - start) * 1000))
 
 
+def _asr_failure_code(transcript: ASRTranscript, fallback_reason: str) -> str:
+    if transcript.error_code:
+        return transcript.error_code
+    return fallback_reason or "asr_failed"
+
+
 class VoicePipeline:
     def __init__(
         self,
@@ -104,77 +110,48 @@ class VoicePipeline:
 
         text = transcript.text.strip()
         if transcript.error_code:
-            fallback_reason = "asr_timeout" if transcript.error_code == "asr_timeout" else "asr_provider_error"
+            if transcript.error_code == "asr_empty":
+                fallback_reason = "asr_empty"
+            elif transcript.error_code == "asr_timeout":
+                fallback_reason = "asr_timeout"
+            else:
+                fallback_reason = "asr_provider_error"
         elif not text:
             fallback_reason = fallback_reason or "asr_empty"
         elif transcript.confidence < self.asr_min_confidence:
             fallback_reason = "asr_low_confidence"
 
         if fallback_reason:
-            if thinking_mode and self.slow_fallback_enabled:
-                result = self._run_audio_fallback(
-                    audio_path,
-                    content_type,
+            timings["total"] = _now_ms(started)
+            error_code = _asr_failure_code(transcript, fallback_reason)
+            failure_response = PetResponse(
+                reply="",
+                mood="idle",
+                face_type="idle",
+                animation="breathing",
+                vibration="none",
+                pet_state={},
+                runtime={"error_class": error_code},
+                route=selected,
+            )
+            return VoicePipelineResult(
+                user_text="",
+                audio_understanding=FALLBACK_AUDIO_UNDERSTANDING,
+                response=failure_response,
+                route_info=VoiceRouteInfo(
                     requested=requested,
+                    selected=selected,
                     thinking_mode=thinking_mode,
+                    asr_provider=transcript.provider,
+                    asr_error_code=error_code,
+                    asr_error_message=transcript.error_message,
+                    brain_provider=brain_provider_name,
                     fallback_reason=fallback_reason,
-                )
-                merged = dict(result.route_info.timings_ms)
-                merged.setdefault("asr", timings["asr"])
-                result = VoicePipelineResult(
-                    user_text=result.user_text,
-                    audio_understanding=result.audio_understanding,
-                    response=result.response,
-                    route_info=VoiceRouteInfo(
-                        requested=result.route_info.requested,
-                        selected=result.route_info.selected,
-                        thinking_mode=result.route_info.thinking_mode,
-                        asr_provider=transcript.provider,
-                        asr_error_code=transcript.error_code,
-                        asr_error_message=transcript.error_message,
-                        brain_provider=result.route_info.brain_provider,
-                        fallback_reason=fallback_reason,
-                        emotion_source=result.route_info.emotion_source,
-                        wake_source=result.route_info.wake_source,
-                        provider_failure=result.route_info.provider_failure,
-                        timings_ms=merged,
-                    ),
-                    fallback_reason=fallback_reason,
-                )
-                return result
-            elif not thinking_mode:
-                # Fast reply: ASR failed, return local recovery instead of heavy fallback
-                timings["total"] = _now_ms(started)
-                fallback_response = PetResponse(
-                    reply="没听清，再说一次嘛~",
-                    mood="idle",
-                    face_type="idle",
-                    animation="breathing",
-                    vibration="none",
-                    pet_state={},
-                    runtime={"error_class": "asr_failed"},
-                    route="fast_reply",
-                )
-                return VoicePipelineResult(
-                    user_text="",
-                    audio_understanding=FALLBACK_AUDIO_UNDERSTANDING,
-                    response=fallback_response,
-                    route_info=VoiceRouteInfo(
-                        requested=requested,
-                        selected="fast_reply",
-                        thinking_mode=False,
-                        asr_provider=transcript.provider,
-                        asr_error_code=transcript.error_code,
-                        asr_error_message=transcript.error_message,
-                        brain_provider=self.fast_brain_provider_name,
-                        fallback_reason=fallback_reason,
-                        emotion_source="none",
-                        asr_failed_hint="没听清",
-                        timings_ms=timings,
-                    ),
-                    fallback_reason=fallback_reason,
-                )
-            understanding = FALLBACK_AUDIO_UNDERSTANDING
+                    emotion_source="none",
+                    timings_ms=timings,
+                ),
+                fallback_reason=fallback_reason,
+            )
         else:
             understanding = AudioUnderstanding(
                 user_text=text,

@@ -75,8 +75,7 @@ def test_thinking_mode_exposes_audio_understanding_provider_failure():
     assert body["reply"]
 
 
-def test_fast_voice_asr_failure_returns_local_recovery():
-    """V1.3: fast voice ASR failure returns asr_failed_hint, no slow fallback."""
+def test_fast_voice_asr_failure_returns_structured_failure():
     app = create_app(testing=True)
     app.state.asr_provider.text = ""
     client = TestClient(app)
@@ -85,14 +84,17 @@ def test_fast_voice_asr_failure_returns_local_recovery():
 
     assert response.status_code == 200
     body = response.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "asr_empty"
     assert body["voice_route"]["selected"] == "fast_reply"
     assert body["voice_route"]["fallback_reason"] == "asr_empty"
-    assert body["voice_route"]["asr_failed_hint"] == "没听清"
-    assert body["reply"]  # fallback reply is present
+    assert body["voice_route"]["asr_error_code"] == "asr_empty"
+    assert body["reply"] == ""
+    assert body["audio_job_id"] is None
+    assert body["voice_url"] is None
 
 
-def test_fast_voice_asr_error_returns_local_recovery():
-    """V1.3: fast voice ASR error returns local recovery instead of slow fallback."""
+def test_fast_voice_asr_error_returns_structured_failure():
     class FailingASR:
         name = "future_asr"
 
@@ -112,10 +114,13 @@ def test_fast_voice_asr_error_returns_local_recovery():
     response = post_voice(client)
 
     assert response.status_code == 200
-    route = response.json()["voice_route"]
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_class"] == "asr_http_401"
+    assert body["reply"] == ""
+    route = body["voice_route"]
     assert route["selected"] == "fast_reply"
     assert route["fallback_reason"] == "asr_provider_error"
-    assert route["asr_failed_hint"] == "没听清"
     assert route["asr_error_code"] == "asr_http_401"
 
 

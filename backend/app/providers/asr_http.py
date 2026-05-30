@@ -112,11 +112,11 @@ class HttpASRProvider:
         if not self.config.base_url:
             return self._error("asr_not_configured", "ASR base URL is not configured")
 
-        attempts = self._max_attempts()
         models = self._model_candidates()
         last_transcript = self._error("asr_provider_error", "ASR provider failed")
+        attempts = self._max_attempts(models)
         for attempt in range(attempts):
-            model = models[attempt % len(models)]
+            model = models[min(attempt, len(models) - 1)]
             last_transcript = self._transcribe_once(audio_path, content_type, model)
             if not self._should_retry(last_transcript.error_code, attempt, attempts):
                 return last_transcript
@@ -137,6 +137,8 @@ class HttpASRProvider:
                 text_paths=self.config.extra.get("transcript_paths") or [],
                 confidence_paths=self.config.extra.get("confidence_paths") or [],
             )
+            if not text.strip():
+                return self._error("asr_empty", "ASR provider returned empty transcript")
             return ASRTranscript(text=text, confidence=confidence, provider=self.name)
         except requests.Timeout:
             return self._error("asr_timeout", "ASR HTTP request timed out")
@@ -172,12 +174,12 @@ class HttpASRProvider:
                 deduped.append(model)
         return deduped or [self.config.model]
 
-    def _max_attempts(self) -> int:
+    def _max_attempts(self, models: List[str]) -> int:
         try:
             retries = int(self.config.extra.get("transient_retries", 0))
         except (TypeError, ValueError):
             retries = 0
-        return max(1, min(4, retries + 1))
+        return max(1, min(4, max(retries + 1, len(models))))
 
     def _retry_backoff_seconds(self, attempt: int) -> float:
         try:
@@ -189,7 +191,7 @@ class HttpASRProvider:
     def _should_retry(self, error_code: str, attempt: int, attempts: int) -> bool:
         if not error_code or attempt >= attempts - 1:
             return False
-        if error_code in {"asr_request_error", "asr_provider_error"}:
+        if error_code in {"asr_request_error", "asr_provider_error", "asr_empty"}:
             return True
         if error_code.startswith("asr_http_"):
             try:

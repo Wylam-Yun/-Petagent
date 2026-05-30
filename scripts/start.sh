@@ -8,6 +8,58 @@ PID_FILE="$PROJECT_DIR/backend/data/runtime.pid"
 LOG_FILE="$PROJECT_DIR/backend/data/logs/runtime.log"
 HEALTH_URL="http://127.0.0.1:$PORT/api/health"
 
+process_state() {
+  pid="$1"
+  [ -r "/proc/$pid/status" ] || return 0
+  while IFS= read -r key value rest; do
+    [ "$key" = "State:" ] && {
+      echo "$value"
+      return 0
+    }
+  done < "/proc/$pid/status"
+}
+
+android_identity_summary() {
+  identity="$(id 2>/dev/null || true)"
+  selinux="$(cat /proc/self/attr/current 2>/dev/null | tr -d '\000' || true)"
+  echo "${identity:-id=unknown} selinux=${selinux:-unknown}"
+}
+
+has_android_inet_group() {
+  identity="$(id 2>/dev/null || true)"
+  case "$identity" in
+    *"3003("*|*"3003,"*|*=",3003"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+require_android_runtime_context() {
+  [ -d /data/data/com.termux/files/usr ] || return 0
+  [ "${PETAGENT_SKIP_ANDROID_CONTEXT_CHECK:-0}" = "1" ] && return 0
+
+  uid="$(id -u 2>/dev/null || echo "")"
+  if [ "$uid" = "0" ]; then
+    if [ "${PETAGENT_ALLOW_ROOT_RUNTIME:-0}" = "1" ]; then
+      echo "WARNING: PetAgent runtime is starting as root; files may become root-owned."
+      return 0
+    fi
+    echo "ERROR: refusing to start PetAgent runtime as root."
+    echo "Start it from the Termux app session, or set PETAGENT_ALLOW_ROOT_RUNTIME=1 for an emergency one-off run."
+    echo "Current identity: $(android_identity_summary)"
+    exit 1
+  fi
+
+  if ! has_android_inet_group; then
+    echo "ERROR: PetAgent runtime is not in the real Termux app network context."
+    echo "Android socket permission requires the inet group (3003); adb/su u0_a137 does not grant it."
+    echo "Open Termux on the phone or use Termux:Boot so the app starts the service."
+    echo "Current identity: $(android_identity_summary)"
+    exit 1
+  fi
+}
+
 repair_android_context() {
   if [ "${PETAGENT_RESTORECON:-1}" = "0" ]; then
     return 0
@@ -30,7 +82,8 @@ remove_pid_file() {
 
 process_exists() {
   pid="$1"
-  [ -n "$pid" ] && [ -d "/proc/$pid" ]
+  [ -n "$pid" ] && [ -d "/proc/$pid" ] || return 1
+  [ "$(process_state "$pid")" != "Z" ]
 }
 
 is_project_runtime() {
@@ -77,6 +130,7 @@ cleanup_duplicate_runtimes() {
 }
 
 START_LOCK="$PROJECT_DIR/backend/data/start.lock"
+require_android_runtime_context
 if [ -d "$START_LOCK" ]; then
   lock_pid="$(cat "$START_LOCK/pid" 2>/dev/null || true)"
   if process_exists "$lock_pid"; then

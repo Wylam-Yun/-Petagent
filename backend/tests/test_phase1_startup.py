@@ -63,8 +63,14 @@ def test_termux_manager_uses_mobile_safe_health_timeouts():
     """Manager health curl budgets should match Phase 1 mobile-safe plan."""
     script = Path(__file__).resolve().parents[2] / "scripts" / "termux_service_manager.sh"
     text = script.read_text()
-    assert '--connect-timeout 1 --max-time 2 "http://127.0.0.1:$PETAGENT_PORT/api/health"' in text
-    assert text.count('--connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog"') >= 2
+    assert 'HEALTH_CONNECT_TIMEOUT="${HEALTH_CONNECT_TIMEOUT:-2}"' in text
+    assert 'HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-8}"' in text
+    assert 'HEALTH_CONFIRM_MAX_TIME="${HEALTH_CONFIRM_MAX_TIME:-15}"' in text
+    assert 'WATCHDOG_MAX_TIME="${WATCHDOG_MAX_TIME:-8}"' in text
+    assert 'petagent_health_confirm() {' in text
+    assert 'curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME"' in text
+    assert 'curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_CONFIRM_MAX_TIME"' in text
+    assert text.count('curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME"') >= 2
 
 
 def test_termux_start_services_can_clear_root_stale_lock():
@@ -85,7 +91,7 @@ def test_termux_manager_can_clear_root_stale_lock():
     text = script.read_text()
     assert 'CHECK_INTERVAL="${CHECK_INTERVAL:-30}"' in text
     assert 'PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-45}"' in text
-    assert 'HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-2}"' in text
+    assert 'HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-5}"' in text
     assert "HOST=0.0.0.0 PORT=\"$PETAGENT_PORT\" PETAGENT_FOREGROUND=0 sh scripts/start.sh" in text
     assert "PETAGENT_FOREGROUND=1 sh scripts/start.sh" not in text
     assert "remove_stale_lock() {" in text
@@ -93,8 +99,9 @@ def test_termux_manager_can_clear_root_stale_lock():
     assert "remove_stale_lock || true" in text
     assert "Stopping foreign service manager process" in text
     assert "Manager lock points to non-manager pid" in text
-    assert "HTTP half-alive state persisted; restarting" in text
-    assert "orphan HTTP half-alive state persisted" in text
+    assert "HTTP half-alive state persisted after confirm; restarting" in text
+    assert "orphan HTTP half-alive state persisted after confirm" in text
+    assert "HTTP health recovered during confirm" in text
     assert "http_fail_count=0" in text
 
 
@@ -104,6 +111,31 @@ def test_start_script_supports_foreground_runtime_mode():
     assert 'if [ "${PETAGENT_FOREGROUND:-0}" = "1" ]; then' in text
     assert "PetAgent runtime foreground on $HOST:$PORT" in text
     assert "exec env PYTHONPATH=\"$PROJECT_DIR/backend\" \"$PYTHON_BIN\" -m uvicorn app.main:app" in text
+    assert "require_android_runtime_context" in text
+    assert "PETAGENT_ALLOW_ROOT_RUNTIME" in text
+    assert "Android socket permission requires the inet group (3003)" in text
+    assert "PETAGENT_SKIP_ANDROID_CONTEXT_CHECK" in text
+
+
+def test_termux_scripts_refuse_adb_su_network_context():
+    repo = Path(__file__).resolve().parents[2]
+    manager_text = (repo / "scripts" / "termux_service_manager.sh").read_text()
+    start_services_text = (repo / "scripts" / "termux_start_services.sh").read_text()
+    status_text = (repo / "scripts" / "status.sh").read_text()
+
+    for text in (manager_text, start_services_text):
+        assert "has_android_inet_group" in text
+        assert "refuse_non_termux_network_context" in text
+        assert "process_has_android_inet_group" in text
+        assert "adb/su u0_a137 lacks Android inet group 3003" in text
+
+    assert "android-context-health-guard-20260530" in manager_text
+    assert "without Android inet group 3003" in manager_text
+    assert "without valid Termux network context" in start_services_text
+    assert "process_state()" in manager_text
+    assert "process_state()" in start_services_text
+    assert "context: not Termux app network context" in status_text
+    assert "cannot start the web server socket" in status_text
 
 
 def test_nubia_deploy_excludes_heavy_runtime_artifacts():

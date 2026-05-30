@@ -258,6 +258,46 @@ def test_http_asr_uses_fallback_model_for_transient_retry(tmp_path: Path, monkey
     assert transcript.error_code == ""
 
 
+def test_http_asr_uses_fallback_model_when_primary_returns_empty(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.extra["transient_retries"] = 0
+    config.extra["retry_backoff_seconds"] = 0
+    config.extra["fallback_models"] = ["FunAudioLLM/SenseVoiceSmall"]
+    models = []
+
+    class EmptyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": ""}
+
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "一二三四五六七八九"}
+
+    def fake_post(url, **kwargs):
+        models.append(kwargs["data"]["model"])
+        return EmptyResponse() if len(models) == 1 else SuccessResponse()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert models == ["parakeet-ctc-0.6b-zh-cn", "FunAudioLLM/SenseVoiceSmall"]
+    assert transcript.text == "一二三四五六七八九"
+    assert transcript.error_code == ""
+
+
 def test_http_asr_does_not_retry_client_errors(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")

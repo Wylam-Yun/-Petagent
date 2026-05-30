@@ -73,6 +73,52 @@ describe("VoiceButton", () => {
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
+  test("structured ASR failure shows error without applying voice response", async () => {
+    const onError = vi.fn();
+    const onPhaseChange = vi.fn();
+    const onVoiceResponse = vi.fn();
+    const uploadVoice = vi.fn().mockResolvedValue({
+      ...voiceResponse,
+      ok: false,
+      reply: "",
+      audio_job_id: null,
+      error_class: "asr_empty",
+      user_text: "",
+      voice_route: {
+        requested: "auto",
+        selected: "fast_reply",
+        thinking_mode: false,
+        asr_provider: "mock_asr",
+        asr_error_code: "asr_empty",
+        brain_provider: "mock_fast_llm",
+        fallback_reason: "asr_empty",
+        timings_ms: {}
+      }
+    });
+
+    render(
+      <VoiceButton
+        disabled={false}
+        phase="idle"
+        recorderFactory={recorderFactory()}
+        thinkingMode={false}
+        uploadVoice={uploadVoice}
+        onError={onError}
+        onPhaseChange={onPhaseChange}
+        onVoiceResponse={onVoiceResponse}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+    await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("listening"));
+    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("没识别到有效语音。"));
+    expect(onVoiceResponse).not.toHaveBeenCalled();
+    expect(onPhaseChange).toHaveBeenCalledWith("error");
+    expect(onPhaseChange).not.toHaveBeenCalledWith("waiting_voice");
+  });
+
   test("tap during upload locally cancels the pending response without posting again", async () => {
     let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
     const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {

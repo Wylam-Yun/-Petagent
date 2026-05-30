@@ -92,6 +92,7 @@ export type BehaviorStep = {
 };
 
 export type PetResponse = {
+  ok?: boolean;
   schema_version?: string;
   reply: string;
   mood: Mood;
@@ -149,6 +150,7 @@ export type AudioUnderstanding = {
 };
 
 export type VoiceChatResponse = PetResponse & {
+  ok?: boolean;
   user_text: string;
   audio_understanding: AudioUnderstanding;
   voice_route?: VoiceRouteInfo;

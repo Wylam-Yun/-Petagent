@@ -18,9 +18,68 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
+android_identity_summary() {
+    identity="$(id 2>/dev/null || true)"
+    selinux="$(cat /proc/self/attr/current 2>/dev/null | tr -d '\000' || true)"
+    echo "${identity:-id=unknown} selinux=${selinux:-unknown}"
+}
+
+has_android_inet_group() {
+    identity="$(id 2>/dev/null || true)"
+    case "$identity" in
+        *"3003("*|*"3003,"*|*=",3003"*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+refuse_non_termux_network_context() {
+    [ -d "$PREFIX_DIR" ] || return 0
+    if has_android_inet_group; then
+        return 0
+    fi
+
+    log "start_services: ERROR not running in real Termux app network context"
+    log "start_services: ERROR adb/su u0_a137 lacks Android inet group 3003; open Termux or use Termux:Boot"
+    log "start_services: ERROR current identity: $(android_identity_summary)"
+    return 1
+}
+
+process_state() {
+    pid="$1"
+    [ -r "/proc/$pid/status" ] || return 0
+    while IFS= read -r key value rest; do
+        [ "$key" = "State:" ] && {
+            echo "$value"
+            return 0
+        }
+    done < "/proc/$pid/status"
+}
+
+process_has_android_inet_group() {
+    pid="$1"
+    [ -r "/proc/$pid/status" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in
+            Groups:*)
+                groups="${line#Groups:}"
+                case " $groups " in
+                    *" 3003 "*)
+                        return 0
+                        ;;
+                esac
+                return 1
+                ;;
+        esac
+    done < "/proc/$pid/status"
+    return 1
+}
+
 process_exists() {
     pid="$1"
-    [ -n "$pid" ] && [ -d "/proc/$pid" ]
+    [ -n "$pid" ] && [ -d "/proc/$pid" ] || return 1
+    [ "$(process_state "$pid")" != "Z" ]
 }
 
 process_uid() {
@@ -203,12 +262,12 @@ manager_is_running() {
 
     current_uid="$(id -u 2>/dev/null || echo "")"
     pid_uid="$(process_uid "$pid")"
-    if [ -n "$current_uid" ] && [ "$pid_uid" = "$current_uid" ]; then
+    if [ -n "$current_uid" ] && [ "$pid_uid" = "$current_uid" ] && process_has_android_inet_group "$pid"; then
         return 0
     fi
 
     if is_manager_process "$pid"; then
-        log "start_services: stopping foreign service manager process $pid owned by uid ${pid_uid:-unknown}"
+        log "start_services: stopping foreign service manager process $pid owned by uid ${pid_uid:-unknown} without valid Termux network context"
         kill "$pid" 2>/dev/null || {
             command -v su >/dev/null 2>&1 && su -c "kill -9 '$pid' 2>/dev/null" >/dev/null 2>&1 || true
         }
@@ -259,6 +318,7 @@ start_manager_if_needed() {
 }
 
 repair_android_context
+refuse_non_termux_network_context || exit 1
 install_legacy_manager_shim
 stop_legacy_manager_processes
 stop_duplicate_repo_managers

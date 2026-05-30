@@ -65,6 +65,13 @@ class UnsupportedWavRecorderError extends Error {
   }
 }
 
+class UnsupportedMediaRecorderError extends Error {
+  constructor() {
+    super("media_recorder_unavailable");
+    this.name = "UnsupportedMediaRecorderError";
+  }
+}
+
 export function assertRecordingDuration(durationMs: number) {
   if (durationMs < MIN_RECORDING_MS) {
     throw new RecordingTooShortError();
@@ -75,13 +82,13 @@ export async function createVoiceRecordingSession(
   options: RecordingOptions = {}
 ): Promise<VoiceRecordingSession> {
   try {
-    return await createWavRecordingSession(options);
+    return await createMediaRecorderSession(options);
   } catch (error) {
     if (error instanceof MicrophonePermissionError) {
       throw error;
     }
   }
-  return createMediaRecorderSession(options);
+  return createWavRecordingSession(options);
 }
 
 async function createWavRecordingSession(
@@ -99,7 +106,7 @@ async function createWavRecordingSession(
 
   let stream: MediaStream;
   try {
-    stream = await getUserMedia(mediaDevices, { audio: true });
+    stream = await getUserMedia(mediaDevices, voiceMediaConstraints());
   } catch {
     throw new MicrophonePermissionError("permission_denied");
   }
@@ -183,12 +190,12 @@ async function createMediaRecorderSession(
     throw new MicrophonePermissionError(unavailableReason);
   }
   if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
-    throw new MicrophonePermissionError("missing_api");
+    throw new UnsupportedMediaRecorderError();
   }
 
   let stream: MediaStream;
   try {
-    stream = await getUserMedia(mediaDevices, { audio: true });
+    stream = await getUserMedia(mediaDevices, voiceMediaConstraints());
   } catch {
     throw new MicrophonePermissionError("permission_denied");
   }
@@ -251,8 +258,26 @@ async function createMediaRecorderSession(
 }
 
 function selectMimeType(MediaRecorderCtor: typeof MediaRecorder): string {
-  const candidates = ["audio/webm", "audio/mp4", "audio/wav"];
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/wav"
+  ];
   return candidates.find((candidate) => MediaRecorderCtor.isTypeSupported(candidate)) ?? "";
+}
+
+function voiceMediaConstraints(): MediaStreamConstraints {
+  return {
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1
+    }
+  };
 }
 
 function getAudioContextCtor(): typeof AudioContext | undefined {

@@ -21,8 +21,13 @@ PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
 PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
 FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"
 STUCK_MAX="${STUCK_MAX:-3}"
-HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-2}"
-MANAGER_VERSION="http-half-alive-recovery-20260529"
+HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-5}"
+HEALTH_CONNECT_TIMEOUT="${HEALTH_CONNECT_TIMEOUT:-2}"
+HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-8}"
+HEALTH_CONFIRM_MAX_TIME="${HEALTH_CONFIRM_MAX_TIME:-15}"
+WATCHDOG_CONNECT_TIMEOUT="${WATCHDOG_CONNECT_TIMEOUT:-2}"
+WATCHDOG_MAX_TIME="${WATCHDOG_MAX_TIME:-8}"
+MANAGER_VERSION="android-context-health-guard-20260530"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -43,9 +48,69 @@ refuse_root_manager() {
     fi
 }
 
+android_identity_summary() {
+    identity="$(id 2>/dev/null || true)"
+    selinux="$(cat /proc/self/attr/current 2>/dev/null | tr -d '\000' || true)"
+    echo "${identity:-id=unknown} selinux=${selinux:-unknown}"
+}
+
+has_android_inet_group() {
+    identity="$(id 2>/dev/null || true)"
+    case "$identity" in
+        *"3003("*|*"3003,"*|*=",3003"*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+refuse_non_termux_network_context() {
+    [ -d "$PREFIX_DIR" ] || return 0
+    if has_android_inet_group; then
+        return 0
+    fi
+
+    log "ERROR: refusing to run service manager outside the real Termux app network context"
+    log "ERROR: open the Termux app or use Termux:Boot; adb/su u0_a137 lacks Android inet group 3003"
+    log "ERROR: current identity: $(android_identity_summary)"
+    cleanup_lock
+    exit 1
+}
+
+process_state() {
+    pid="$1"
+    [ -r "/proc/$pid/status" ] || return 0
+    while IFS= read -r key value rest; do
+        [ "$key" = "State:" ] && {
+            echo "$value"
+            return 0
+        }
+    done < "/proc/$pid/status"
+}
+
+process_has_android_inet_group() {
+    pid="$1"
+    [ -r "/proc/$pid/status" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in
+            Groups:*)
+                groups="${line#Groups:}"
+                case " $groups " in
+                    *" 3003 "*)
+                        return 0
+                        ;;
+                esac
+                return 1
+                ;;
+        esac
+    done < "/proc/$pid/status"
+    return 1
+}
+
 process_exists() {
     pid="$1"
-    [ -n "$pid" ] && [ -d "/proc/$pid" ]
+    [ -n "$pid" ] && [ -d "/proc/$pid" ] || return 1
+    [ "$(process_state "$pid")" != "Z" ]
 }
 
 process_uid() {
@@ -119,7 +184,13 @@ take_lock() {
         current_uid="$(id -u 2>/dev/null || echo "")"
         old_uid="$(process_uid "$old_pid")"
         if [ "$old_uid" = "$current_uid" ] && is_manager_process "$old_pid"; then
-            exit 0
+            if process_has_android_inet_group "$old_pid"; then
+                exit 0
+            fi
+            log "Stopping service manager process $old_pid without Android inet group 3003"
+            kill "$old_pid" 2>/dev/null || {
+                command -v su >/dev/null 2>&1 && su -c "kill -9 '$old_pid' 2>/dev/null" >/dev/null 2>&1 || true
+            }
         fi
         if is_manager_process "$old_pid"; then
             log "Stopping foreign service manager process $old_pid owned by uid ${old_uid:-unknown}"
@@ -289,13 +360,22 @@ petagent_start_in_progress() {
 
 petagent_health() {
     command -v curl >/dev/null 2>&1 || return 1
-    curl -fsS --connect-timeout 1 --max-time 2 "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
+    curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
+}
+
+petagent_health_confirm() {
+    command -v curl >/dev/null 2>&1 || return 1
+    resp="$(curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_CONFIRM_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>&1)" || {
+        log "PetAgent health confirm failed: $resp"
+        return 1
+    }
+    printf '%s' "$resp" | grep -q '"ok":true'
 }
 
 petagent_watchdog() {
     # Returns 0 if not stuck, 1 if stuck, 2 if unreachable
     command -v curl >/dev/null 2>&1 || return 2
-    resp="$(curl -fsS --connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
+    resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
     printf '%s' "$resp" | grep -q '"stuck":true' && return 1
     return 0
 }
@@ -303,7 +383,7 @@ petagent_watchdog() {
 ensure_browser() {
     # Relaunch browser if frontend heartbeat is stale and runtime is healthy
     command -v curl >/dev/null 2>&1 || return 0
-    resp="$(curl -fsS --connect-timeout 1 --max-time 3 "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
+    resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
     heartbeat_age="$(printf '%s' "$resp" | sed -n 's/.*"frontend_heartbeat_age_s":\([0-9.]*\).*/\1/p')"
     [ -z "$heartbeat_age" ] && return 0
     # Compare: if heartbeat_age > FRONTEND_STARTUP_SECONDS, relaunch
@@ -345,7 +425,7 @@ start_petagent() {
         HOST=0.0.0.0 PORT="$PETAGENT_PORT" PETAGENT_FOREGROUND=0 sh scripts/start.sh
     ) >> "$PETAGENT_LOG" 2>&1
 
-    if petagent_health; then
+    if petagent_health || petagent_health_confirm; then
         log "PetAgent runtime is healthy on port $PETAGENT_PORT"
         return 0
     fi
@@ -380,6 +460,7 @@ ensure_petagent() {
 main() {
     take_lock
     refuse_root_manager
+    refuse_non_termux_network_context
     repair_android_context
     log "Service manager started with PID $$ ($MANAGER_VERSION)"
     acquire_wake_lock
@@ -468,9 +549,13 @@ main() {
                         log "PetAgent pid file is missing and port $PETAGENT_PORT is HTTP half-alive ($http_fail_count/$HTTP_FAIL_MAX)"
                         if [ "$http_fail_count" -ge "$HTTP_FAIL_MAX" ]; then
                             http_fail_count=0
-                            log "CRITICAL: PetAgent orphan HTTP half-alive state persisted; attempting runtime restart"
-                            cleanup_duplicate_runtimes ""
-                            start_petagent || log "CRITICAL: PetAgent restart failed while orphan HTTP was half-alive"
+                            if petagent_health_confirm; then
+                                log "PetAgent orphan HTTP health recovered during confirm; not restarting"
+                            else
+                                log "CRITICAL: PetAgent orphan HTTP half-alive state persisted after confirm; attempting runtime restart"
+                                cleanup_duplicate_runtimes ""
+                                start_petagent || log "CRITICAL: PetAgent restart failed while orphan HTTP was half-alive"
+                            fi
                         fi
                         petagent_fail_count=0
                     fi
@@ -509,11 +594,15 @@ main() {
                 if [ "$http_fail_count" -ge "$HTTP_FAIL_MAX" ]; then
                     http_fail_count=0
                     pid="$(petagent_pid)"
-                    log "CRITICAL: PetAgent HTTP half-alive state persisted; restarting pid ${pid:-unknown}"
-                    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-                    sleep 2
-                    [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
-                    start_petagent || log "CRITICAL: PetAgent restart failed while HTTP was half-alive"
+                    if petagent_health_confirm; then
+                        log "PetAgent HTTP health recovered during confirm; not restarting pid ${pid:-unknown}"
+                    else
+                        log "CRITICAL: PetAgent HTTP half-alive state persisted after confirm; restarting pid ${pid:-unknown}"
+                        [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+                        sleep 2
+                        [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
+                        start_petagent || log "CRITICAL: PetAgent restart failed while HTTP was half-alive"
+                    fi
                 fi
                 petagent_fail_count=0
                 ;;

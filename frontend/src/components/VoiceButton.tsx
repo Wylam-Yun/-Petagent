@@ -101,15 +101,12 @@ export function VoiceButton({
       const blob = await session.stop();
       const response = await uploadVoice(blob, { thinkingMode });
       if (uploadRunRef.current !== uploadRun) return;
-      onVoiceResponse(response);
-      const fallbackReason = response.voice_route?.fallback_reason;
-      if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
-        onError("豆豆没太听清，再说一次？");
-      } else if (fallbackReason === "asr_timeout") {
-        onError("语音识别有点慢，再说一次？");
-      } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
-        onError("语音识别暂时不太灵，但豆豆还在听。");
+      if (response.ok === false || response.error_class) {
+        onError(messageForVoiceFailure(response.error_class ?? response.voice_route?.fallback_reason));
+        changePhase("error");
+        return;
       }
+      onVoiceResponse(response);
       changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
       if (uploadRunRef.current !== uploadRun) return;
@@ -173,6 +170,19 @@ export function VoiceButton({
       )}
     </div>
   );
+}
+
+function messageForVoiceFailure(errorClass?: string | null): string {
+  if (errorClass === "asr_empty" || errorClass === "asr_low_confidence") {
+    return "没识别到有效语音。";
+  }
+  if (errorClass === "asr_timeout") {
+    return "语音识别超时。";
+  }
+  if (errorClass?.startsWith("asr_")) {
+    return "语音识别失败。";
+  }
+  return "语音这次失败了。";
 }
 
 function labelForPhase(phase: PetUIPhase): string {

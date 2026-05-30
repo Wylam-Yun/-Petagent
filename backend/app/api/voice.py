@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app.providers.errors import ProviderError
 from app.runtime.concurrency import ServerBusyError
+from app.runtime.voice_debug import write_voice_debug
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,12 @@ DEFAULT_AUDIO_TYPES = {
 DEFAULT_MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 
+def _base_content_type(content_type: str) -> str:
+    return str(content_type or "").split(";", 1)[0].strip().lower()
+
+
 def _extension_for_content_type(content_type: str) -> str:
+    content_type = _base_content_type(content_type)
     if content_type == "audio/wav":
         return "wav"
     if content_type == "audio/mpeg":
@@ -56,6 +62,12 @@ def _invalid_audio(message: str) -> HTTPException:
         status_code=400,
         detail={"error": message, "error_class": "invalid_audio"},
     )
+
+
+def _is_voice_failure(body: Dict[str, Any]) -> bool:
+    runtime = body.get("runtime") if isinstance(body.get("runtime"), dict) else {}
+    error_class = body.get("error_class") or runtime.get("error_class")
+    return bool(error_class)
 
 
 def _validate_magic_bytes(path: Path, content_type: str) -> None:
@@ -94,7 +106,7 @@ def _validate_magic_bytes(path: Path, content_type: str) -> None:
 
 
 async def _save_upload(settings, upload_dir: Path, file: UploadFile) -> Path:
-    content_type = file.content_type or ""
+    content_type = _base_content_type(file.content_type or "")
     if content_type not in allowed_audio_types(settings):
         raise HTTPException(
             status_code=400,
@@ -142,6 +154,7 @@ async def post_voice_chat(
             detail={"error": "Server is shutting down", "reason": "shutting_down"},
         )
     settings = request.app.state.settings
+    content_type = _base_content_type(file.content_type or "")
     started = datetime.utcnow()
     path = await _save_upload(settings, settings.upload_dir, file)
     upload_save_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
@@ -151,7 +164,7 @@ async def post_voice_chat(
         fn = partial(
             request.app.state.voice_pipeline.handle,
             path,
-            file.content_type or "",
+            content_type,
             requested_route=route,
             thinking_mode=_as_bool(thinking_mode),
         )
@@ -164,6 +177,7 @@ async def post_voice_chat(
     except ProviderError as exc:
         logger.warning("voice_chat provider error: %s", exc.to_dict())
         body: Dict[str, Any] = {
+            "ok": False,
             "reply": "豆豆有点累了，稍后再试试吧~",
             "mood": "tired",
             "face_type": "tired",
@@ -175,13 +189,31 @@ async def post_voice_chat(
         }
         return body
     body = result.response.dict()
+    runtime = body.get("runtime") if isinstance(body.get("runtime"), dict) else {}
+    error_class = runtime.get("error_class") or None
+    failed = _is_voice_failure({"error_class": error_class, "runtime": runtime})
+    body["ok"] = not failed
     body["user_text"] = result.user_text
-    body["error_class"] = None
+    body["error_class"] = error_class
+    if failed:
+        body["pet_state"] = request.app.state.state_store.get_state()
     body["audio_understanding"] = result.audio_understanding.dict()
     route_info = result.route_info.dict()
     route_info["timings_ms"] = dict(route_info.get("timings_ms", {}))
     route_info["timings_ms"].setdefault("upload_save", upload_save_ms)
     body["voice_route"] = route_info
+    try:
+        write_voice_debug(
+            settings.data_dir / "logs" / "voice_debug.jsonl",
+            audio_path=path,
+            content_type=content_type,
+            route_info=route_info,
+            user_text=result.user_text,
+            error_class=error_class,
+            ok=not failed,
+        )
+    except Exception:
+        logger.debug("voice debug logging failed", exc_info=True)
     if result.activation is not None:
         body["activation"] = result.activation
     return body

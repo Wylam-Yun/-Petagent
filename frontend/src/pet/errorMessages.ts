@@ -4,6 +4,26 @@
  */
 
 const ERROR_BUBBLE_MAP: Record<string, { text: string; mood: "tired" | "concerned" }> = {
+  asr_empty: {
+    text: "没识别到有效语音。",
+    mood: "concerned",
+  },
+  asr_low_confidence: {
+    text: "语音识别不够确定。",
+    mood: "concerned",
+  },
+  asr_timeout: {
+    text: "语音识别超时。",
+    mood: "tired",
+  },
+  asr_provider_error: {
+    text: "语音识别服务失败。",
+    mood: "concerned",
+  },
+  asr_provider_exception: {
+    text: "语音识别服务异常。",
+    mood: "concerned",
+  },
   provider_auth_failed: {
     text: "豆豆连不上脑子了，主人检查一下配置？",
     mood: "concerned",

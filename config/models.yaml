@@ -50,7 +50,6 @@ providers:
     model_field: model
     fallback_models:
       - FunAudioLLM/SenseVoiceSmall
-      - iic/SenseVoiceSmall
     language_field: language
     language_code: zh-CN
     auth_scheme: bearer

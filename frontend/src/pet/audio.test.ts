@@ -16,6 +16,11 @@ class FakeMediaRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   state = "inactive";
+  mimeType = "audio/webm;codecs=opus";
+
+  constructor(_stream?: MediaStream, options?: MediaRecorderOptions) {
+    this.mimeType = options?.mimeType || "audio/webm";
+  }
 
   start() {
     this.state = "recording";
@@ -23,7 +28,7 @@ class FakeMediaRecorder {
 
   stop() {
     this.state = "inactive";
-    this.ondataavailable?.({ data: new Blob(["voice"], { type: "audio/webm" }) });
+    this.ondataavailable?.({ data: new Blob(["voice"], { type: this.mimeType }) });
     this.onstop?.();
   }
 }
@@ -57,7 +62,37 @@ describe("audio recording helpers", () => {
     vi.useRealTimers();
   });
 
-  test("prefers wav recording when Web Audio is available", async () => {
+  test("prefers MediaRecorder with raw browser audio when available", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
+    });
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    const blob = await session.stop();
+
+    expect(blob.type).toBe("audio/webm;codecs=opus");
+    expect(mediaDevices.getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1
+      }
+    });
+    now.mockRestore();
+  });
+
+  test("falls back to wav recording when MediaRecorder is unavailable", async () => {
     vi.useRealTimers();
     const now = vi.spyOn(Date, "now").mockReturnValue(0);
     const stream = {
@@ -92,7 +127,7 @@ describe("audio recording helpers", () => {
     const session = await createVoiceRecordingSession({
       mediaDevices,
       audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
-      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
+      mediaRecorderCtor: undefined
     });
     processor!.onaudioprocess?.({
       inputBuffer: {
@@ -146,7 +181,8 @@ describe("audio recording helpers", () => {
 
     const session = await createVoiceRecordingSession({
       mediaDevices,
-      audioContextCtor: FakeZeroRateAudioContext as unknown as typeof AudioContext
+      audioContextCtor: FakeZeroRateAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: undefined
     });
     processor!.onaudioprocess?.({
       inputBuffer: {
@@ -197,7 +233,8 @@ describe("audio recording helpers", () => {
 
     const session = await createVoiceRecordingSession({
       mediaDevices,
-      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext
+      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: undefined
     });
     processor!.onaudioprocess?.({
       inputBuffer: {
@@ -263,7 +300,8 @@ describe("audio recording helpers", () => {
     }
 
     const session = await createVoiceRecordingSession({
-      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext
+      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: undefined
     });
     processor!.onaudioprocess?.({
       inputBuffer: {
@@ -274,7 +312,14 @@ describe("audio recording helpers", () => {
     now.mockReturnValue(MIN_RECORDING_MS + 1);
     await expect(session.stop()).resolves.toBeInstanceOf(Blob);
     expect(legacyGetUserMedia).toHaveBeenCalledWith(
-      { audio: true },
+      {
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1
+        }
+      },
       expect.any(Function),
       expect.any(Function)
     );
