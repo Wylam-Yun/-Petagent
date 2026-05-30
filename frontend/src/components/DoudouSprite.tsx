@@ -108,20 +108,6 @@ export function DoudouSprite({
     );
   }
 
-  if (assetState === "loading") {
-    return (
-      <div
-        className="doudou-sprite doudou-sprite--loading"
-        style={{
-          width: manifest.cellWidth,
-          height: manifest.cellHeight,
-        }}
-        aria-label="豆豆"
-        data-action={action}
-      />
-    );
-  }
-
   return (
     <div
       className="doudou-sprite"
