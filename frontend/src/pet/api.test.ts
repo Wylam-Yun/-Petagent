@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   VOICE_UPLOAD_TIMEOUT_MS,
   getAudioJob,
-  getPetState,
+  getProactiveCheck,
   postAudioRetry,
   reportDeviceState,
   sendHeartbeat,
@@ -34,23 +34,6 @@ describe("uploadVoice", () => {
     const body = init.body as FormData;
     expect(init.method).toBe("POST");
     expect(body.get("thinking_mode")).toBe("true");
-  });
-
-  test("passes caller abort signal through voice upload when supported", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true })
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const controller = new AbortController();
-
-    await uploadVoice(new Blob(["voice"], { type: "audio/wav" }), {
-      thinkingMode: false,
-      signal: controller.signal
-    });
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   test("uses a longer timeout for voice uploads than normal requests", async () => {
@@ -141,6 +124,20 @@ describe("stage 3 API helpers", () => {
     });
   });
 
+  test("fetches proactive check endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: false })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await getProactiveCheck();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/pet/proactive");
+    expect(response).toEqual({ active: false });
+  });
+
   test("sends frontend heartbeat as JSON body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -190,12 +187,12 @@ describe("requestJson retry", () => {
   test("does not require AbortController in old Android browsers", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ name: "豆豆", mood: "idle" })
+      json: async () => ({ active: false })
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("AbortController", undefined);
 
-    await expect(getPetState()).resolves.toEqual({ name: "豆豆", mood: "idle" });
+    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init).not.toHaveProperty("signal");
@@ -249,7 +246,7 @@ describe("requestJson retry", () => {
       send(body: XMLHttpRequestBodyInit | null) {
         this.body = body;
         this.status = 200;
-        this.responseText = JSON.stringify({ name: "豆豆", mood: "idle" });
+        this.responseText = JSON.stringify({ active: false });
         this.readyState = FakeXMLHttpRequest.DONE;
         this.onreadystatechange?.();
       }
@@ -258,7 +255,7 @@ describe("requestJson retry", () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
 
-    await expect(getPetState()).resolves.toEqual({ name: "豆豆", mood: "idle" });
+    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
 
     vi.stubGlobal("fetch", originalFetch);
     vi.stubGlobal("XMLHttpRequest", originalXhr);
@@ -269,21 +266,21 @@ describe("requestJson retry", () => {
       .mockRejectedValueOnce(new Error("network error"))
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ name: "豆豆", mood: "idle" })
+        json: async () => ({ active: false })
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await getPetState();
+    const response = await getProactiveCheck();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(response).toEqual({ name: "豆豆", mood: "idle" });
+    expect(response).toEqual({ active: false });
   });
 
   test("throws after max retries exhausted", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("persistent failure"));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPetState()).rejects.toThrow("persistent failure");
+    await expect(getProactiveCheck()).rejects.toThrow("persistent failure");
     // 1 initial + 2 retries = 3 total
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

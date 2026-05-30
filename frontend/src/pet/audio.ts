@@ -1,7 +1,6 @@
 export const MIN_RECORDING_MS = 300;
 export const MAX_RECORDING_MS = 15_000;
 const ASR_WAV_SAMPLE_RATE = 16_000;
-const MIN_AUDIBLE_SAMPLE_PEAK = 0.00001;
 
 export class RecordingTooShortError extends Error {
   constructor() {
@@ -112,13 +111,6 @@ async function createWavRecordingSession(
     stopStream(stream);
     throw new UnsupportedWavRecorderError();
   }
-  try {
-    await audioContext.resume?.();
-  } catch {
-    stopStream(stream);
-    void audioContext.close?.();
-    throw new UnsupportedWavRecorderError();
-  }
 
   const chunks: Float32Array[] = [];
   const source = audioContext.createMediaStreamSource(stream);
@@ -148,7 +140,6 @@ async function createWavRecordingSession(
     void audioContext.close?.();
     try {
       assertRecordingDuration(Date.now() - startedAt);
-      assertHasAudioSamples(chunks);
       resolveFinished(encodeWavBlob(chunks, normalizedSampleRate(audioContext.sampleRate)));
     } catch (error) {
       rejectFinished(error as Error);
@@ -362,18 +353,6 @@ function flattenChunks(chunks: Float32Array[]): Float32Array {
     offset += chunk.length;
   });
   return samples;
-}
-
-function assertHasAudioSamples(chunks: Float32Array[]) {
-  if (chunks.length === 0 || chunks.every((chunk) => chunk.length === 0)) {
-    throw new RecordingTooShortError();
-  }
-  const hasAudibleSample = chunks.some((chunk) =>
-    chunk.some((sample) => Math.abs(sample) >= MIN_AUDIBLE_SAMPLE_PEAK)
-  );
-  if (!hasAudibleSample) {
-    throw new RecordingTooShortError();
-  }
 }
 
 function resamplePcm(

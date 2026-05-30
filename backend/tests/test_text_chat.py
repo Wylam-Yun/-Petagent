@@ -56,18 +56,18 @@ def test_text_chat_rejects_too_long_text():
     assert response.json()["detail"] == "Text message is too long"
 
 
-def test_text_chat_treats_wake_and_exit_phrases_as_normal_chat_text():
+def test_text_chat_handles_wake_and_exit_phrases():
     client = TestClient(create_app(testing=True))
 
     wake = client.post("/api/text/chat", json={"text": "嗨 momo"})
-    exit_response = client.post("/api/text/chat", json={"text": "先这样写代码"})
+    exit_response = client.post("/api/text/chat", json={"text": "momo休息吧"})
 
     assert wake.status_code == 200
-    assert wake.json()["user_text"] == "嗨 momo"
-    assert "activation" not in wake.json()
+    assert wake.json()["activation"]["type"] == "wake"
+    assert wake.json()["activation"]["active"] is True
     assert exit_response.status_code == 200
-    assert exit_response.json()["user_text"] == "先这样写代码"
-    assert "activation" not in exit_response.json()
+    assert exit_response.json()["activation"]["type"] == "exit"
+    assert exit_response.json()["activation"]["active"] is False
 
 
 def test_text_message_can_trigger_skill_planner():
@@ -86,7 +86,7 @@ def test_text_message_can_trigger_skill_planner():
     response = client.post("/api/text/chat", json={"text": "今天适合出门吗"})
 
     assert response.status_code == 200
-    # User text keywords no longer alter route policy in fast mode.
+    # V1.3: tool keywords route to fast_reply with no tools
     assert response.json()["runtime"]["skills_used"] == []
 
 

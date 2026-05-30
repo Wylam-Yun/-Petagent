@@ -52,7 +52,7 @@ providers:
       - FunAudioLLM/SenseVoiceSmall
       - iic/SenseVoiceSmall
     language_field: language
-    language_code: zh
+    language_code: zh-CN
     auth_scheme: bearer
     proxy_url_env:
       - SILICONFLOW_PROXY_URL

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from time import sleep
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -10,9 +9,6 @@ import requests
 from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
-logger = logging.getLogger(__name__)
-
-MISSING_CONFIDENCE = 0.5
 
 def _timeout_tuple(scalar: int, connect: int = 2) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
@@ -28,22 +24,19 @@ def parse_transcript_json(
 ) -> Tuple[str, float]:
     configured_text = _first_text(body, text_paths or [])
     if configured_text:
-        raw_confidence = _first_value(body, confidence_paths or [])
-        if raw_confidence is None:
-            raw_confidence = body.get("confidence", MISSING_CONFIDENCE)
         return configured_text, _confidence(
-            raw_confidence
+            _first_value(body, confidence_paths or []) or body.get("confidence", 1.0)
         )
 
     for key in ("text", "transcript", "transcription"):
         text = str(body.get(key) or "").strip()
         if text:
-            return text, _confidence(body.get("confidence", MISSING_CONFIDENCE))
+            return text, _confidence(body.get("confidence", 1.0))
 
     for segment in body.get("segments", []) or []:
         text = str(segment.get("text") or "").strip()
         if text:
-            return text, _confidence(segment.get("confidence", body.get("confidence", MISSING_CONFIDENCE)))
+            return text, _confidence(segment.get("confidence", body.get("confidence", 1.0)))
 
     for result in body.get("results", []) or []:
         for alternative in result.get("alternatives", []) or []:
@@ -54,7 +47,7 @@ def parse_transcript_json(
                 or ""
             ).strip()
             if text:
-                return text, _confidence(alternative.get("confidence", body.get("confidence", MISSING_CONFIDENCE)))
+                return text, _confidence(alternative.get("confidence", body.get("confidence", 1.0)))
 
     return "", 0.0
 
@@ -119,22 +112,14 @@ class HttpASRProvider:
         if not self.config.base_url:
             return self._error("asr_not_configured", "ASR base URL is not configured")
 
+        attempts = self._max_attempts()
         models = self._model_candidates()
-        attempts = self._max_attempts(models)
         last_transcript = self._error("asr_provider_error", "ASR provider failed")
         for attempt in range(attempts):
-            model_index = attempt % len(models)
-            model = models[model_index]
+            model = models[attempt % len(models)]
             last_transcript = self._transcribe_once(audio_path, content_type, model)
-            if not self._should_retry(last_transcript, attempt, attempts, model_index, len(models)):
+            if not self._should_retry(last_transcript.error_code, attempt, attempts):
                 return last_transcript
-            logger.info(
-                "http_asr_retry provider=%s model=%s reason=%s next_attempt=%d",
-                self.name,
-                model,
-                last_transcript.error_code or "empty_transcript",
-                attempt + 2,
-            )
             sleep(self._retry_backoff_seconds(attempt))
         return last_transcript
 
@@ -152,7 +137,7 @@ class HttpASRProvider:
                 text_paths=self.config.extra.get("transcript_paths") or [],
                 confidence_paths=self.config.extra.get("confidence_paths") or [],
             )
-            return ASRTranscript(text=text.strip(), confidence=confidence, provider=self.name)
+            return ASRTranscript(text=text, confidence=confidence, provider=self.name)
         except requests.Timeout:
             return self._error("asr_timeout", "ASR HTTP request timed out")
         except requests.HTTPError as exc:
@@ -187,12 +172,12 @@ class HttpASRProvider:
                 deduped.append(model)
         return deduped or [self.config.model]
 
-    def _max_attempts(self, models: List[str]) -> int:
+    def _max_attempts(self) -> int:
         try:
             retries = int(self.config.extra.get("transient_retries", 0))
         except (TypeError, ValueError):
             retries = 0
-        return max(1, min(4, max(retries + 1, len(models))))
+        return max(1, min(4, retries + 1))
 
     def _retry_backoff_seconds(self, attempt: int) -> float:
         try:
@@ -201,21 +186,10 @@ class HttpASRProvider:
             base = 0.25
         return max(0.0, min(2.0, base * (attempt + 1)))
 
-    def _should_retry(
-        self,
-        transcript: ASRTranscript,
-        attempt: int,
-        attempts: int,
-        model_index: int,
-        model_count: int,
-    ) -> bool:
-        error_code = transcript.error_code
-        if not transcript.text.strip() and not error_code:
-            retry_empty = self.config.extra.get("retry_empty_transcript", True)
-            return bool(retry_empty) and model_index < model_count - 1
+    def _should_retry(self, error_code: str, attempt: int, attempts: int) -> bool:
         if not error_code or attempt >= attempts - 1:
             return False
-        if error_code in {"asr_timeout", "asr_request_error", "asr_provider_error"}:
+        if error_code in {"asr_request_error", "asr_provider_error"}:
             return True
         if error_code.startswith("asr_http_"):
             try:

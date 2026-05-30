@@ -34,29 +34,6 @@ const voiceResponse: VoiceChatResponse = {
   runtime: { event_id: "evt-voice", skills_used: [] }
 };
 
-const asrEmptyResponse: VoiceChatResponse = {
-  ...voiceResponse,
-  reply: "刚刚那句声音有点糊，主人再说一遍？",
-  user_text: "",
-  voice_url: null,
-  audio_job_id: null,
-  voice_route: {
-    requested: "auto",
-    selected: "fast_reply",
-    thinking_mode: false,
-    asr_provider: "mock_asr",
-    asr_error_code: "",
-    asr_error_message: "",
-    brain_provider: "mock_fast_llm",
-    fallback_reason: "asr_empty",
-    emotion_source: "none",
-    wake_source: "",
-    asr_failed_hint: "没听清",
-    provider_failure: null,
-    timings_ms: {}
-  }
-};
-
 function recorderFactory(blob = new Blob(["voice"], { type: "audio/webm" })) {
   return vi.fn().mockResolvedValue({
     stop: vi.fn().mockResolvedValue(blob),
@@ -92,14 +69,11 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
-    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), {
-      thinkingMode: false,
-      signal: expect.any(AbortSignal)
-    });
+    expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob), { thinkingMode: false });
     expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
   });
 
-  test("tap during upload aborts and ignores the pending response without posting again", async () => {
+  test("tap during upload locally cancels the pending response without posting again", async () => {
     let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
     const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {
       resolveUpload = resolve;
@@ -126,8 +100,6 @@ describe("VoiceButton", () => {
     await waitFor(() => expect(uploadVoice).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "取消发送" }));
-    const [, options] = uploadVoice.mock.calls[0];
-    expect(options.signal.aborted).toBe(true);
     resolveUpload(voiceResponse);
 
     await act(async () => {
@@ -137,47 +109,6 @@ describe("VoiceButton", () => {
     expect(createRecorder).toHaveBeenCalledTimes(1);
     expect(uploadVoice).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "点一下说话" })).toBeInTheDocument();
-  });
-
-  test("cannot start another recording while canceled upload is still in flight", async () => {
-    let resolveUpload: (value: VoiceChatResponse) => void = () => undefined;
-    const uploadPromise = new Promise<VoiceChatResponse>((resolve) => {
-      resolveUpload = resolve;
-    });
-    const uploadVoice = vi.fn().mockReturnValue(uploadPromise);
-    const createRecorder = recorderFactory();
-
-    render(
-      <VoiceButton
-        disabled={false}
-        phase="idle"
-        recorderFactory={createRecorder}
-        thinkingMode={false}
-        uploadVoice={uploadVoice}
-        onError={vi.fn()}
-        onPhaseChange={vi.fn()}
-        onVoiceResponse={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
-    await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
-    await waitFor(() => expect(uploadVoice).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(screen.getByRole("button", { name: "取消发送" }));
-    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
-
-    expect(createRecorder).toHaveBeenCalledTimes(1);
-    expect(uploadVoice).toHaveBeenCalledTimes(1);
-
-    resolveUpload(voiceResponse);
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
-    await waitFor(() => expect(createRecorder).toHaveBeenCalledTimes(2));
   });
 
   test("cancel button discards active recording", async () => {
@@ -259,30 +190,5 @@ describe("VoiceButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith("豆豆还在路上卡住了，再点一下试试。"));
-  });
-
-  test("does not override backend ASR recovery reply with a duplicate local error", async () => {
-    const onError = vi.fn();
-    const onVoiceResponse = vi.fn();
-
-    render(
-      <VoiceButton
-        disabled={false}
-        phase="idle"
-        recorderFactory={recorderFactory()}
-        thinkingMode={false}
-        uploadVoice={vi.fn().mockResolvedValue(asrEmptyResponse)}
-        onError={onError}
-        onPhaseChange={vi.fn()}
-        onVoiceResponse={onVoiceResponse}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
-    await waitFor(() => screen.getByRole("button", { name: "点一下发送" }));
-    fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
-
-    await waitFor(() => expect(onVoiceResponse).toHaveBeenCalledWith(asrEmptyResponse));
-    expect(onError).not.toHaveBeenCalledWith("豆豆没太听清，再说一次？");
   });
 });

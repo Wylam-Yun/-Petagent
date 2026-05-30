@@ -129,6 +129,10 @@ export type DeviceStatePayload = {
   is_charging: boolean | null;
 };
 
+export type ProactiveResponse =
+  | ({ active: true } & PetResponse)
+  | { active: false };
+
 export type AudioUnderstanding = {
   user_text: string;
   detected_emotion:
@@ -186,4 +190,9 @@ export type VoiceRouteInfo = {
   asr_failed_hint?: string;
   provider_failure?: Record<string, unknown> | null;
   timings_ms: Record<string, number>;
+};
+
+export type ActivationResponse = PetResponse & {
+  active: boolean;
+  session_id: string | null;
 };

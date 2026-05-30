@@ -3,20 +3,6 @@ import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 
 import App from "./App";
 
-const OriginalImage = globalThis.Image;
-
-function mockImageLoad() {
-  // @ts-expect-error replacing global Image constructor
-  globalThis.Image = class extends OriginalImage {
-    constructor() {
-      super();
-      setTimeout(() => {
-        this.dispatchEvent(new Event("load"));
-      }, 0);
-    }
-  };
-}
-
 class MockAudio {
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -59,24 +45,22 @@ const interactionCatalogResponse = [
 
 beforeEach(() => {
   vi.useFakeTimers();
-  mockImageLoad();
 });
 
 afterEach(() => {
-  globalThis.Image = OriginalImage;
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 async function flush() {
-  // Advance enough for Image onload, fetch responses, and initial renders.
+  // Advance enough for fetch responses and initial renders.
   // Do NOT use runAllTimersAsync — the ambient setInterval would loop forever.
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
   });
 }
 
-test("App renders 豆豆 and shows sprite", async () => {
+test("App renders 豆豆 and shows kaomoji face", async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
     .mockResolvedValueOnce({
@@ -102,16 +86,10 @@ test("App renders 豆豆 and shows sprite", async () => {
   await flush();
 
   expect(screen.getByText("豆豆")).toBeInTheDocument();
-  // DoudouSprite should render (with aria-label "豆豆")
-  const sprites = screen.getAllByLabelText("豆豆");
-  expect(sprites.length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(・ω・)");
 });
 
-test("tap on sprite shows local reaction before backend responds", async () => {
-  let resolveEvent: (value: unknown) => void = () => undefined;
-  const eventPromise = new Promise((resolve) => {
-    resolveEvent = resolve;
-  });
+test("local more interaction updates kaomoji without backend post", async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
     .mockResolvedValueOnce({
@@ -130,37 +108,18 @@ test("tap on sprite shows local reaction before backend responds", async () => {
       })
     })
     .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
-    .mockReturnValueOnce(eventPromise) // tap backend sync (pet_head)
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        job_id: "aud-event",
-        status: "ready",
-        voice_url: "/static/audio/test.wav",
-        error: null,
-        created_at: "now",
-        updated_at: "now"
-      })
-    });
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
   await flush();
 
-  // Find the sprite (role="img" with aria-label "豆豆")
-  const sprite = screen.getAllByLabelText("豆豆").find(
-    (el) => el.getAttribute("role") === "img"
-  );
-  expect(sprite).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "更多互动" }));
+  fireEvent.click(screen.getByRole("button", { name: "摸摸头" }));
 
-  // Tap the sprite
-  fireEvent.click(sprite!);
-
-  // Bubble should show a local tap reaction immediately (no waiting for backend)
-  const bubbleTexts = ["摸到了。", "嗯~", "喵~", "在的在的。"];
-  const bubble = document.querySelector(".pet-bubble")!;
-  expect(bubbleTexts.some((t) => bubble.textContent?.includes(t))).toBe(true);
+  expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-wiggle");
+  expect(screen.getByText("摸摸头…")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(4);
 });
 
 describe("text chat", () => {
@@ -240,7 +199,7 @@ describe("text chat", () => {
     });
   });
 
-  test("fast action remains visible before waiting voice fallback", async () => {
+  test("fast reply still starts audio polling while kaomoji remains responsive", async () => {
     const petStateResponse = {
       schema_version: "0.1",
       name: "豆豆",
@@ -303,17 +262,15 @@ describe("text chat", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    const sprite = screen.getAllByLabelText("豆豆").find(
-      (el) => el.getAttribute("role") === "img"
-    ) as HTMLElement;
-    expect(sprite.dataset.action).toBe("happy");
+    expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-bounce");
+    expect(screen.getByText("豆豆准备开口…")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/audio/jobs/aud-fast-action")).toBe(true);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(600);
     });
 
-    expect(sprite.dataset.action).toBe("think");
+    expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-bounce");
   });
 });
 

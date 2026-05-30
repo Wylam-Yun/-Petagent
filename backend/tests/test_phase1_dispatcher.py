@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from unittest.mock import MagicMock
 
 from app.pet.state import PetStateStore
@@ -128,44 +127,6 @@ def test_provider_gate_failed_acquire_does_not_reset_active_age():
     gate.release("llm_fast")
 
 
-def test_provider_gate_blocking_acquire_waits_for_release():
-    """Blocking acquire should wait for a slot instead of raising immediately."""
-    gate = ProviderGate({"asr": 1})
-    gate.acquire("asr")
-    acquired = threading.Event()
-
-    def wait_for_slot():
-        gate.acquire("asr", blocking=True, timeout_s=1)
-        acquired.set()
-        gate.release("asr")
-
-    worker = threading.Thread(target=wait_for_slot)
-    worker.start()
-    time.sleep(0.05)
-    assert not acquired.is_set()
-
-    gate.release("asr")
-    worker.join(timeout=1)
-
-    assert acquired.is_set()
-    assert gate.get_usage()["asr"]["current"] == 0
-
-
-def test_provider_gate_blocking_acquire_times_out_without_incrementing_usage():
-    """Timed out blocking acquire should leave counters untouched."""
-    gate = ProviderGate({"asr": 1})
-    gate.acquire("asr")
-
-    try:
-        gate.acquire("asr", blocking=True, timeout_s=0.01)
-        assert False, "Should have raised"
-    except ProviderBusyError:
-        pass
-
-    assert gate.get_usage()["asr"]["current"] == 1
-    gate.release("asr")
-
-
 def test_provider_gate_default_limits():
     """ProviderGate should have sensible defaults."""
     gate = ProviderGate()
@@ -206,7 +167,7 @@ def test_dispatcher_uses_provider_gate_for_llm():
     assert resp.status_code == 200
 
     # fast_llm profile maps to llm_fast gate type
-    mock_gate.acquire.assert_called_once_with("llm_fast", blocking=True, timeout_s=25)
+    mock_gate.acquire.assert_called_once_with("llm_fast")
     mock_gate.release.assert_called_once_with("llm_fast")
 
 
@@ -229,5 +190,5 @@ def test_dispatcher_provider_gate_slow_profile():
     })
     assert resp.status_code == 200
 
-    mock_gate.acquire.assert_called_once_with("llm_slow", blocking=True, timeout_s=25)
+    mock_gate.acquire.assert_called_once_with("llm_slow")
     mock_gate.release.assert_called_once_with("llm_slow")

@@ -67,7 +67,6 @@ describe("audio recording helpers", () => {
       getUserMedia: vi.fn().mockResolvedValue(stream)
     };
 
-    const resumeMock = vi.fn().mockResolvedValue(undefined);
     let processor: {
       onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
       connect: () => void;
@@ -76,7 +75,6 @@ describe("audio recording helpers", () => {
     class FakeAudioContext {
       sampleRate = 16_000;
       destination = {};
-      resume = resumeMock;
       createMediaStreamSource() {
         return { connect: vi.fn(), disconnect: vi.fn() };
       }
@@ -111,7 +109,6 @@ describe("audio recording helpers", () => {
 
     expect(blob.type).toBe("audio/wav");
     expect(header).toBe("RIFFWAVE");
-    expect(resumeMock).toHaveBeenCalledTimes(1);
     now.mockRestore();
   });
 
@@ -133,7 +130,6 @@ describe("audio recording helpers", () => {
     class FakeZeroRateAudioContext {
       sampleRate = 0;
       destination = {};
-      resume = vi.fn().mockResolvedValue(undefined);
       createMediaStreamSource() {
         return { connect: vi.fn(), disconnect: vi.fn() };
       }
@@ -185,7 +181,6 @@ describe("audio recording helpers", () => {
     class FakeAudioContext {
       sampleRate = 48_000;
       destination = {};
-      resume = vi.fn().mockResolvedValue(undefined);
       createMediaStreamSource() {
         return { connect: vi.fn(), disconnect: vi.fn() };
       }
@@ -253,7 +248,6 @@ describe("audio recording helpers", () => {
     class FakeAudioContext {
       sampleRate = 16_000;
       destination = {};
-      resume = vi.fn().mockResolvedValue(undefined);
       createMediaStreamSource() {
         return { connect: vi.fn(), disconnect: vi.fn() };
       }
@@ -293,55 +287,6 @@ describe("audio recording helpers", () => {
       configurable: true,
       value: originalGetUserMedia
     });
-    now.mockRestore();
-  });
-
-  test("rejects Web Audio recordings with only silent samples", async () => {
-    vi.useRealTimers();
-    const now = vi.spyOn(Date, "now").mockReturnValue(0);
-    const stream = {
-      getTracks: () => [{ stop: vi.fn() }]
-    } as unknown as MediaStream;
-    const mediaDevices = {
-      getUserMedia: vi.fn().mockResolvedValue(stream)
-    };
-
-    let processor: {
-      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
-      connect: () => void;
-      disconnect: () => void;
-    };
-    class FakeAudioContext {
-      sampleRate = 16_000;
-      destination = {};
-      resume = vi.fn().mockResolvedValue(undefined);
-      createMediaStreamSource() {
-        return { connect: vi.fn(), disconnect: vi.fn() };
-      }
-      createScriptProcessor() {
-        processor = {
-          onaudioprocess: null,
-          connect: vi.fn(),
-          disconnect: vi.fn()
-        };
-        return processor;
-      }
-      close = vi.fn();
-    }
-
-    const session = await createVoiceRecordingSession({
-      mediaDevices,
-      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
-      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
-    });
-    processor!.onaudioprocess?.({
-      inputBuffer: {
-        getChannelData: () => new Float32Array([0, 0, 0, 0])
-      }
-    } as unknown as AudioProcessingEvent);
-
-    now.mockReturnValue(MIN_RECORDING_MS + 1);
-    await expect(session.stop()).rejects.toBeInstanceOf(RecordingTooShortError);
     now.mockRestore();
   });
 });

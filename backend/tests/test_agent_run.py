@@ -19,8 +19,6 @@ def test_agent_run_has_required_fields():
     assert isinstance(run.tool_observations, list)
     assert run.final_action is None
     assert run.audio_job_id is None
-    assert run.sanitized_user_text == ""
-    assert run.sanitized_response_text == ""
     assert isinstance(run.timings_ms, dict)
     assert run.status == "started"
     assert run.error is None
@@ -105,23 +103,9 @@ def test_agent_run_to_dict_sanitized():
     assert d["event_id"] == "evt-abc"
     assert d["route"] == "fast"
     assert d["context_profile"] == "fast_companion"
-    assert d["sanitized_user_text"] == ""
-    assert d["sanitized_response_text"] == ""
     assert d["observation_count"] == 1
     # to_dict should not include raw observations list
     assert "observations" not in d
-
-
-def test_agent_run_to_dict_redacts_token_like_text():
-    run = AgentRun()
-    run.sanitized_user_text = "my api key is sk-abc123secret"
-    run.sanitized_response_text = "Bearer token=xyz found"
-
-    d = run.to_dict()
-
-    assert "sk-" not in d["sanitized_user_text"]
-    assert "Bearer" not in d["sanitized_response_text"]
-    assert "[REDACTED]" in d["sanitized_user_text"]
 
 
 # --- Integration tests ---
@@ -140,8 +124,6 @@ def test_text_chat_creates_agent_run():
     assert len(runs) == 1
     assert runs[0]["run_id"] == body["runtime"]["run_id"]
     assert runs[0]["status"] == "completed"
-    assert runs[0]["sanitized_user_text"] == "你好呀"
-    assert runs[0]["sanitized_response_text"]
 
 
 def test_button_event_fast_companion_profile():

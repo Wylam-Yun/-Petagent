@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict
@@ -14,17 +12,8 @@ from app.providers.audio_omni import (
 from app.providers.errors import ProviderError
 from app.runtime.actions import PetResponse
 from app.runtime.dispatcher import RuntimeDispatcher
+from app.runtime.activation import classify_activation as _classify_activation
 from app.runtime.voice_types import ASRTranscript, VoicePipelineResult, VoiceRouteInfo
-
-logger = logging.getLogger(__name__)
-
-FAST_ASR_RECOVERY_REPLIES = (
-    "没听清，再说一次嘛~",
-    "刚刚那句声音有点糊，主人再说一遍？",
-    "豆豆听到一点点，但不敢乱猜，再讲一次嘛。",
-    "这句没识别完整，主人说长一点好不好？",
-    "豆豆刚刚没接准，换个说法再来一次？",
-)
 
 
 def _now_ms(start: float) -> int:
@@ -41,8 +30,10 @@ class VoicePipeline:
         asr_provider: Any,
         audio_provider: Any,
         slow_fallback_enabled: bool = True,
+        asr_min_confidence: float = 0.0,
         fast_brain_provider_name: str = "fast_llm",
         slow_brain_provider_name: str = "slow_llm",
+        activation_manager: Any = None,
         provider_gate: Any = None,
     ) -> None:
         self.dispatcher = dispatcher
@@ -51,11 +42,11 @@ class VoicePipeline:
         self.asr_provider = asr_provider
         self.audio_provider = audio_provider
         self.slow_fallback_enabled = slow_fallback_enabled
+        self.asr_min_confidence = asr_min_confidence
         self.fast_brain_provider_name = fast_brain_provider_name
         self.slow_brain_provider_name = slow_brain_provider_name
+        self.activation_manager = activation_manager
         self.provider_gate = provider_gate
-        self._fast_asr_recovery_index = 0
-        self._fast_asr_recovery_lock = threading.Lock()
 
     def handle(
         self,
@@ -100,12 +91,7 @@ class VoicePipeline:
         emotion_source = "asr"
         try:
             transcript = self._transcribe_with_gate(audio_path, content_type)
-        except Exception as exc:
-            logger.info(
-                "voice_asr_exception provider=%s error_type=%s",
-                self._asr_name(),
-                type(exc).__name__,
-            )
+        except Exception:
             transcript = ASRTranscript(
                 text="",
                 confidence=0.0,
@@ -118,23 +104,11 @@ class VoicePipeline:
 
         text = transcript.text.strip()
         if transcript.error_code:
-            if transcript.error_code == "asr_timeout":
-                fallback_reason = "asr_timeout"
-            else:
-                fallback_reason = "asr_provider_error"
+            fallback_reason = "asr_timeout" if transcript.error_code == "asr_timeout" else "asr_provider_error"
         elif not text:
             fallback_reason = fallback_reason or "asr_empty"
-
-        logger.info(
-            "voice_asr_result selected=%s provider=%s text_len=%d confidence=%.3f "
-            "fallback_reason=%s elapsed_ms=%d",
-            selected,
-            transcript.provider,
-            len(text),
-            transcript.confidence,
-            fallback_reason or "none",
-            timings["asr"],
-        )
+        elif transcript.confidence < self.asr_min_confidence:
+            fallback_reason = "asr_low_confidence"
 
         if fallback_reason:
             if thinking_mode and self.slow_fallback_enabled:
@@ -171,9 +145,8 @@ class VoicePipeline:
             elif not thinking_mode:
                 # Fast reply: ASR failed, return local recovery instead of heavy fallback
                 timings["total"] = _now_ms(started)
-                recovery_reply = self._next_fast_asr_recovery_reply()
                 fallback_response = PetResponse(
-                    reply=recovery_reply,
+                    reply="没听清，再说一次嘛~",
                     mood="idle",
                     face_type="idle",
                     animation="breathing",
@@ -213,18 +186,28 @@ class VoicePipeline:
 
         brain_started = perf_counter()
 
-        response = self.dispatcher.handle_event(
-            {
-                "type": "voice_message",
-                "source": "voice_%s" % selected,
-                "payload": {
-                    "user_text": understanding.user_text,
-                    "audio_understanding": understanding.dict(),
-                    "thinking_mode": thinking_mode,
+        # Check for wake/exit phrase before dispatching as voice_message
+        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
+        activation_info = None
+        wake_source = ""
+        if activation_event is not None:
+            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            response = self.dispatcher.handle_event(activation_event, brain=brain)
+            activation_info = self._build_activation_info(activation_event["type"])
+        else:
+            response = self.dispatcher.handle_event(
+                {
+                    "type": "voice_message",
+                    "source": "voice_%s" % selected,
+                    "payload": {
+                        "user_text": understanding.user_text,
+                        "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
+                    },
                 },
-            },
-            brain=brain,
-        )
+                brain=brain,
+            )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -241,9 +224,11 @@ class VoicePipeline:
                 brain_provider=brain_provider_name,
                 fallback_reason=fallback_reason,
                 emotion_source=emotion_source,
+                wake_source=wake_source,
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
+            activation=activation_info,
         )
 
     def _run_audio_understanding_route(
@@ -265,17 +250,12 @@ class VoicePipeline:
         except ProviderError as exc:
             provider_failure = exc.to_dict()
             understanding = FALLBACK_AUDIO_UNDERSTANDING
-            logger.info(
-                "voice_audio_understanding_provider_error provider_failure=%s",
-                provider_failure.get("error_class"),
-            )
-        except Exception as exc:
-            logger.info("voice_audio_understanding_exception error_type=%s", type(exc).__name__)
+        except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
         timings["audio_understanding"] = _now_ms(started)
 
         # Step 2: Check if audio understanding gave usable text
-        has_usable_text = bool(understanding.user_text.strip())
+        has_usable_text = bool(understanding.user_text.strip()) and understanding.confidence >= 0.3
 
         transcript = None
         if has_usable_text:
@@ -284,16 +264,15 @@ class VoicePipeline:
             asr_start = perf_counter()
             try:
                 transcript = self._transcribe_with_gate(audio_path, content_type)
-            except Exception as exc:
-                logger.info("voice_asr_assist_exception error_type=%s", type(exc).__name__)
+            except Exception:
+                pass
             timings["asr_assist"] = _now_ms(asr_start)
         else:
             # Audio understanding failed or returned empty — fall back to ASR
             asr_start = perf_counter()
             try:
                 transcript = self._transcribe_with_gate(audio_path, content_type)
-            except Exception as exc:
-                logger.info("voice_asr_fallback_exception error_type=%s", type(exc).__name__)
+            except Exception:
                 transcript = ASRTranscript(
                     text="",
                     confidence=0.0,
@@ -303,7 +282,7 @@ class VoicePipeline:
                 )
             timings["asr"] = _now_ms(asr_start)
 
-            if transcript.text.strip():
+            if transcript.text.strip() and transcript.confidence >= self.asr_min_confidence:
                 # ASR succeeded — use it, but note emotion came from ASR
                 understanding = AudioUnderstanding(
                     user_text=transcript.text.strip(),
@@ -319,58 +298,28 @@ class VoicePipeline:
 
         brain_started = perf_counter()
 
-        final_has_text = bool(understanding.user_text.strip())
-        if not final_has_text:
-            timings["total"] = _now_ms(started)
-            fallback_reason = "audio_understanding_insufficient"
-            if transcript is not None and transcript.error_code:
-                fallback_reason = (
-                    "asr_timeout" if transcript.error_code == "asr_timeout" else "asr_provider_error"
-                )
-            recovery_reply = self._next_fast_asr_recovery_reply()
-            response = PetResponse(
-                reply=recovery_reply,
-                mood="idle",
-                face_type="idle",
-                animation="breathing",
-                vibration="none",
-                pet_state={},
-                runtime={"error_class": "asr_failed"},
-                route="thinking",
-                action="confused",
-            )
-            return VoicePipelineResult(
-                user_text="",
-                audio_understanding=understanding,
-                response=response,
-                route_info=VoiceRouteInfo(
-                    requested=requested,
-                    selected="thinking",
-                    thinking_mode=thinking_mode,
-                    asr_provider=getattr(transcript, "provider", "") if transcript else "",
-                    asr_error_code=getattr(transcript, "error_code", "") if transcript else "",
-                    asr_error_message=getattr(transcript, "error_message", "") if transcript else "",
-                    brain_provider=self.slow_brain_provider_name,
-                    fallback_reason=fallback_reason,
-                    emotion_source=emotion_source,
-                    provider_failure=provider_failure,
-                    asr_failed_hint="没听清",
-                    timings_ms=timings,
-                ),
-                fallback_reason=fallback_reason,
-            )
-        response = self.dispatcher.handle_event(
-            {
-                "type": "voice_message",
-                "source": "voice_thinking",
-                "payload": {
-                    "user_text": understanding.user_text,
-                    "audio_understanding": understanding.dict(),
-                    "thinking_mode": thinking_mode,
+        # Check for wake/exit phrase
+        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
+        activation_info = None
+        wake_source = ""
+        if activation_event is not None:
+            wake_source = "text" if understanding.user_text.strip() else "audio_understanding"
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
+            activation_info = self._build_activation_info(activation_event["type"])
+        else:
+            response = self.dispatcher.handle_event(
+                {
+                    "type": "voice_message",
+                    "source": "voice_thinking",
+                    "payload": {
+                        "user_text": understanding.user_text,
+                        "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
+                    },
                 },
-            },
-            brain=self.slow_brain,
-        )
+                brain=self.slow_brain,
+            )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -383,12 +332,14 @@ class VoicePipeline:
                 thinking_mode=thinking_mode,
                 asr_provider=getattr(transcript, "provider", "") if transcript else "",
                 brain_provider=self.slow_brain_provider_name,
-                fallback_reason="" if final_has_text else "audio_understanding_insufficient",
+                fallback_reason="" if has_usable_text else "audio_understanding_insufficient",
                 emotion_source=emotion_source,
+                wake_source=wake_source,
                 provider_failure=provider_failure,
                 timings_ms=timings,
             ),
-            fallback_reason=None if final_has_text else "audio_understanding_insufficient",
+            fallback_reason=None if has_usable_text else "audio_understanding_insufficient",
+            activation=activation_info,
         )
 
     def _run_audio_fallback(
@@ -409,30 +360,33 @@ class VoicePipeline:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             provider_failure = exc.to_dict()
             fallback_reason = fallback_reason or "audio_understanding_error"
-            logger.info(
-                "voice_audio_fallback_provider_error provider_failure=%s",
-                provider_failure.get("error_class"),
-            )
-        except Exception as exc:
-            logger.info("voice_audio_fallback_exception error_type=%s", type(exc).__name__)
+        except Exception:
             understanding = FALLBACK_AUDIO_UNDERSTANDING
             fallback_reason = fallback_reason or "audio_understanding_error"
         timings["audio_understanding"] = _now_ms(started)
 
         brain_started = perf_counter()
 
-        response = self.dispatcher.handle_event(
-            {
-                "type": "voice_message",
-                "source": "voice_thinking",
-                "payload": {
-                    "user_text": understanding.user_text,
-                    "audio_understanding": understanding.dict(),
-                    "thinking_mode": thinking_mode,
+        # Check for wake/exit phrase before dispatching as voice_message
+        activation_event = _classify_activation(understanding.user_text, self.activation_manager)
+        activation_info = None
+        if activation_event is not None:
+            activation_event.setdefault("payload", {})["thinking_mode"] = thinking_mode
+            response = self.dispatcher.handle_event(activation_event, brain=self.slow_brain)
+            activation_info = self._build_activation_info(activation_event["type"])
+        else:
+            response = self.dispatcher.handle_event(
+                {
+                    "type": "voice_message",
+                    "source": "voice_thinking",
+                    "payload": {
+                        "user_text": understanding.user_text,
+                        "audio_understanding": understanding.dict(),
+                        "thinking_mode": thinking_mode,
+                    },
                 },
-            },
-            brain=self.slow_brain,
-        )
+                brain=self.slow_brain,
+            )
         timings["brain_tts"] = _now_ms(brain_started)
         timings["total"] = _now_ms(started)
         return VoicePipelineResult(
@@ -451,23 +405,27 @@ class VoicePipeline:
                 timings_ms=timings,
             ),
             fallback_reason=fallback_reason or None,
+            activation=activation_info,
         )
+
+    def _build_activation_info(self, event_type: str) -> Dict[str, Any]:
+        """Build activation info dict from the activation manager state."""
+        if self.activation_manager is None:
+            return {"type": event_type, "active": False}
+        state = self.activation_manager.state
+        return {
+            "type": event_type,
+            "active": state.active,
+            "session_id": state.session_id,
+        }
 
     def _asr_name(self) -> str:
         return str(getattr(self.asr_provider, "name", "unknown_asr"))
 
-    def _next_fast_asr_recovery_reply(self) -> str:
-        with self._fast_asr_recovery_lock:
-            reply = FAST_ASR_RECOVERY_REPLIES[
-                self._fast_asr_recovery_index % len(FAST_ASR_RECOVERY_REPLIES)
-            ]
-            self._fast_asr_recovery_index += 1
-            return reply
-
     def _transcribe_with_gate(self, audio_path: Path, content_type: str) -> ASRTranscript:
         acquired = False
         if self.provider_gate is not None:
-            self.provider_gate.acquire("asr", blocking=True, timeout_s=30)
+            self.provider_gate.acquire("asr")
             acquired = True
         try:
             return self.asr_provider.transcribe(audio_path, content_type)
@@ -478,7 +436,7 @@ class VoicePipeline:
     def _understand_with_gate(self, audio_path: Path, content_type: str) -> AudioUnderstanding:
         acquired = False
         if self.provider_gate is not None:
-            self.provider_gate.acquire("audio_understanding", blocking=True, timeout_s=60)
+            self.provider_gate.acquire("audio_understanding")
             acquired = True
         try:
             return self.audio_provider.understand(audio_path, content_type)

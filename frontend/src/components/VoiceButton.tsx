@@ -40,9 +40,6 @@ export function VoiceButton({
   const [localPhase, setLocalPhase] = useState<PetUIPhase>(phase);
   const sessionRef = useRef<VoiceRecordingSession | null>(null);
   const uploadRunRef = useRef(0);
-  const activeUploadRunRef = useRef(0);
-  const uploadAbortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!busy) {
@@ -56,9 +53,7 @@ export function VoiceButton({
 
   useEffect(() => {
     return () => {
-      mountedRef.current = false;
       uploadRunRef.current += 1;
-      uploadAbortRef.current?.abort();
       sessionRef.current?.cancel();
     };
   }, []);
@@ -101,19 +96,16 @@ export function VoiceButton({
     changePhase("thinking");
     const uploadRun = uploadRunRef.current + 1;
     uploadRunRef.current = uploadRun;
-    activeUploadRunRef.current = uploadRun;
-    uploadAbortRef.current = typeof AbortController === "undefined" ? null : new AbortController();
     setBusy(true);
     try {
       const blob = await session.stop();
-      const response = await uploadVoice(blob, {
-        thinkingMode,
-        ...(uploadAbortRef.current ? { signal: uploadAbortRef.current.signal } : {})
-      });
+      const response = await uploadVoice(blob, { thinkingMode });
       if (uploadRunRef.current !== uploadRun) return;
       onVoiceResponse(response);
       const fallbackReason = response.voice_route?.fallback_reason;
-      if (fallbackReason === "asr_timeout") {
+      if (fallbackReason === "asr_empty" || fallbackReason === "asr_low_confidence") {
+        onError("豆豆没太听清，再说一次？");
+      } else if (fallbackReason === "asr_timeout") {
         onError("语音识别有点慢，再说一次？");
       } else if (fallbackReason === "asr_provider_error" || fallbackReason === "asr_provider_exception") {
         onError("语音识别暂时不太灵，但豆豆还在听。");
@@ -132,13 +124,7 @@ export function VoiceButton({
         onError("呜，刚刚没接住。");
       }
     } finally {
-      if (activeUploadRunRef.current === uploadRun) {
-        activeUploadRunRef.current = 0;
-      }
-      if (uploadAbortRef.current?.signal.aborted || activeUploadRunRef.current === 0) {
-        uploadAbortRef.current = null;
-      }
-      if (mountedRef.current) {
+      if (uploadRunRef.current === uploadRun) {
         setBusy(false);
       }
     }
@@ -153,7 +139,7 @@ export function VoiceButton({
 
   function cancelPendingUpload() {
     uploadRunRef.current += 1;
-    uploadAbortRef.current?.abort();
+    setBusy(false);
     changePhase("idle");
   }
 
@@ -167,7 +153,7 @@ export function VoiceButton({
       <button
         aria-label={label}
         className={`voice-button voice-${effectivePhase}`}
-        disabled={disabled || starting || (busy && effectivePhase !== "thinking")}
+        disabled={disabled || starting}
         type="button"
         onClick={handleTap}
       >

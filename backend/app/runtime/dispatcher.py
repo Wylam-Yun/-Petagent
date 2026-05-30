@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from difflib import SequenceMatcher
 from datetime import datetime
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
@@ -15,7 +14,7 @@ from app.pet.guard import guard_action, guard_fast_reply_action
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
-from app.runtime.actions import ALLOWED_BEHAVIOR_ACTIONS, FastReplyAction, PetResponse
+from app.runtime.actions import PetResponse
 from app.runtime.agent_run import AgentRun
 from app.runtime.context import build_runtime_context
 from app.runtime.context_manager import ContextManager
@@ -28,55 +27,6 @@ from app.runtime.memory_triggers import detect_memory_triggers
 
 logger = logging.getLogger(__name__)
 
-FAST_DUPLICATE_RECOVERY_REPLIES = (
-    "收到，豆豆顺着你这句继续聊。",
-    "知道啦，豆豆这次不沿用上一句。",
-    "嗯，豆豆接着你的意思往下说。",
-    "好，豆豆换个角度陪你继续。",
-    "明白，豆豆给你一个新的回应。",
-)
-
-PROVIDER_FALLBACK_REPLIES = (
-    "豆豆在这儿，刚才反应慢了一下，但这句收到了。",
-    "刚才豆豆脑袋转慢了点，这次直接接住你的意思。",
-    "豆豆慢半拍了，但没有走开，这句先记住。",
-    "这轮豆豆有点短路，先把你的话稳稳接住。",
-    "豆豆刚刚反应慢了点，但这次不会让你重说。",
-)
-
-ASR_FAILURE_COPY_MARKERS = (
-    "没听清",
-    "没接准",
-    "声音有点糊",
-    "声音糊",
-    "没识别完整",
-    "识别不完整",
-    "听偏了",
-    "没接稳",
-    "没接住",
-    "再说一遍",
-    "再讲一次",
-    "再来一次",
-    "换个说法再来",
-    "不敢乱猜",
-    "听到一点点",
-    "竖起耳朵在听",
-    "竖起耳朵听",
-    "竖着耳朵",
-    "耳朵竖",
-    "耳朵都竖",
-    "你说啥",
-    "假装没听见",
-    "没听见",
-    "再提示一下",
-    "再提示",
-    "继续说嘛",
-    "主人慢慢说",
-    "主人再说",
-)
-
-FAST_REPLY_REPEAT_SIMILARITY = 0.72
-
 _PROFILE_TO_GATE = {
     "fast_llm": "llm_fast",
     "slow_llm": "llm_slow",
@@ -87,224 +37,6 @@ def _profile_to_gate_type(provider_profile: str) -> str:
     return _PROFILE_TO_GATE.get(provider_profile, "llm_slow")
 
 
-def _normalize_reply_for_repeat(reply: str) -> str:
-    return "".join(
-        char
-        for char in str(reply or "")
-        if char not in " \t\r\n，。,.！？!?～~…"
-    )
-
-
-def _reply_similarity(left: str, right: str) -> float:
-    left_norm = _normalize_reply_for_repeat(left)
-    right_norm = _normalize_reply_for_repeat(right)
-    if not left_norm or not right_norm:
-        return 0.0
-    if left_norm == right_norm:
-        return 1.0
-    return SequenceMatcher(None, left_norm, right_norm).ratio()
-
-
-def _is_duplicate_fast_reply(reply: str, cognition_context: Optional[Dict[str, Any]]) -> bool:
-    normalized = _normalize_reply_for_repeat(reply)
-    if not normalized or not cognition_context:
-        return False
-    recent_events = (
-        cognition_context.get("recent_reply_history")
-        or cognition_context.get("recent_exact_events")
-        or []
-    )
-    for event in recent_events[-5:]:
-        if not isinstance(event, dict):
-            continue
-        recent_reply = str(event.get("pet") or "")
-        if _reply_similarity(reply, recent_reply) >= FAST_REPLY_REPEAT_SIMILARITY:
-            return True
-    return False
-
-
-def _is_duplicate_reply(reply: str, cognition_context: Optional[Dict[str, Any]]) -> bool:
-    return _is_duplicate_fast_reply(reply, cognition_context)
-
-
-def _recent_reply_norms(cognition_context: Optional[Dict[str, Any]]) -> List[str]:
-    if not cognition_context:
-        return []
-    recent_events = (
-        cognition_context.get("recent_reply_history")
-        or cognition_context.get("recent_exact_events")
-        or []
-    )
-    return [
-        _normalize_reply_for_repeat(str(event.get("pet") or ""))
-        for event in recent_events[-5:]
-        if isinstance(event, dict)
-    ]
-
-
-def _generic_recovery_replies() -> tuple[str, ...]:
-    return (
-        "收到，豆豆继续陪你聊。",
-        "嗯，豆豆接着你的意思往下说。",
-        "好，豆豆换个角度陪你继续。",
-    )
-
-
-def _select_generic_recovery_reply(
-    cognition_context: Optional[Dict[str, Any]],
-) -> str:
-    recent = _recent_reply_norms(cognition_context)
-    for reply in _generic_recovery_replies():
-        if _normalize_reply_for_repeat(reply) not in recent:
-            return reply
-    return _generic_recovery_replies()[0]
-
-
-def _select_duplicate_recovery_reply(
-    cognition_context: Optional[Dict[str, Any]],
-) -> str:
-    recent = _recent_reply_norms(cognition_context)
-    for reply in _generic_recovery_replies() + FAST_DUPLICATE_RECOVERY_REPLIES:
-        if _normalize_reply_for_repeat(reply) not in recent:
-            return reply
-    return _generic_recovery_replies()[0]
-
-
-def _select_distinct_reply(
-    replies: tuple[str, ...],
-    cognition_context: Optional[Dict[str, Any]],
-) -> str:
-    recent = _recent_reply_norms(cognition_context)
-    for reply in replies:
-        if _normalize_reply_for_repeat(reply) not in recent:
-            return reply
-    return replies[0]
-
-
-def _event_user_text(event: Any) -> str:
-    payload = getattr(event, "payload", {}) or {}
-    return str(payload.get("user_text") or payload.get("text") or "")
-
-
-def _select_successful_voice_repair_reply(
-    cognition_context: Optional[Dict[str, Any]],
-) -> str:
-    return _select_generic_recovery_reply(cognition_context)
-
-
-def _dedupe_fast_reply(
-    fast_action: FastReplyAction,
-    cognition_context: Optional[Dict[str, Any]],
-) -> FastReplyAction:
-    if not _is_duplicate_fast_reply(fast_action.reply, cognition_context):
-        return fast_action
-    return FastReplyAction(
-        reply=_select_duplicate_recovery_reply(cognition_context),
-        mood=fast_action.mood or "happy",
-        action=fast_action.action or "speak",
-        voice_style=fast_action.voice_style,
-    )
-
-
-def _is_successful_voice_event(event: Any) -> bool:
-    if getattr(event, "type", "") != "voice_message":
-        return False
-    return bool(_event_user_text(event).strip())
-
-
-def _contains_asr_failure_copy(reply: str) -> bool:
-    text = str(reply or "")
-    return any(marker in text for marker in ASR_FAILURE_COPY_MARKERS)
-
-
-def _repair_successful_voice_reply(
-    reply: str,
-    cognition_context: Optional[Dict[str, Any]],
-) -> str:
-    if not _contains_asr_failure_copy(reply):
-        return reply
-    return _select_successful_voice_repair_reply(cognition_context)
-
-
-def _first_behavior_action(action: Any, mood: str) -> str:
-    if action and action.behavior_plan:
-        for step in action.behavior_plan:
-            if isinstance(step, dict):
-                candidate = str(step.get("action") or "")
-                if candidate in ALLOWED_BEHAVIOR_ACTIONS:
-                    return candidate
-    if mood == "happy":
-        return "happy"
-    if mood == "sleepy":
-        return "nap"
-    if mood in {"sad", "lonely", "concerned"}:
-        return "comfort"
-    if mood == "thinking":
-        return "think"
-    if mood == "excited":
-        return "excited"
-    if mood == "angry":
-        return "deny"
-    if mood == "shy":
-        return "self_groom"
-    return "speak"
-
-
-def _provider_fallback_action(raw_action: Any, cognition_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if raw_action is not None:
-        return raw_action
-    reply = _select_distinct_reply(PROVIDER_FALLBACK_REPLIES, cognition_context)
-    return {
-        "reply": reply,
-        "mood": "concerned",
-        "face_type": "concerned",
-        "animation": "tilt",
-        "voice_style": "soft",
-        "vibration": "none",
-        "intent": "provider_fallback",
-        "autonomy_notes": "provider unavailable or invalid output",
-        "state_delta": {},
-        "state_affect": {
-            "interaction_tone": "comforting",
-            "pet_effort": "none",
-            "emotional_effect": "uncertain",
-            "reason": "provider fallback",
-        },
-        "memory_update": {"should_save": False, "content": ""},
-        "behavior_intent": "neutral_companion",
-        "behavior_plan": [
-            {"action": "confused", "slot": "before_speech", "duration_ms": 900},
-            {"action": "speak", "slot": "speech", "duration_ms": 1400},
-        ],
-    }
-
-
-def _dedupe_context_from_recent_events(
-    cognition_context: Optional[Dict[str, Any]],
-    event_log_store: Any,
-    episode_id: str,
-) -> Optional[Dict[str, Any]]:
-    if event_log_store is None or not episode_id:
-        return cognition_context
-    try:
-        raw_events = event_log_store.recent_events(episode_id=episode_id, limit=5)
-    except Exception:
-        return cognition_context
-    recent_exact_events = []
-    for event in raw_events:
-        entry: Dict[str, Any] = {}
-        if event.get("user_text"):
-            entry["user"] = event["user_text"]
-        if event.get("pet_reply"):
-            entry["pet"] = event["pet_reply"]
-        if entry:
-            recent_exact_events.append(entry)
-    recent_exact_events.reverse()
-    if not recent_exact_events:
-        return cognition_context
-    merged = dict(cognition_context or {})
-    merged["recent_exact_events"] = recent_exact_events
-    return merged
 
 class RuntimeDispatcher:
     def __init__(
@@ -424,7 +156,6 @@ class RuntimeDispatcher:
                 run.route = decision.route
                 run.context_profile = decision.context_profile
                 run.provider = decision.provider_profile
-                run.sanitized_user_text = user_text[:500]
                 run.set_status("planning")
 
             # Apply tick
@@ -550,7 +281,7 @@ class RuntimeDispatcher:
         gate_acquired = False
         try:
             if self.provider_gate is not None:
-                self.provider_gate.acquire(provider_type, blocking=True, timeout_s=25)
+                self.provider_gate.acquire(provider_type)
                 gate_acquired = True
             try:
                 if is_fast_reply:
@@ -588,24 +319,8 @@ class RuntimeDispatcher:
             run.set_status("action_generated")
 
         fast_action = None
-        if raw_action is None:
-            raw_action = _provider_fallback_action(raw_action, cognition_context)
-
         if is_fast_reply:
             fast_action = guard_fast_reply_action(raw_action)
-            if _is_successful_voice_event(event):
-                fast_action.reply = _repair_successful_voice_reply(
-                    fast_action.reply,
-                    cognition_context,
-                )
-            fast_action = _dedupe_fast_reply(
-                fast_action,
-                _dedupe_context_from_recent_events(
-                    cognition_context,
-                    self.event_log_store,
-                    episode_id,
-                ),
-            )
             if run:
                 run.final_action = {
                     "reply": fast_action.reply[:200],
@@ -613,7 +328,6 @@ class RuntimeDispatcher:
                     "action": fast_action.action or "",
                     "voice_style": fast_action.voice_style,
                 }
-                run.sanitized_response_text = fast_action.reply[:500]
             # Minimal state update: mood + last_interaction_at only
             final_state = dict(ruled_state)
             if fast_action.mood:
@@ -626,20 +340,6 @@ class RuntimeDispatcher:
                 max_reply_chars=self._max_reply_chars(active_brain),
                 event_type=event.type,
             )
-            if _is_successful_voice_event(event):
-                action.reply = _repair_successful_voice_reply(
-                    action.reply,
-                    cognition_context,
-                )
-                dedupe_context = _dedupe_context_from_recent_events(
-                    cognition_context,
-                    self.event_log_store,
-                    episode_id,
-                )
-                if _is_duplicate_reply(action.reply, dedupe_context):
-                    action.reply = _select_duplicate_recovery_reply(
-                        dedupe_context,
-                    )
             if run:
                 run.final_action = {
                     "reply": action.reply[:200],
@@ -648,7 +348,6 @@ class RuntimeDispatcher:
                     "animation": action.animation,
                     "voice_style": action.voice_style,
                 }
-                run.sanitized_response_text = action.reply[:500]
             # Compute state delta (deterministic, can be recomputed on CAS retry)
             sanitized_delta = {k: v for k, v in action.state_delta.items() if k != "energy"}
             if "energy" in action.state_delta:
@@ -885,7 +584,6 @@ class RuntimeDispatcher:
                 state_affect=action.state_affect.dict(),
                 behavior_intent=action.behavior_intent,
                 behavior_plan=action.behavior_plan,
-                action=_first_behavior_action(action, action.mood),
                 route="thinking",
             )
         if run:

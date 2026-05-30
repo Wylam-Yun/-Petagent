@@ -1,8 +1,10 @@
 import type {
+  ActivationResponse,
   AudioJob,
   DeviceStatePayload,
   InteractionDefinition,
   PetEventType,
+  ProactiveResponse,
   PetResponse,
   PetState,
   TextChatResponse,
@@ -14,11 +16,7 @@ export const VOICE_UPLOAD_TIMEOUT_MS = {
   thinking: 60_000
 } as const;
 
-async function requestJson<T>(
-  url: string,
-  init?: RequestInit,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {}
-): Promise<T> {
+async function requestJson<T>(url: string, init?: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
   const maxRetries = 2;
   const timeoutMs = options.timeoutMs ?? 8_000;
   let lastError: Error | undefined;
@@ -32,7 +30,7 @@ async function requestJson<T>(
       await new Promise((r) => window.setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
     }
     try {
-      const response = await requestWithTransport(url, init, timeoutMs, options.signal);
+      const response = await requestWithTransport(url, init, timeoutMs);
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
@@ -54,25 +52,22 @@ type JsonTransportResponse = {
 function requestWithTransport(
   url: string,
   init: RequestInit | undefined,
-  timeoutMs: number,
-  signal?: AbortSignal
+  timeoutMs: number
 ): Promise<JsonTransportResponse> {
   if (typeof fetch === "function") {
-    return requestWithFetch(url, init, timeoutMs, signal);
+    return requestWithFetch(url, init, timeoutMs);
   }
-  return requestWithXhr(url, init, timeoutMs, signal);
+  return requestWithXhr(url, init, timeoutMs);
 }
 
 async function requestWithFetch(
   url: string,
   init: RequestInit | undefined,
-  timeoutMs: number,
-  signal?: AbortSignal
+  timeoutMs: number
 ): Promise<JsonTransportResponse> {
   const controller = createAbortController();
   let timedOut = false;
   let timer: number | null = null;
-  const abortFromCaller = () => controller?.abort();
   const timeout = new Promise<never>((_, reject) => {
     timer = window.setTimeout(() => {
       timedOut = true;
@@ -80,7 +75,6 @@ async function requestWithFetch(
       reject(new Error("request timeout"));
     }, timeoutMs);
   });
-  signal?.addEventListener("abort", abortFromCaller, { once: true });
   try {
     return await Promise.race([
       fetch(url, {
@@ -90,28 +84,20 @@ async function requestWithFetch(
       timeout
     ]);
   } catch (err) {
-    if (signal?.aborted) throw new Error("request aborted");
     if (timedOut) throw new Error("request timeout");
     throw err;
   } finally {
     if (timer !== null) window.clearTimeout(timer);
-    signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
 function requestWithXhr(
   url: string,
   init: RequestInit | undefined,
-  timeoutMs: number,
-  signal?: AbortSignal
+  timeoutMs: number
 ): Promise<JsonTransportResponse> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const finish = (fn: () => void) => {
-      signal?.removeEventListener("abort", abortFromCaller);
-      fn();
-    };
-    const abortFromCaller = () => xhr.abort();
     xhr.open(init?.method ?? "GET", url, true);
     xhr.timeout = timeoutMs;
 
@@ -121,18 +107,16 @@ function requestWithXhr(
 
     xhr.onreadystatechange = () => {
       if (xhr.readyState !== XMLHttpRequest.DONE) return;
-      finish(() => resolve({
+      resolve({
         ok: xhr.status >= 200 && xhr.status < 300,
         status: xhr.status,
         json: async () => JSON.parse(xhr.responseText || "null")
-      }));
+      });
     };
-    xhr.onerror = () => finish(() => reject(new TypeError("network error")));
-    xhr.ontimeout = () => finish(() => reject(new Error("request timeout")));
-    xhr.onabort = () => finish(() => reject(new Error("request aborted")));
-    signal?.addEventListener("abort", abortFromCaller, { once: true });
+    xhr.onerror = () => reject(new TypeError("network error"));
+    xhr.ontimeout = () => reject(new Error("request timeout"));
+    xhr.onabort = () => reject(new Error("request aborted"));
     xhr.send((init?.body as XMLHttpRequestBodyInit | null | undefined) ?? null);
-    if (signal?.aborted) xhr.abort();
   });
 }
 
@@ -178,6 +162,17 @@ export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceSt
   });
 }
 
+export function getProactiveCheck(): Promise<{ active: boolean; candidate?: string }> {
+  return requestJson("/api/pet/proactive");
+}
+
+export function triggerProactiveEvent(): Promise<ProactiveResponse> {
+  return requestJson<ProactiveResponse>("/api/pet/proactive/trigger", {
+    method: "POST",
+    headers: { "content-type": "application/json" }
+  });
+}
+
 export function getInteractions(): Promise<InteractionDefinition[]> {
   return requestJson<InteractionDefinition[]>("/api/interactions");
 }
@@ -192,7 +187,6 @@ export function postPetEvent(event: PetEventType): Promise<PetResponse> {
 
 export type UploadVoiceOptions = {
   thinkingMode?: boolean;
-  signal?: AbortSignal;
 };
 
 export function uploadVoice(
@@ -208,11 +202,24 @@ export function uploadVoice(
       method: "POST",
       body: formData
     },
-    {
-      timeoutMs: options.thinkingMode ? VOICE_UPLOAD_TIMEOUT_MS.thinking : VOICE_UPLOAD_TIMEOUT_MS.fast,
-      signal: options.signal
-    }
+    { timeoutMs: options.thinkingMode ? VOICE_UPLOAD_TIMEOUT_MS.thinking : VOICE_UPLOAD_TIMEOUT_MS.fast }
   );
+}
+
+export function wakeMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
+  return requestJson<ActivationResponse>("/api/activation/wake", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
+  });
+}
+
+export function exitMomo(phrase: string, confidence: number): Promise<ActivationResponse> {
+  return requestJson<ActivationResponse>("/api/activation/exit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phrase, confidence, source: "foreground_voice" })
+  });
 }
 
 export type ContextRefreshResponse = {

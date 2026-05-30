@@ -108,23 +108,6 @@ describe("BehaviorDirector", () => {
       );
       expect(out.bubbleText).toBe("豆豆说你好");
     });
-
-    it("prefers behavior_plan over single action when both are present", () => {
-      const out = dir.onBackendResponse(
-        {
-          action: "speak",
-          behavior_plan: [
-            { action: "confused", slot: "before_speech", duration_ms: 900 },
-            { action: "speak", slot: "speech", duration_ms: 1400 },
-          ],
-          mood: "thinking",
-        },
-        "idle",
-      );
-
-      expect(out.visibleAction).toBe("confused");
-      expect(dir.advanceSlot("speech")?.visibleAction).toBe("speak");
-    });
   });
 
   describe("onPhaseChange", () => {
@@ -221,6 +204,79 @@ describe("BehaviorDirector", () => {
 
       dir.advanceSlot("speech");
       expect(dir.advanceSlot("speech")).toBeNull();
+    });
+  });
+
+  describe("onAmbientTick", () => {
+    it("returns null during non-idle phase", () => {
+      expect(dir.onAmbientTick(50000, "listening", false, true)).toBeNull();
+    });
+
+    it("returns null when busy", () => {
+      expect(dir.onAmbientTick(50000, "idle", true, true)).toBeNull();
+    });
+
+    it("returns null when document not visible", () => {
+      expect(dir.onAmbientTick(50000, "idle", false, false)).toBeNull();
+    });
+
+    it("returns null during cooldown after user interaction", () => {
+      dir.onTap(1000, "idle");
+      expect(dir.onAmbientTick(50000, "idle", false, true)).toBeNull();
+    });
+
+    it("does not fire immediately on first idle tick", () => {
+      expect(dir.onAmbientTick(50000, "idle", false, true)).toBeNull();
+    });
+
+    it("fires short idle activity after threshold", () => {
+      dir.onAmbientTick(1000, "idle", false, true);
+      const out = dir.onAmbientTick(62000, "idle", false, true);
+      expect(out).not.toBeNull();
+      expect(["lazy_idle", "self_groom", "wander"]).toContain(out!.visibleAction);
+    });
+
+    it("returns null before scheduled ambient time", () => {
+      // First tick sets the schedule
+      dir.onAmbientTick(1000, "idle", false, true);
+      dir.onAmbientTick(62000, "idle", false, true);
+      // Second tick immediately after should not fire
+      expect(dir.onAmbientTick(62001, "idle", false, true)).toBeNull();
+    });
+
+    it("allows long idle activities after long threshold", () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.999;
+      try {
+        dir.onAmbientTick(1000, "idle", false, true);
+        const out = dir.onAmbientTick(302000, "idle", false, true);
+        expect(["nap", "sneak_eat", "watch_tv"]).toContain(out!.visibleAction);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it("returns interruption reaction for last idle activity", () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.999;
+      try {
+        dir.onAmbientTick(1000, "idle", false, true);
+        const idleOut = dir.onAmbientTick(302000, "idle", false, true);
+        expect(idleOut!.visibleAction).toBe("watch_tv");
+        const tapOut = dir.onTap(303000, "idle");
+        expect(tapOut.visibleAction).toBe("pretend_busy");
+        expect(tapOut.bubbleText).toContain("关键");
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it("clears idle activity after interruption reaction", () => {
+      dir.onAmbientTick(1000, "idle", false, true);
+      dir.onAmbientTick(62000, "idle", false, true);
+      dir.onTap(63000, "idle");
+      const out = dir.onTap(64000, "idle");
+      expect(["waving", "jumping", "failed"]).toContain(out.visibleAction);
     });
   });
 

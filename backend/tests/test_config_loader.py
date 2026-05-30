@@ -104,7 +104,7 @@ providers:
     timeout_seconds: 15
     protocol: http
     endpoint: /v1/audio/transcriptions
-    language_code: zh
+    language_code: zh-CN
     auth_scheme: bearer
     proxy_url_env:
       - ASR_PROXY_URL
@@ -177,7 +177,6 @@ providers:
     assert settings.asr.api_key == "test-asr-secret"
     assert settings.asr.extra["protocol"] == "http"
     assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
-    assert settings.asr.extra["language_code"] == "zh"
     assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
     assert settings.llm_fallback is not None
     assert settings.llm_fallback.model == "mimo-v2-omni"

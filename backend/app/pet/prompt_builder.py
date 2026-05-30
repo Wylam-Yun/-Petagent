@@ -104,7 +104,7 @@ def build_pet_messages(
             "\n\n语音事件规则：\n"
             "1. 优先回应用户情绪，而不是急着给建议。\n"
             "2. 如果用户疲惫、烦躁、低落，语气要温柔。\n"
-            "3. 后端已经过滤不可用识别；你收到的 user_text 要当作用户真实输入回应。\n"
+            "3. 如果识别置信度低，不要假装完全听懂，可以说刚刚有点没听清。\n"
             "4. 不要复读用户整句话。\n"
             "5. 很多时候陪着就好，不要强行解决问题。"
         )
@@ -230,9 +230,7 @@ def build_fast_reply_messages(
 
     if event.type == "voice_message":
         system_prompt += (
-            "\n6. 后端已经过滤不可用识别；普通回复只回应 user_text，不要归因到语音识别质量。"
-            "\n7. 如果内容本身含糊，围绕用户说出的文字自然追问。"
-            "\n8. 不要连续复用最近一次回复的句式、动作或意象。"
+            "\n6. 如果识别置信度低，可以说刚刚有点没听清。"
         )
 
     # Build minimal payload — only essential fields
@@ -310,10 +308,7 @@ def build_thinking_messages(
         "\n4. 不输出 memory_update；记忆写入由后台触发器和夜间整理负责。"
     )
     if event.type == "voice_message":
-        system_prompt += (
-            "\n5. 后端已经过滤不可用识别；普通回复只回应 user_input，"
-            "不要归因到语音识别质量。"
-        )
+        system_prompt += "\n5. 语音输入可能不完整，低置信内容要温柔确认。"
 
     cognition = context.cognition_context or {}
     notebook_memory = _selected_notebook_lines(

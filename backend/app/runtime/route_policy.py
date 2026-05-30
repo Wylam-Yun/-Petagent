@@ -16,6 +16,16 @@ class RouteDecision:
     reason: str
 
 
+TOOL_KEYWORDS = {"天气", "出门", "下雨", "温度", "冷不冷", "热不热", "电量", "充电"}
+RECALL_KEYWORDS = {
+    "昨天", "前天", "刚刚", "之前", "上次", "回顾",
+    "聊了啥", "聊了什么", "说了啥", "说了什么", "记得", "想起来", "记得吗",
+}
+LONG_TASK_KEYWORDS = {
+    "代码", "编程", "写一个", "解释一下", "详细", "分析",
+    "帮我写", "教程", "原理", "算法",
+}
+
 PROACTIVE_EVENT_TYPES = {
     "morning", "night", "long_idle", "battery_low",
     "charging_started", "charging_stopped", "sleepy_time", "user_return",
@@ -60,6 +70,39 @@ def decide_route(
             allow_tools=False,
             max_tool_calls=0,
             reason="button interaction",
+        )
+
+    if user_text and any(kw in user_text for kw in RECALL_KEYWORDS):
+        return RouteDecision(
+            route="fast_reply",
+            context_profile="fast_reply",
+            provider_profile="fast_llm",
+            brain="fast",
+            allow_tools=False,
+            max_tool_calls=0,
+            reason="recall keyword in fast mode, using memory cards",
+        )
+
+    if user_text and any(kw in user_text for kw in TOOL_KEYWORDS):
+        return RouteDecision(
+            route="fast_reply",
+            context_profile="fast_reply",
+            provider_profile="fast_llm",
+            brain="fast",
+            allow_tools=False,
+            max_tool_calls=0,
+            reason="tool keywords routed to fast_reply (tools disabled in V1.3)",
+        )
+
+    if user_text and any(kw in user_text for kw in LONG_TASK_KEYWORDS):
+        return RouteDecision(
+            route="fast_reply",
+            context_profile="fast_reply",
+            provider_profile="fast_llm",
+            brain="fast",
+            allow_tools=False,
+            max_tool_calls=0,
+            reason="complex keywords routed to fast_reply (suggest Thinking Mode in prompt)",
         )
 
     return RouteDecision(

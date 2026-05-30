@@ -1,34 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
-import { DoudouSprite } from "./components/DoudouSprite";
 import { PetBubble } from "./components/PetBubble";
+import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
 import { TextInputBar } from "./components/TextInputBar";
 import { TouchArea } from "./components/TouchArea";
 import { VoiceButton } from "./components/VoiceButton";
 import { VoiceModeToggle } from "./components/VoiceModeToggle";
 import {
+  exitMomo,
   getAudioJob,
   getInteractions,
   getPetState,
+  getProactiveCheck,
   postAudioRetry,
   postPetEvent,
   refreshContext,
   reportDeviceState,
   resetRuntime,
   sendHeartbeat,
-  sendTextChat
+  sendTextChat,
+  triggerProactiveEvent,
+  wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
-import {
-  BehaviorDirector,
-  FAST_ACTION_MIN_VISIBLE_MS,
-} from "./pet/behaviorDirector";
+import { detectActivationIntent } from "./pet/activation";
 import { getErrorBubble } from "./pet/errorMessages";
+import { shouldApplyProactive } from "./pet/proactive";
 import { useClientConfig } from "./hooks/useClientConfig";
 import { useNetworkState } from "./hooks/useNetworkState";
-import type { DoudouAction } from "./pet/doudouSprites";
 import type {
+  ActivationResponse,
   AudioJob,
   AnimationName,
   InteractionDefinition,
@@ -78,7 +80,6 @@ function App() {
   const [petState, setPetState] = useState<PetState>(fallbackState);
   const [faceType, setFaceType] = useState<Mood>("idle");
   const [animation, setAnimation] = useState<AnimationName>("breathing");
-  const [doudouAction, setDoudouAction] = useState<DoudouAction>("idle");
   const [bubbleText, setBubbleText] = useState("豆豆在这里。");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<PetUIPhase>("idle");
@@ -91,8 +92,6 @@ function App() {
   const phaseRef = useRef<PetUIPhase>("idle");
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentPlaybackRef = useRef<PlaybackController | null>(null);
-  const fastActionHoldTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const directorRef = useRef(new BehaviorDirector());
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
 
@@ -100,15 +99,6 @@ function App() {
     phaseRef.current = nextPhase;
     setPhase(nextPhase);
   }
-
-  const clearFastActionHoldTimer = useCallback(() => {
-    if (fastActionHoldTimerRef.current) {
-      window.clearTimeout(fastActionHoldTimerRef.current);
-      fastActionHoldTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => clearFastActionHoldTimer, [clearFastActionHoldTimer]);
 
   useEffect(() => {
     let alive = true;
@@ -118,7 +108,6 @@ function App() {
         setPetState(state);
         setFaceType(state.mood);
         setAnimation(animationMap[state.mood] ?? "breathing");
-        setDoudouAction(BehaviorDirector.phaseToAction("idle"));
       })
       .catch(() => {
         if (!alive) return;
@@ -176,6 +165,23 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!isOnline) return;
+      if (!shouldApplyProactive({ phase, busy })) return;
+      void getProactiveCheck()
+        .then((check) => {
+          if (!check.active || !shouldApplyProactive({ phase, busy })) return;
+          return triggerProactiveEvent();
+        })
+        .then((response) => {
+          if (response && response.active) applyPetResponse(response);
+        })
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [phase, busy, isOnline]);
+
+  useEffect(() => {
     if (!isOnline) return;
     void sendHeartbeat().catch(() => undefined);
     const timer = window.setInterval(() => {
@@ -198,51 +204,6 @@ function App() {
     return result;
   }, [interactions]);
 
-  const handleDoudouTap = useCallback(() => {
-    const out = directorRef.current.onTap(Date.now(), phase);
-    setDoudouAction(out.visibleAction);
-    if (out.bubbleText) setBubbleText(out.bubbleText);
-  }, [phase]);
-
-  const handleOneShotComplete = useCallback((action: DoudouAction) => {
-    // Return to phase-appropriate action after one-shot
-    const currentPhase = phaseRef.current;
-    if (currentPhase === "listening" || currentPhase === "waiting_voice" || currentPhase === "speaking") {
-      if (directorRef.current.isFastActionHoldActive()) return;
-      setDoudouAction(BehaviorDirector.phaseToAction(currentPhase));
-    } else {
-      setDoudouAction("idle");
-    }
-  }, []);
-
-  function applyPhaseAction(nextPhase: PetUIPhase) {
-    const out = directorRef.current.onPhaseChange(nextPhase);
-    setDoudouAction(out.visibleAction);
-    return out;
-  }
-
-  function applySpeechPhaseAction(slotAction?: DoudouAction) {
-    if (slotAction) {
-      clearFastActionHoldTimer();
-      setDoudouAction(slotAction);
-    } else if (!directorRef.current.isFastActionHoldActive()) {
-      setDoudouAction(BehaviorDirector.phaseToAction("speaking"));
-    }
-  }
-
-  function scheduleFastActionHoldRelease(runId: number) {
-    clearFastActionHoldTimer();
-    fastActionHoldTimerRef.current = window.setTimeout(() => {
-      fastActionHoldTimerRef.current = null;
-      if (audioRunRef.current !== runId) return;
-      setDoudouAction(
-        BehaviorDirector.phaseToAction(
-          phaseRef.current === "speaking" ? "speaking" : "waiting_voice",
-        ),
-      );
-    }, FAST_ACTION_MIN_VISIBLE_MS);
-  }
-
   async function handlePetEvent(interaction: InteractionDefinition) {
     const event = interaction.event_id;
     const preview = interactionPreview[event] ?? {
@@ -253,7 +214,6 @@ function App() {
     setFaceType(preview.mood);
     setAnimation(preview.animation);
     setBubbleText(preview.text);
-    setDoudouAction("review");
 
     if (interaction.requires_model !== true) {
       return;
@@ -269,7 +229,6 @@ function App() {
       setFaceType("concerned");
       setAnimation("tilt");
       setBubbleText("豆豆刚刚没接稳，但还在这儿。");
-      setDoudouAction("failed");
     } finally {
       setBusy(false);
     }
@@ -279,21 +238,7 @@ function App() {
     setPetState(response.pet_state);
     setFaceType(response.face_type);
     setAnimation(response.animation);
-
-    // Feed response to director for behavior plan
-    const out = directorRef.current.onBackendResponse(
-      {
-        behavior_intent: response.behavior_intent,
-        behavior_plan: response.behavior_plan,
-        action: response.action,
-        mood: response.mood,
-        reply: response.reply,
-      },
-      phase,
-      Date.now(),
-    );
-    setDoudouAction(out.visibleAction);
-    if (out.bubbleText) setBubbleText(out.bubbleText);
+    setBubbleText(response.reply);
 
     const hasAudio = !!(response.audio_job_id || response.voice_url);
     if (hasAudio) {
@@ -308,31 +253,21 @@ function App() {
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
     stopCurrentAudioPlayback();
-    clearFastActionHoldTimer();
 
     try {
       if (response.audio_job_id) {
         setLastAudioJobId(response.audio_job_id);
         setPetPhase("waiting_voice");
-        applyPhaseAction("waiting_voice");
-        if (response.action) scheduleFastActionHoldRelease(runId);
-        const beforeOut = directorRef.current.advanceSlot("before_speech");
-        if (beforeOut) setDoudouAction(beforeOut.visibleAction);
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
           setLastAudioJobId(null);
           setPetPhase("speaking");
-          applyPhaseAction("speaking");
           setBubbleText("豆豆在说…");
-          const speechOut = directorRef.current.advanceSlot("speech");
-          applySpeechPhaseAction(speechOut?.visibleAction);
           await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
             setPetPhase("idle");
             setBubbleText("豆豆说完啦。");
-            const afterOut = directorRef.current.advanceSlot("after_speech");
-            setDoudouAction(afterOut?.visibleAction ?? "idle");
           }
           return;
         }
@@ -341,17 +276,11 @@ function App() {
 
       if (response.voice_url) {
         setPetPhase("speaking");
-        applyPhaseAction("speaking");
-        if (response.action) scheduleFastActionHoldRelease(runId);
         setBubbleText("豆豆在说…");
-        const speechOut = directorRef.current.advanceSlot("speech");
-        applySpeechPhaseAction(speechOut?.visibleAction);
         await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
           setBubbleText("豆豆说完啦。");
-          const afterOut = directorRef.current.advanceSlot("after_speech");
-          setDoudouAction(afterOut?.visibleAction ?? "idle");
         }
         return;
       }
@@ -364,11 +293,7 @@ function App() {
       setFaceType(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
-      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
     } finally {
-      if (audioRunRef.current === runId) {
-        clearFastActionHoldTimer();
-      }
       if (audioRunRef.current === runId) {
         setBusy(false);
       }
@@ -413,10 +338,8 @@ function App() {
     setBusy(true);
     setPetPhase("waiting_voice");
     setBubbleText("豆豆再试试…");
-    applyPhaseAction("waiting_voice");
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
-    clearFastActionHoldTimer();
     try {
       const { new_job_id } = await postAudioRetry(lastAudioJobId);
       if (audioRunRef.current !== runId) return;
@@ -427,20 +350,16 @@ function App() {
       if (job.voice_url) {
         setLastAudioJobId(null);
         setPetPhase("speaking");
-        applyPhaseAction("speaking");
         setBubbleText("豆豆在说…");
-        setDoudouAction(BehaviorDirector.phaseToAction("speaking"));
         await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
           setBubbleText("豆豆说完啦。");
-          setDoudouAction("idle");
         }
       } else {
         const errBubble = getErrorBubble(job.error_class);
         setPetPhase("audio_error");
         setBubbleText(errBubble.text);
-        setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
         setLastAudioJobId(null);
       }
     } catch (error) {
@@ -450,7 +369,6 @@ function App() {
       setFaceType(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
-      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
       if (error instanceof AudioJobError && error.status === "superseded") {
         setLastAudioJobId(null);
       }
@@ -467,7 +385,6 @@ function App() {
       setFaceType(errBubble.mood);
       setAnimation("slowBlink");
       setBubbleText(errBubble.text);
-      setDoudouAction(BehaviorDirector.phaseToAction("audio_error"));
       return;
     }
 
@@ -477,18 +394,48 @@ function App() {
       return;
     }
 
+    const intent = detectActivationIntent(
+      response.user_text,
+      response.audio_understanding.confidence
+    );
+
+    try {
+      if (intent === "wake") {
+        const activation = await wakeMomo(
+          response.user_text,
+          response.audio_understanding.confidence
+        );
+        setActiveSession(activation.active ? activation.session_id : null);
+        applyActivationResponse(activation);
+        return;
+      }
+      if (intent === "exit") {
+        const activation = await exitMomo(
+          response.user_text,
+          response.audio_understanding.confidence
+        );
+        setActiveSession(activation.active ? activation.session_id : null);
+        applyActivationResponse(activation);
+        return;
+      }
+    } catch {
+      setActiveSession(null);
+    }
+
+    applyPetResponse(response);
+  }
+
+  function applyActivationResponse(response: ActivationResponse) {
     applyPetResponse(response);
   }
 
   function handleVoicePhase(nextPhase: PetUIPhase) {
     setPetPhase(nextPhase);
-    const out = applyPhaseAction(nextPhase);
-    setDoudouAction(out.visibleAction);
 
     if (nextPhase === "listening") {
       setFaceType("thinking");
       setAnimation("blink");
-      setBubbleText("录音中。");
+      setBubbleText("嗯嗯，豆豆听着呢。");
     } else if (nextPhase === "thinking") {
       setFaceType("thinking");
       setAnimation("blink");
@@ -510,7 +457,6 @@ function App() {
   function interruptVoiceRun() {
     audioRunRef.current += 1;
     stopCurrentAudioPlayback();
-    clearFastActionHoldTimer();
     setBusy(false);
     setLastAudioJobId(null);
   }
@@ -542,7 +488,6 @@ function App() {
       setBubbleText(response.reply);
       setFaceType("idle");
       setAnimation("breathing");
-      setDoudouAction("idle");
     } catch {
       setBubbleText("换个话题的时候出了点小状况。");
     } finally {
@@ -563,7 +508,6 @@ function App() {
       setBubbleText(response.reply);
       setFaceType("idle");
       setAnimation("breathing");
-      setDoudouAction("idle");
       setActiveSession(null);
     } catch {
       setBubbleText("重新认识的时候出了点小状况。");
@@ -578,7 +522,6 @@ function App() {
     setFaceType("thinking");
     setAnimation("blink");
     setBubbleText("豆豆想一下…");
-    setDoudouAction("review");
     try {
       const response: TextChatResponse = await sendTextChat(text, { thinkingMode });
       if (response.activation) {
@@ -589,7 +532,6 @@ function App() {
         setFaceType(errBubble.mood);
         setAnimation("slowBlink");
         setBubbleText(errBubble.text);
-        setDoudouAction("failed");
         setBusy(false);
         return false;
       }
@@ -599,7 +541,6 @@ function App() {
       setFaceType("concerned");
       setAnimation("tilt");
       setBubbleText("文字没发出去，再试一次？");
-      setDoudouAction("failed");
       return false;
     } finally {
       setBusy(false);
@@ -620,11 +561,7 @@ function App() {
       <StatusBar state={petState} />
       <section className="pet-stage" aria-label={`豆豆当前心情 ${titleMood}`}>
         <h1>豆豆</h1>
-        <DoudouSprite
-          action={doudouAction}
-          onTap={handleDoudouTap}
-          onOneShotComplete={handleOneShotComplete}
-        />
+        <PetFace faceType={faceType} animation={animation} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
