@@ -1,6 +1,6 @@
 # Doudou Expression And Ambient Bubble Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` or equivalent task-by-task execution. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` or equivalent task-by-task execution. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 实现 V1.6 豆豆颜表情契约和 LLM 生成空闲气泡，让对话表情由语境驱动，空闲小剧场低频、可观测、不可规则生成台词。
 
@@ -80,7 +80,7 @@
 - Test: `backend/tests/test_v16_expression_contract.py`
 - Modify later: `frontend/src/pet/faces.ts`
 
-- [ ] **Step 1: Write backend catalog tests**
+- [x] **Step 1: Write backend catalog tests**
 
 Add tests:
 
@@ -114,7 +114,7 @@ def test_activity_recommendations_have_valid_expression_and_action():
     assert "sneak_eat" in rec.actions
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -124,7 +124,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_expression_contract.p
 
 Expected: import failure because `app.runtime.expressions` does not exist.
 
-- [ ] **Step 3: Implement catalog**
+- [x] **Step 3: Implement catalog**
 
 Create `backend/app/runtime/expressions.py` with:
 
@@ -212,7 +212,7 @@ def activity_recommendation(activity: str) -> ActivityRecommendation:
     return ACTIVITY_RECOMMENDATIONS[activity]
 ```
 
-- [ ] **Step 4: Run catalog tests**
+- [x] **Step 4: Run catalog tests**
 
 Run:
 
@@ -222,7 +222,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_expression_contract.p
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/runtime/expressions.py backend/tests/test_v16_expression_contract.py
@@ -241,7 +241,7 @@ git commit -m "feat: add doudou expression catalog"
 - Modify: `backend/app/runtime/dispatcher.py`
 - Tests: `backend/tests/test_v16_expression_contract.py`, `backend/tests/test_fast_reply_contract.py`
 
-- [ ] **Step 1: Add failing guard tests**
+- [x] **Step 1: Add failing guard tests**
 
 Append tests:
 
@@ -304,7 +304,7 @@ def test_fast_reply_rejects_kaomoji_in_tts_reply():
         raise AssertionError("kaomoji in reply must not reach TTS text")
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -314,7 +314,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_expression_contract.p
 
 Expected: failures because `FastReplyAction.expression_key` does not exist.
 
-- [ ] **Step 3: Update models**
+- [x] **Step 3: Update models**
 
 In `backend/app/runtime/actions.py`:
 
@@ -347,7 +347,7 @@ class PetResponse(BaseModel):
     memory_ack_hint: Optional[str] = None
 ```
 
-- [ ] **Step 4: Update fast reply guard**
+- [x] **Step 4: Update fast reply guard**
 
 In `backend/app/pet/guard.py`, import `normalize_expression_key` and update `guard_fast_reply_action()`:
 
@@ -393,7 +393,7 @@ return FastReplyAction(
 )
 ```
 
-- [ ] **Step 5: Update unified prompt schema**
+- [x] **Step 5: Update unified prompt schema**
 
 In `backend/app/pet/prompt_builder.py`, add expression list to `FAST_REPLY_SCHEMA`:
 
@@ -420,7 +420,7 @@ system_prompt += (
 )
 ```
 
-- [ ] **Step 6: Include expression in dispatcher responses**
+- [x] **Step 6: Include expression in dispatcher responses**
 
 In `backend/app/runtime/dispatcher.py`, add `expression_key` to `run.final_action` and `PetResponse` creation:
 
@@ -448,7 +448,7 @@ expression_key=normalize_expression_key(getattr(action, "expression_key", None),
 
 If the non-fast path is now unreachable for foreground, keep this as compatibility only.
 
-- [ ] **Step 7: Record submitted TTS text for debug**
+- [x] **Step 7: Record submitted TTS text for debug**
 
 In `RuntimeDispatcher.__init__`:
 
@@ -468,7 +468,7 @@ self.last_submitted_tts_at = datetime.utcnow().isoformat()
 
 This value must always be the final sanitized `reply`, never `expression_key`, kaomoji text, or raw LLM JSON. Tests should assert `last_submitted_tts_text == response["reply"]` and `last_submitted_tts_event_id` matches the current event, so stale debug values cannot mask a regression.
 
-- [ ] **Step 8: Run backend contract tests**
+- [x] **Step 8: Run backend contract tests**
 
 Run:
 
@@ -478,7 +478,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_expression_contract.p
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/app/runtime/actions.py backend/app/pet/guard.py backend/app/pet/prompt_builder.py backend/app/runtime/dispatcher.py backend/tests/test_v16_expression_contract.py backend/tests/test_fast_reply_contract.py
@@ -496,7 +496,7 @@ git commit -m "feat: add expression key to foreground replies"
 - Modify: `backend/app/main.py`
 - Test: `backend/tests/test_v16_ambient_policy.py`
 
-- [ ] **Step 1: Write policy and guard tests**
+- [x] **Step 1: Write policy and guard tests**
 
 Create `backend/tests/test_v16_ambient_policy.py`:
 
@@ -600,7 +600,7 @@ def test_failure_and_cancel_do_not_advance_counters(tmp_path):
     assert cancelled["backoff_step"] == before["backoff_step"]
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -610,7 +610,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_ambient_policy.py -q
 
 Expected: import failure because ambient service does not exist.
 
-- [ ] **Step 3: Implement ambient models, guard, store**
+- [x] **Step 3: Implement ambient models, guard, store**
 
 Create `backend/app/runtime/ambient_bubble.py` with these public surfaces:
 
@@ -886,7 +886,7 @@ class AmbientBubbleService:
         }
 ```
 
-- [ ] **Step 4: Add ambient prompt builder**
+- [x] **Step 4: Add ambient prompt builder**
 
 In `backend/app/pet/prompt_builder.py`:
 
@@ -936,7 +936,7 @@ def build_ambient_bubble_messages(
     ]
 ```
 
-- [ ] **Step 5: Add PetBrain method**
+- [x] **Step 5: Add PetBrain method**
 
 In `backend/app/pet/brain.py`:
 
@@ -959,7 +959,7 @@ def generate_ambient_bubble(self, *, scene: str, idle_step: int, idle_minutes: i
     return self.provider.complete_json(messages)
 ```
 
-- [ ] **Step 6: Wire service in app startup**
+- [x] **Step 6: Wire service in app startup**
 
 In `backend/app/main.py`, import the service near the other runtime imports:
 
@@ -979,7 +979,7 @@ Do **not** assign `app.state` at this point because `app` is not created until l
 app.state.ambient_bubble_service = ambient_bubble_service
 ```
 
-- [ ] **Step 7: Run policy tests**
+- [x] **Step 7: Run policy tests**
 
 Run:
 
@@ -989,7 +989,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_ambient_policy.py -q
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/runtime/ambient_bubble.py backend/app/pet/prompt_builder.py backend/app/pet/brain.py backend/app/main.py backend/tests/test_v16_ambient_policy.py
@@ -1006,7 +1006,7 @@ git commit -m "feat: add ambient bubble backend policy"
 - Test: `backend/tests/test_v16_ambient_api.py`
 - Test: `backend/tests/test_v16_idle_debug.py`
 
-- [ ] **Step 1: Write API tests**
+- [x] **Step 1: Write API tests**
 
 Create `backend/tests/test_v16_ambient_api.py`:
 
@@ -1151,7 +1151,7 @@ def test_legacy_proactive_no_longer_generates_user_visible_text():
     assert trigger.status_code == 410
 ```
 
-- [ ] **Step 2: Run API tests and verify failure**
+- [x] **Step 2: Run API tests and verify failure**
 
 Run:
 
@@ -1161,7 +1161,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_ambient_api.py tests/
 
 Expected: 404 failures because endpoints do not exist.
 
-- [ ] **Step 3: Add request models and eligibility helpers**
+- [x] **Step 3: Add request models and eligibility helpers**
 
 In `backend/app/api/pet.py`:
 
@@ -1229,7 +1229,7 @@ def _ambient_block_reason(request: Request, payload: AmbientRequest) -> str:
     return ""
 ```
 
-- [ ] **Step 4: Add check endpoint**
+- [x] **Step 4: Add check endpoint**
 
 In `backend/app/api/pet.py`:
 
@@ -1246,7 +1246,7 @@ def post_ambient_check(payload: AmbientRequest, request: Request):
     return {"eligible": True, "block_reason": "", "next_activity": svc.select_activity(payload.local_date)}
 ```
 
-- [ ] **Step 5: Add trigger, confirm and cancel endpoints**
+- [x] **Step 5: Add trigger, confirm and cancel endpoints**
 
 In `backend/app/api/pet.py`:
 
@@ -1346,7 +1346,7 @@ def post_ambient_cancel(payload: AmbientEventRequest, request: Request):
     return {"ok": ok}
 ```
 
-- [ ] **Step 6: Disable legacy proactive user-facing output**
+- [x] **Step 6: Disable legacy proactive user-facing output**
 
 In `backend/app/api/pet.py`, keep the endpoints only as compatibility stubs so old frontends fail clearly instead of seeing rule-generated copy from `ProactiveRuleProvider`:
 
@@ -1372,7 +1372,7 @@ def trigger_pet_proactive(request: Request, mode: str = ""):
 
 `ProactiveScheduler` can remain for heartbeat/watchdog freshness checks, but `ProactiveRuleProvider` must not be reachable from user-facing frontend code after this task.
 
-- [ ] **Step 7: Add debug endpoint**
+- [x] **Step 7: Add debug endpoint**
 
 In `backend/app/api/debug.py`:
 
@@ -1405,7 +1405,7 @@ def debug_idle_state(request: Request) -> Dict[str, Any]:
     }
 ```
 
-- [ ] **Step 8: Run API tests**
+- [x] **Step 8: Run API tests**
 
 Run:
 
@@ -1415,7 +1415,7 @@ cd backend && ../.venv/bin/python -m pytest tests/test_v16_ambient_api.py tests/
 
 Expected: PASS after updating `tests/test_phase1_proactive.py` to assert the legacy disabled behavior instead of rule-generated proactive copy.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/app/api/pet.py backend/app/api/debug.py backend/tests/test_v16_ambient_api.py backend/tests/test_v16_idle_debug.py backend/tests/test_phase1_proactive.py
@@ -1437,7 +1437,7 @@ git commit -m "feat: add ambient bubble api and debug state"
 - Test: `frontend/src/pet/faces.test.ts`
 - Test: `frontend/src/App.test.tsx`
 
-- [ ] **Step 1: Add frontend expression tests**
+- [x] **Step 1: Add frontend expression tests**
 
 Update `frontend/src/pet/faces.test.ts`:
 
@@ -1458,7 +1458,7 @@ test("faceForType keeps old mood behavior", () => {
 });
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -1468,7 +1468,7 @@ cd frontend && npm test -- --run src/pet/faces.test.ts
 
 Expected: failure because `expressionForKey` does not exist.
 
-- [ ] **Step 3: Update frontend types**
+- [x] **Step 3: Update frontend types**
 
 In `frontend/src/pet/types.ts`:
 
@@ -1503,7 +1503,7 @@ expression_key?: ExpressionKey;
 action?: string;
 ```
 
-- [ ] **Step 4: Update face map**
+- [x] **Step 4: Update face map**
 
 In `frontend/src/pet/faces.ts`:
 
@@ -1554,7 +1554,7 @@ export function expressionForKey(key?: string | null, mood?: Mood | string | nul
 }
 ```
 
-- [ ] **Step 5: Update PetFace**
+- [x] **Step 5: Update PetFace**
 
 In `frontend/src/components/PetFace.tsx`:
 
@@ -1582,7 +1582,7 @@ export function PetFace({ faceType, animation, expressionKey }: PetFaceProps) {
 }
 ```
 
-- [ ] **Step 6: Update App state and response application**
+- [x] **Step 6: Update App state and response application**
 
 In `frontend/src/App.tsx`, import `DoudouSprite`, `isValidDoudouAction`, and `DoudouAction`, then add:
 
@@ -1620,7 +1620,7 @@ In render, keep `PetFace` for the kaomoji contract and add the sprite as the vis
 <PetFace faceType={faceType} animation={animation} expressionKey={expressionKey} />
 ```
 
-- [ ] **Step 7: Update App test fixture**
+- [x] **Step 7: Update App test fixture**
 
 In `frontend/src/App.test.tsx`, add `expression_key` to successful responses:
 
@@ -1635,7 +1635,7 @@ expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-k
 expect(screen.getByLabelText("豆豆")).toHaveAttribute("data-action", "think");
 ```
 
-- [ ] **Step 8: Run frontend expression tests**
+- [x] **Step 8: Run frontend expression tests**
 
 Run:
 
@@ -1645,7 +1645,7 @@ cd frontend && npm test -- --run src/pet/faces.test.ts src/components/PetFace.te
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/src/pet/faces.ts frontend/src/pet/types.ts frontend/src/components/PetFace.tsx frontend/src/pet/faces.test.ts frontend/src/components/PetFace.test.tsx frontend/src/App.tsx frontend/src/App.test.tsx
@@ -1667,7 +1667,7 @@ git commit -m "feat: render doudou expression keys"
 - Test: `frontend/src/pet/api.test.ts`
 - Test: `frontend/src/App.test.tsx`
 
-- [ ] **Step 1: Write ambient controller tests**
+- [x] **Step 1: Write ambient controller tests**
 
 Create `frontend/src/pet/ambient.test.ts`:
 
@@ -1766,7 +1766,7 @@ test("ambient state persists idle step and local date", () => {
 });
 ```
 
-- [ ] **Step 2: Run test and verify failure**
+- [x] **Step 2: Run test and verify failure**
 
 Run:
 
@@ -1776,7 +1776,7 @@ cd frontend && npm test -- --run src/pet/ambient.test.ts
 
 Expected: import failure because `ambient.ts` does not exist.
 
-- [ ] **Step 3: Implement ambient helpers**
+- [x] **Step 3: Implement ambient helpers**
 
 Create `frontend/src/pet/ambient.ts`:
 
@@ -1869,7 +1869,7 @@ export function buildAmbientClientState(input: Omit<AmbientEligibilityInput, "no
 }
 ```
 
-- [ ] **Step 4: Add API types and functions**
+- [x] **Step 4: Add API types and functions**
 
 In `frontend/src/pet/types.ts`:
 
@@ -1954,7 +1954,7 @@ export function cancelAmbientBubble(payload: AmbientEventRequest): Promise<{ ok:
 }
 ```
 
-- [ ] **Step 5: Replace App proactive polling**
+- [x] **Step 5: Replace App proactive polling**
 
 In `frontend/src/App.tsx`:
 
@@ -2102,7 +2102,7 @@ onChange={(event) => {
 }}
 ```
 
-- [ ] **Step 6: Ensure user interaction resets idle**
+- [x] **Step 6: Ensure user interaction resets idle**
 
 In text submit start, voice phase `listening`, voice upload `thinking`, successful button interaction, reset button, and any tap/touch interaction:
 
@@ -2121,7 +2121,7 @@ if (nextPhase === "idle" || nextPhase === "error" || nextPhase === "audio_error"
 
 When `playResponseAudio()` finishes successfully, call `markIdleAnchor(true)` after phase becomes `idle`. When audio fails and the error bubble is shown, set a short timeout such as 1500ms that returns phase to `idle` and then calls `markIdleAnchor(true)`; this prevents `audio_error` from permanently blocking ambient eligibility.
 
-- [ ] **Step 7: Run frontend tests**
+- [x] **Step 7: Run frontend tests**
 
 Run:
 
@@ -2131,7 +2131,7 @@ cd frontend && npm test -- --run src/pet/ambient.test.ts src/pet/api.test.ts src
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/src/pet/ambient.ts frontend/src/pet/api.ts frontend/src/pet/types.ts frontend/src/App.tsx frontend/src/components/TextInputBar.tsx frontend/src/pet/ambient.test.ts frontend/src/pet/api.test.ts frontend/src/App.test.tsx
@@ -2145,7 +2145,7 @@ git commit -m "feat: add ambient idle bubble frontend"
 **Files:**
 - Modify: `plan/V1.6/doudou-expression-and-ambient-bubble-verification.md`
 
-- [ ] **Step 1: Run backend targeted tests**
+- [x] **Step 1: Run backend targeted tests**
 
 Run:
 
@@ -2163,7 +2163,7 @@ cd backend && ../.venv/bin/python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run backend full suite**
+- [x] **Step 2: Run backend full suite**
 
 Run:
 
@@ -2173,7 +2173,7 @@ cd backend && ../.venv/bin/python -m pytest -q
 
 Expected: PASS or only known skipped tests.
 
-- [ ] **Step 3: Run frontend targeted tests**
+- [x] **Step 3: Run frontend targeted tests**
 
 Run:
 
@@ -2188,7 +2188,7 @@ cd frontend && npm test -- --run \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run frontend full suite**
+- [x] **Step 4: Run frontend full suite**
 
 Run:
 
@@ -2198,7 +2198,7 @@ cd frontend && npm test -- --run
 
 Expected: PASS.
 
-- [ ] **Step 5: Check formatting and diff safety**
+- [x] **Step 5: Check formatting and diff safety**
 
 Run:
 
@@ -2209,7 +2209,7 @@ git status --short --branch
 
 Expected: no whitespace errors. Status should show only V1.6-related files.
 
-- [ ] **Step 6: Nubia connection precheck**
+- [x] **Step 6: Nubia connection precheck**
 
 Current known device state on 2026-05-31: ADB is available, screen is awake, backend is reachable through `adb forward tcp:18000 tcp:8000`, and Wi-Fi SSH to `nubia:8022` may time out because Mac routing/VPN can capture the phone subnet. Treat ADB forward as the required HTTP verification path, and use `ssh nubia-adb` for Termux restarts while USB is connected.
 
@@ -2231,7 +2231,7 @@ Expected:
 - Health returns `"ok":true`.
 - Watchdog returns `"ok":true` and `stuck:false`.
 
-- [ ] **Step 7: Deploy to Nubia and restart only through real Termux context**
+- [x] **Step 7: Deploy to Nubia and restart only through real Termux context**
 
 Deploy files with the existing ADB archive flow:
 
@@ -2248,7 +2248,7 @@ ssh -o ConnectTimeout=5 nubia-adb 'cd ~/Petagent && scripts/start.sh'
 
 If `ssh nubia-adb` times out after the forward is created, do **not** start the backend through `adb shell su` or as root. `scripts/start.sh` intentionally refuses root/adb network contexts because Android socket permission requires the real Termux app `inet` group. Mark deployment restart as `blocked_ssh_unavailable`, keep the existing running service if health remains good, and record that HTTP checks verify the currently running build only. Direct Wi-Fi SSH via `ssh nubia` is not a deployment prerequisite.
 
-- [ ] **Step 8: Verify Nubia health and build hash through ADB forward**
+- [x] **Step 8: Verify Nubia health and build hash through ADB forward**
 
 Run from host:
 
@@ -2265,7 +2265,7 @@ Expected health shape:
 
 The response should include the current build hash if existing health output supports it. If build hash is not the just-deployed commit because SSH restart was unavailable, record the mismatch explicitly and do not mark deployed-build verification as pass.
 
-- [ ] **Step 9: Verify foreground expression contract on Nubia**
+- [x] **Step 9: Verify foreground expression contract on Nubia**
 
 Send a text chat request:
 
@@ -2282,7 +2282,7 @@ Expected:
 - `expression_key` is present and whitelisted.
 - `audio_job_id` may be present, but TTS debug text equals `reply` when debug endpoint can be queried.
 
-- [ ] **Step 10: Verify ambient trigger with debug-scaled payload**
+- [x] **Step 10: Verify ambient trigger with debug-scaled payload**
 
 Send heartbeat, then trigger ambient:
 
@@ -2306,7 +2306,7 @@ Expected:
 - If active: no `audio_job_id`, no `voice_url`.
 - If active: `runtime.source` is `llm_generated`.
 
-- [ ] **Step 11: Confirm or cancel ambient display during manual API verification**
+- [x] **Step 11: Confirm or cancel ambient display during manual API verification**
 
 If Step 10 returned `active:true`, confirm it only after manually deciding the returned bubble would have been displayed:
 
@@ -2327,7 +2327,7 @@ curl -sS --max-time 5 -X POST http://127.0.0.1:18000/api/pet/ambient/cancel \
   -d '{"event_id":"'"$EVENT_ID"'"}'
 ```
 
-- [ ] **Step 12: Verify debug idle state**
+- [x] **Step 12: Verify debug idle state**
 
 Run with debug token only if it is known. On Nubia the token normally lives under `~/Petagent/backend/secrets/internal_token`, but if SSH/Termux is unavailable it may not be retrievable from the host. Do not assume `$DEBUG_TOKEN` is set.
 
@@ -2359,7 +2359,7 @@ Expected fields:
 - `last_submitted_tts_at`
 - `last_idle_bubble_source`
 
-- [ ] **Step 13: Write verification notes**
+- [x] **Step 13: Write verification notes**
 
 Create `plan/V1.6/doudou-expression-and-ambient-bubble-verification.md` using the observed results from Steps 1-12. Set the shell variables first, then generate the file:
 
@@ -2416,7 +2416,7 @@ EOF
 
 If any verification item fails, set that variable to `fail` and add a concrete note under `## Notes` before committing.
 
-- [ ] **Step 14: Final commit**
+- [x] **Step 14: Final commit**
 
 ```bash
 git add plan/V1.6/doudou-expression-and-ambient-bubble-verification.md
@@ -2427,9 +2427,9 @@ git commit -m "test: verify V1.6 expression and ambient bubble"
 
 ## Self-Review Checklist
 
-- [ ] Spec coverage: expression key, prompt schema, TTS isolation, ambient LLM generation, no rule-generated text, backoff, limits, debug state and Nubia verification all have tasks.
-- [ ] No user-facing Thinking Mode or Recall Mode is introduced.
-- [ ] Ambient bubbles do not write memory, do not call TTS and do not count as successful dialogue turns.
-- [ ] Foreground TTS only uses final sanitized `reply`.
-- [ ] Frontend owns actual TTS-end idle timing; backend owns daily limits, activity selection and LLM output validation.
-- [ ] Existing V1.5 failure behavior remains: invalid LLM output fails instead of producing fake normal replies.
+- [x] Spec coverage: expression key, prompt schema, TTS isolation, ambient LLM generation, no rule-generated text, backoff, limits, debug state and Nubia verification all have tasks.
+- [x] No user-facing Thinking Mode or Recall Mode is introduced.
+- [x] Ambient bubbles do not write memory, do not call TTS and do not count as successful dialogue turns.
+- [x] Foreground TTS only uses final sanitized `reply`.
+- [x] Frontend owns actual TTS-end idle timing; backend owns daily limits, activity selection and LLM output validation.
+- [x] Existing V1.5 failure behavior remains: invalid LLM output fails instead of producing fake normal replies.

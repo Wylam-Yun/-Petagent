@@ -1,9 +1,9 @@
 # PetAgent V1.6 Verification
 
 **Date:** 2026-05-31
-**Host commit before final V1.6 commit:** ac833a0
-**Nubia runtime process:** 15328
-**Nubia access path:** `adb forward tcp:18000 tcp:8000`, `ssh nubia-adb`
+**V1.6 code verification commit on Nubia:** 3428ade
+**Nubia runtime process:** 21774
+**Nubia access path:** `adb forward tcp:18000 tcp:8000`, `adb forward tcp:18022 tcp:8022`, `ssh nubia-adb`
 **Deployment rule:** 后续部署统一使用 `adb forward tcp:18022 tcp:8022` + `ssh nubia-adb`，不依赖 Wi-Fi 直连 `ssh nubia`。
 
 ## Backend
@@ -76,5 +76,6 @@
 
 ## Notes
 
-- The earlier Nubia health `build_hash` was `ac833a0` because V1.6 changes were deployed before the final local commit existed. Runtime behavior confirmed the loaded files included the new V1.6 endpoints and code.
-- After the final commit, rebuild and redeploy once more through `ssh nubia-adb`; `/api/health.build_hash` should match the committed V1.6 SHA.
+- Nubia code verification `/api/health` returned `build_hash: 3428ade`, `pid: 21774`, and `ok: true`.
+- Final Nubia `/api/health/watchdog` returned `ok: true`, `stuck: false`.
+- Final Nubia runtime guard check returned `mismatch_rejected True` for a `stay_near` activity paired with `sneak_eat`, proving the deployed code rejects activity/action mismatches instead of normalizing them.
