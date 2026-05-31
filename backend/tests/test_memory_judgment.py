@@ -238,6 +238,35 @@ def test_turn_summary_prompt_includes_current_and_recent_context():
     assert "selected_memory" not in payload
 
 
+def test_turn_summary_prompt_excludes_runtime_self_audit_memories():
+    provider = MockProvider(result={
+        "memories": [{"category": "preference", "content": "用户喜欢短回复"}],
+    })
+    tmp = Path(mkdtemp())
+    notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
+    notebook.overwrite_memory_lines([
+        {"category": "preference", "content": "用户喜欢短回复。"},
+        {"category": "temporary", "content": "我之前答错了星期。"},
+    ])
+    q = MemoryJudgmentQueue(provider=provider, notebook_manager=notebook)
+
+    q.enqueue_turn_summary(
+        user_text="今天星期几",
+        pet_reply="今天是星期一。",
+        route="unified",
+    )
+    q.process_one()
+    system_prompt = provider.last_messages[0]["content"]
+    payload = json.loads(provider.last_messages[1]["content"])
+
+    assert "只维护用户相关长期事实" in system_prompt
+    assert "自我审计" in system_prompt
+    assert "答错题" in system_prompt
+    assert "ASR" in system_prompt
+    assert "应移除" in system_prompt
+    assert "我之前答错了星期" in payload["long_term_memory_file"]
+
+
 def test_empty_summary_does_not_clear_existing_memory():
     provider = MockProvider(result={"memories": []})
     tmp = Path(mkdtemp())
