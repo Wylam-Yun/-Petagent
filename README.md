@@ -95,12 +95,19 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 
 ## Nubia Operations
 
+当前部署和运维统一走 USB ADB 转发后的 Termux SSH 通道，避免 Mac 侧
+VPN/路由影响 Wi-Fi 直连：
+
+```bash
+adb forward tcp:18022 tcp:8022
+```
+
 常用健康检查：
 
 ```bash
-ssh nubia 'curl -s http://127.0.0.1:8000/api/health'
-ssh nubia 'curl -s http://127.0.0.1:8000/api/health/watchdog'
-ssh nubia 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
+ssh nubia-adb 'curl -s http://127.0.0.1:8000/api/health'
+ssh nubia-adb 'curl -s http://127.0.0.1:8000/api/health/watchdog'
+ssh nubia-adb 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
 ```
 
 日志路径：

@@ -18,6 +18,7 @@ def test_guard_replaces_invalid_mood_and_limits_delta():
 
     assert action.mood == "idle"
     assert action.face_type == "idle"
+    assert action.expression_key == "idle_soft"
     assert action.animation == "breathing"
     assert action.state_delta["intimacy"] == 3
     assert action.state_delta["loneliness"] == -10
@@ -33,7 +34,7 @@ def test_guard_allows_natural_length_replies_up_to_configured_limit():
 
     action = guard_action({"reply": reply, "mood": "thinking"}, max_reply_chars=500)
 
-    assert action.reply == reply
+    assert action.reply == "我可以陪你把思路写清楚，先用哈希表记录见过的数字，再找目标差值。"
 
 
 def test_guard_truncates_at_configured_reply_limit():
@@ -70,7 +71,7 @@ def test_guard_strips_unclosed_think_block_with_final_reply():
 
     assert "<think>" not in action.reply
     assert "先判断" not in action.reply
-    assert action.reply == "早呀主人，豆豆醒着呢～"
+    assert action.reply == "早呀主人，我醒着呢～"
 
 
 def test_guard_strips_chinese_structured_reasoning_markers():
@@ -84,7 +85,7 @@ def test_guard_strips_chinese_structured_reasoning_markers():
 
     assert "思考" not in action.reply
     assert "用户在问" not in action.reply
-    assert action.reply == "早呀主人，豆豆来蹭蹭你。"
+    assert action.reply == "早呀主人，我来蹭蹭你。"
 
 
 def test_guard_strips_english_markdown_reasoning_markers():
@@ -98,7 +99,7 @@ def test_guard_strips_english_markdown_reasoning_markers():
 
     assert "Analysis" not in action.reply
     assert "The user" not in action.reply
-    assert action.reply == "Morning,豆豆在这里。"
+    assert action.reply == "Morning,我在这里。"
 
 
 def test_guard_raises_when_reply_is_only_reasoning():
@@ -121,7 +122,7 @@ def test_guard_drops_reasoning_appended_after_visible_reply():
         max_reply_chars=500,
     )
 
-    assert action.reply == "早呀主人，豆豆在这里。"
+    assert action.reply == "早呀主人，我在这里。"
 
 
 def test_guard_preserves_normal_user_facing_analysis_reply():
@@ -143,7 +144,14 @@ def test_guard_replaces_legacy_pet_name_in_visible_reply():
 
     assert "Momo" not in action.reply
     assert "momo" not in action.reply
-    assert action.reply == "早呀，豆豆 在这里。豆豆 刚醒。"
+    assert action.reply == "早呀，我 在这里。我 刚醒。"
+
+
+def test_guard_action_rejects_catalog_kaomoji_in_tts_reply():
+    for reply in ["我在(´・ω・)", "我超开心(≧▽≦)"]:
+        with pytest.raises(InvalidActionError) as exc_info:
+            guard_action({"reply": reply, "mood": "happy"})
+        assert exc_info.value.error_class == "llm_invalid_output"
 
 
 def test_guard_allows_large_feed_momo_hunger_delta():

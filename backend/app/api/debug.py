@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -45,6 +46,40 @@ def debug_incidents(
         return {"ok": True, "incidents": [], "total": 0}
     incidents = incident_store.recent(limit=limit)
     return {"ok": True, "incidents": incidents, "total": incident_store.count()}
+
+
+@router.get("/api/debug/idle-state")
+def debug_idle_state(request: Request) -> Dict[str, Any]:
+    require_internal_token(request)
+    local_date = datetime.now().date().isoformat()
+    svc = getattr(request.app.state, "ambient_bubble_service", None)
+    ambient = svc.debug_state(local_date) if svc is not None else {}
+    scheduler = getattr(request.app.state, "proactive_scheduler", None)
+    eligible = bool(scheduler and not scheduler.is_frontend_stale())
+    return {
+        "ok": True,
+        "eligible": eligible,
+        "block_reason": "" if eligible else "frontend_stale",
+        "next_trigger_time": "",
+        "backoff_step": ambient.get("backoff_step", 0),
+        "daily_count": ambient.get("daily_count", 0),
+        "pending_count": ambient.get("pending_count", 0),
+        "activity_counts": ambient.get("activity_counts", {}),
+        "last_suggested_activity": ambient.get("last_suggested_activity", ""),
+        "last_rendered_expression_key": ambient.get("last_rendered_expression_key", ""),
+        "last_rendered_action": ambient.get("last_rendered_action", ""),
+        "last_validation_failure_reason": ambient.get("last_validation_failure_reason", ""),
+        "last_submitted_tts_text": getattr(
+            request.app.state.dispatcher, "last_submitted_tts_text", ""
+        ),
+        "last_submitted_tts_event_id": getattr(
+            request.app.state.dispatcher, "last_submitted_tts_event_id", ""
+        ),
+        "last_submitted_tts_at": getattr(
+            request.app.state.dispatcher, "last_submitted_tts_at", ""
+        ),
+        "last_idle_bubble_source": ambient.get("last_idle_bubble_source", ""),
+    }
 
 
 @router.post("/api/internal/incident")

@@ -2,12 +2,16 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   VOICE_UPLOAD_TIMEOUT_MS,
+  cancelAmbientBubble,
+  confirmAmbientBubble,
   getAudioJob,
-  getProactiveCheck,
+  getAmbientCheck,
+  getClientConfig,
   postAudioRetry,
   reportDeviceState,
   sendHeartbeat,
   sendTextChat,
+  triggerAmbientBubble,
   uploadVoice
 } from "./api";
 import { getErrorBubble } from "./errorMessages";
@@ -124,18 +128,36 @@ describe("stage 3 API helpers", () => {
     });
   });
 
-  test("fetches proactive check endpoint", async () => {
+  test("posts ambient check endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ active: false })
+      json: async () => ({ eligible: true, block_reason: "" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const payload = ambientPayload();
+
+    await getAmbientCheck(payload);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/pet/ambient/check");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(payload);
+  });
+
+  test("posts ambient trigger and lifecycle endpoints", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true })
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await getProactiveCheck();
+    await triggerAmbientBubble(ambientPayload());
+    await confirmAmbientBubble({ event_id: "ambient-1" });
+    await cancelAmbientBubble({ event_id: "ambient-2" });
 
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/pet/proactive");
-    expect(response).toEqual({ active: false });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/pet/ambient/trigger");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/pet/ambient/confirm");
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/pet/ambient/cancel");
   });
 
   test("sends frontend heartbeat as JSON body", async () => {
@@ -154,6 +176,27 @@ describe("stage 3 API helpers", () => {
     expect(JSON.parse(init.body as string)).toHaveProperty("user_agent");
   });
 });
+
+function ambientPayload() {
+  return {
+    local_date: "2026-05-31",
+    scene: "post_conversation_idle",
+    idle_step: 0,
+    idle_elapsed_ms: 300000,
+    client_state: {
+      visible: true,
+      foreground: true,
+      screen_on: true,
+      idle: true,
+      busy: false,
+      input_active: false,
+      recording: false,
+      waiting_llm: false,
+      waiting_tts: false,
+      playing_tts: false
+    }
+  };
+}
 
 describe("audio error copy", () => {
   test("maps playback and unknown audio errors", () => {
@@ -192,7 +235,7 @@ describe("requestJson retry", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("AbortController", undefined);
 
-    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+    await expect(getAudioJob("aud-1")).resolves.toEqual({ active: false });
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init).not.toHaveProperty("signal");
@@ -255,7 +298,50 @@ describe("requestJson retry", () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
 
-    await expect(getProactiveCheck()).resolves.toEqual({ active: false });
+    await expect(getAudioJob("aud-1")).resolves.toEqual({ active: false });
+
+    vi.stubGlobal("fetch", originalFetch);
+    vi.stubGlobal("XMLHttpRequest", originalXhr);
+  });
+
+  test("client config uses the same transport fallback", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+
+    class FakeXMLHttpRequest {
+      static DONE = 4;
+      readyState = 0;
+      status = 0;
+      responseText = "";
+      timeout = 0;
+      onreadystatechange: (() => void) | null = null;
+      method = "";
+      url = "";
+
+      open(method: string, url: string) {
+        this.method = method;
+        this.url = url;
+      }
+
+      setRequestHeader() {
+        return undefined;
+      }
+
+      send() {
+        this.status = 200;
+        this.responseText = JSON.stringify({ audio_wait_ms: 12345, pet_name: "豆豆" });
+        this.readyState = FakeXMLHttpRequest.DONE;
+        this.onreadystatechange?.();
+      }
+    }
+
+    vi.stubGlobal("fetch", undefined);
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+
+    await expect(getClientConfig()).resolves.toEqual({
+      audio_wait_ms: 12345,
+      pet_name: "豆豆",
+    });
 
     vi.stubGlobal("fetch", originalFetch);
     vi.stubGlobal("XMLHttpRequest", originalXhr);
@@ -270,7 +356,7 @@ describe("requestJson retry", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await getProactiveCheck();
+    const response = await getAudioJob("aud-1");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(response).toEqual({ active: false });
@@ -280,7 +366,7 @@ describe("requestJson retry", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("persistent failure"));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getProactiveCheck()).rejects.toThrow("persistent failure");
+    await expect(getAudioJob("aud-1")).rejects.toThrow("persistent failure");
     // 1 initial + 2 retries = 3 total
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

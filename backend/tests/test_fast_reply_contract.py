@@ -42,9 +42,9 @@ def test_fast_reply_guard_raises_on_empty():
 
 
 def test_fast_reply_guard_invalid_mood():
-    """Invalid mood is cleared, not fallback to idle."""
     result = guard_fast_reply_action({"reply": "早", "mood": "furious"})
-    assert result.mood is None
+    assert result.mood == "idle"
+    assert result.expression_key == "idle_soft"
 
 
 def test_fast_reply_guard_invalid_action():
@@ -60,7 +60,7 @@ def test_fast_reply_guard_prompt_leak():
     }
     result = guard_fast_reply_action(raw)
     assert "state_delta" not in result.reply
-    assert "豆豆在这儿" in result.reply
+    assert "我在这儿" in result.reply
 
 
 def test_fast_reply_guard_strips_structured_reasoning():
@@ -74,7 +74,7 @@ def test_fast_reply_guard_strips_structured_reasoning():
 
     assert "分析" not in result.reply
     assert "早安问候" not in result.reply
-    assert result.reply == "早呀主人，豆豆醒啦～"
+    assert result.reply == "早呀主人，我醒啦～"
 
 
 def test_fast_reply_guard_raises_on_reasoning_only():
@@ -87,7 +87,7 @@ def test_fast_reply_guard_replaces_legacy_pet_name():
 
     assert "Momo" not in result.reply
     assert "momo" not in result.reply
-    assert result.reply == "早呀，豆豆 刚醒。豆豆 在听。"
+    assert result.reply == "早呀，我 刚醒。我 在听。"
 
 
 def test_fast_reply_response_has_route_and_action():
@@ -112,6 +112,7 @@ def test_fast_reply_response_has_route_and_action():
     )
     assert response.route == "unified"
     assert response.action == "waving"
+    assert response.expression_key == "happy"
     assert response.state_affect is None
     assert response.behavior_intent is None
     assert response.behavior_plan is None
@@ -129,6 +130,31 @@ def test_thinking_response_has_route():
     )
     assert response.route == "unified"
     assert response.runtime["context_profile"] == "unified"
+
+
+def test_fast_reply_tts_debug_uses_sanitized_reply_only():
+    app = create_app(testing=True)
+    provider = app.state.dispatcher.brain.provider
+
+    provider.complete_json = lambda messages: {
+        "reply": "豆豆来回答。",
+        "mood": "happy",
+        "expression_key": "happy",
+        "action": "speak",
+    }
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "你好"},
+        }
+    )
+
+    assert response.reply == "我来回答。"
+    assert response.expression_key == "happy"
+    assert app.state.dispatcher.last_submitted_tts_text == response.reply
+    assert app.state.dispatcher.last_submitted_tts_event_id == response.runtime["event_id"]
+    assert app.state.dispatcher.last_submitted_tts_at
 
 
 def test_fast_reply_skips_state_delta():

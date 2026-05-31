@@ -1,10 +1,14 @@
 import type {
   ActivationResponse,
+  AmbientBubbleResponse,
+  AmbientCheckRequest,
+  AmbientCheckResponse,
+  AmbientEventRequest,
   AudioJob,
+  ClientConfigResponse,
   DeviceStatePayload,
   InteractionDefinition,
   PetEventType,
-  ProactiveResponse,
   PetResponse,
   PetState,
   TextChatResponse,
@@ -142,6 +146,10 @@ export function getPetState(): Promise<PetState> {
   return requestJson<PetState>("/api/pet/state");
 }
 
+export function getClientConfig(): Promise<ClientConfigResponse> {
+  return requestJson<ClientConfigResponse>("/api/runtime/client-config");
+}
+
 export function getAudioJob(jobId: string): Promise<AudioJob> {
   return requestJson<AudioJob>(`/api/audio/jobs/${encodeURIComponent(jobId)}`);
 }
@@ -161,14 +169,35 @@ export function reportDeviceState(payload: DeviceStatePayload): Promise<DeviceSt
   });
 }
 
-export function getProactiveCheck(): Promise<{ active: boolean; candidate?: string }> {
-  return requestJson("/api/pet/proactive");
+export function getAmbientCheck(payload: AmbientCheckRequest): Promise<AmbientCheckResponse> {
+  return requestJson<AmbientCheckResponse>("/api/pet/ambient/check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
-export function triggerProactiveEvent(): Promise<ProactiveResponse> {
-  return requestJson<ProactiveResponse>("/api/pet/proactive/trigger", {
+export function triggerAmbientBubble(payload: AmbientCheckRequest): Promise<AmbientBubbleResponse> {
+  return requestJson<AmbientBubbleResponse>("/api/pet/ambient/trigger", {
     method: "POST",
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function confirmAmbientBubble(payload: AmbientEventRequest): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>("/api/pet/ambient/confirm", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function cancelAmbientBubble(payload: AmbientEventRequest): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>("/api/pet/ambient/cancel", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
   });
 }
 

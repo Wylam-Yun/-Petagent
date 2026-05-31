@@ -128,11 +128,9 @@ def test_proactive_low_cost_does_not_create_audio_job():
     client = TestClient(create_app(testing=True))
 
     response = client.post("/api/pet/proactive/trigger")
-    body = response.json()
 
-    if body.get("active"):
-        assert body["voice_url"] is None
-        assert body["audio_job_id"] is None
+    assert response.status_code == 410
+    assert response.json()["detail"]["error_class"] == "legacy_proactive_disabled"
 
 
 def test_audio_job_supersede_same_session():

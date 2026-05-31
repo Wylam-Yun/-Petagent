@@ -41,10 +41,10 @@ from app.providers.asr_http import HttpASRProvider
 from app.providers.asr_mock import MockASRProvider
 from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLMProvider
-from app.providers.proactive_rule import ProactiveRuleProvider
 from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
 from app.providers.probes import ProviderProbeManager
 from app.runtime.activation import ActivationManager
+from app.runtime.ambient_bubble import AmbientBubbleService
 from app.runtime.audio_job_store import AudioJobStore
 from app.runtime.audio_jobs import AudioJobManager
 from app.runtime.concurrency import AgentWorkExecutor, ProviderGate
@@ -159,6 +159,7 @@ def create_app(testing: bool = False) -> FastAPI:
     device_store = DeviceStateStore(state_store.connection)
     tick_service = TickService(state_store, device_store)
     proactive_service = ProactiveService(state_store, device_store)
+    ambient_bubble_service = AmbientBubbleService(state_store.connection)
     registry = SkillRegistry(settings=settings, device_store=device_store)
 
     # Stage 3.5: Cognition Context stores
@@ -250,8 +251,6 @@ def create_app(testing: bool = False) -> FastAPI:
     )
     brain = PetBrain(settings, slow_llm_provider)
     fast_brain = PetBrain(settings, fast_llm_provider)
-    proactive_brain = PetBrain(settings, ProactiveRuleProvider())
-
     memory_judgment_queue = MemoryJudgmentQueue(
         provider=_select_memory_summarizer_provider(settings, testing),
         provider_gate=None,  # wired after provider_gate is created
@@ -486,14 +485,15 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.device_store = device_store
     app.state.tick_service = tick_service
     app.state.proactive_service = proactive_service
+    app.state.ambient_bubble_service = ambient_bubble_service
     app.state.registry = registry
     app.state.dispatcher = dispatcher
+    app.state.fast_brain = fast_brain
     app.state.audio_provider = audio_provider
     app.state.asr_provider = asr_provider
     app.state.voice_pipeline = voice_pipeline
     app.state.text_pipeline = text_pipeline
     app.state.activation_manager = activation_manager
-    app.state.proactive_brain = proactive_brain
     app.state.episode_manager = episode_manager
     app.state.event_log_store = event_log_store
     app.state.successful_turn_store = successful_turn_store

@@ -11,6 +11,28 @@ export type Mood =
   | "excited"
   | "lonely";
 
+export type ExpressionKey =
+  | "idle_soft"
+  | "idle_wink"
+  | "happy"
+  | "happy_big"
+  | "excited"
+  | "shy"
+  | "clingy"
+  | "thinking"
+  | "confused"
+  | "concerned"
+  | "sad"
+  | "crying"
+  | "sleepy"
+  | "tired"
+  | "annoyed"
+  | "wronged"
+  | "proud"
+  | "playful"
+  | "lonely"
+  | "calm";
+
 export type AnimationName =
   | "breathing"
   | "bounce"
@@ -85,6 +107,12 @@ export type PetState = {
   updated_at?: string;
 };
 
+export type ClientConfigResponse = {
+  audio_wait_ms?: number;
+  audio_progressive?: Record<string, string>;
+  pet_name?: string;
+};
+
 export type BehaviorStep = {
   action: string;
   slot?: string;
@@ -97,6 +125,7 @@ export type PetResponse = {
   reply: string;
   mood: Mood;
   face_type: Mood;
+  expression_key?: ExpressionKey;
   animation: AnimationName;
   vibration: "none" | "light" | "medium";
   voice_url: string | null;
@@ -130,9 +159,48 @@ export type DeviceStatePayload = {
   is_charging: boolean | null;
 };
 
-export type ProactiveResponse =
-  | ({ active: true } & PetResponse)
-  | { active: false };
+export type AmbientClientState = {
+  visible: boolean;
+  foreground: boolean;
+  screen_on: boolean;
+  idle: boolean;
+  busy: boolean;
+  input_active: boolean;
+  recording: boolean;
+  waiting_llm: boolean;
+  waiting_tts: boolean;
+  playing_tts: boolean;
+};
+
+export type AmbientCheckRequest = {
+  local_date: string;
+  scene: string;
+  idle_step: number;
+  idle_elapsed_ms: number;
+  client_state: AmbientClientState;
+};
+
+export type AmbientCheckResponse = {
+  eligible: boolean;
+  block_reason: string;
+  next_activity?: string | null;
+};
+
+export type AmbientBubbleResponse = {
+  active: boolean;
+  event_id?: string;
+  bubble?: string;
+  expression_key?: ExpressionKey;
+  action?: string;
+  block_reason?: string;
+  audio_job_id?: null;
+  voice_url?: null;
+  runtime?: Record<string, unknown>;
+};
+
+export type AmbientEventRequest = {
+  event_id: string;
+};
 
 export type AudioUnderstanding = {
   user_text: string;

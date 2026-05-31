@@ -20,6 +20,7 @@ from app.runtime.actions import (
     PetAction,
     StateAffect,
 )
+from app.runtime.expressions import contains_kaomoji, normalize_expression_key
 
 
 DEFAULT_STATE_DELTA_LIMITS = {
@@ -140,6 +141,7 @@ FALLBACK_ACTION = {
 FAST_REPLY_FALLBACK = {
     "reply": "嗯嗯，豆豆在这儿。",
     "mood": "happy",
+    "expression_key": "happy",
     "action": "idle",
     "voice_style": "soft",
 }
@@ -307,6 +309,10 @@ def _sanitize_pet_name(reply: str) -> str:
     return _LEGACY_PET_NAME_PATTERN.sub("豆豆", reply)
 
 
+def _sanitize_first_person(reply: str) -> str:
+    return str(reply or "").replace("豆豆", "我")
+
+
 def guard_action(
     raw: Any,
     max_reply_chars: int = DEFAULT_MAX_REPLY_CHARS,
@@ -322,6 +328,7 @@ def guard_action(
     face_type = data.get("face_type") or mood
     if face_type not in ALLOWED_MOODS:
         face_type = mood
+    expression_key = normalize_expression_key(data.get("expression_key"), mood)
 
     animation = data.get("animation") or MOOD_ANIMATION_MAP.get(mood, "breathing")
     if animation not in ALLOWED_ANIMATIONS:
@@ -338,14 +345,18 @@ def guard_action(
     reply = _strip_reasoning(str(data.get("reply", "")).strip())
     reply = _sanitize_prompt_leak(reply)
     reply = _sanitize_pet_name(reply)
+    reply = _sanitize_first_person(reply)
     if not reply:
         raise InvalidActionError("llm_invalid_output", "LLM reply is empty after sanitization")
+    if contains_kaomoji(reply):
+        raise InvalidActionError("llm_invalid_output", "LLM reply contains kaomoji")
     reply = _trim_reply(reply, max_reply_chars)
 
     return PetAction(
         reply=reply,
         mood=mood,
         face_type=face_type,
+        expression_key=expression_key,
         animation=animation,
         voice_style=voice_style,
         vibration=vibration,
@@ -369,8 +380,10 @@ def guard_fast_reply_action(
         raise InvalidActionError("llm_invalid_output", "LLM reply is empty")
 
     mood = data.get("mood")
-    if mood and mood not in ALLOWED_MOODS:
-        mood = None
+    if mood not in ALLOWED_MOODS:
+        mood = "idle"
+
+    expression_key = normalize_expression_key(data.get("expression_key"), mood)
 
     action = data.get("action")
     if action and action not in ALLOWED_BEHAVIOR_ACTIONS:
@@ -383,13 +396,17 @@ def guard_fast_reply_action(
     reply = _strip_reasoning(str(data.get("reply", "")).strip())
     reply = _sanitize_prompt_leak(reply)
     reply = _sanitize_pet_name(reply)
+    reply = _sanitize_first_person(reply)
     if not reply:
         raise InvalidActionError("llm_invalid_output", "LLM reply is empty after sanitization")
+    if contains_kaomoji(reply):
+        raise InvalidActionError("llm_invalid_output", "LLM reply contains kaomoji")
     reply = _trim_reply(reply, max_reply_chars)
 
     return FastReplyAction(
         reply=reply,
         mood=mood,
+        expression_key=expression_key,
         action=action,
         voice_style=voice_style,
     )

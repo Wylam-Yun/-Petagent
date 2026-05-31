@@ -20,6 +20,7 @@ from app.runtime.context import build_runtime_context
 from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.events import normalize_event
+from app.runtime.expressions import normalize_expression_key
 from app.runtime.registry import SkillRegistry
 from app.runtime.concurrency import ProviderBusyError, ProviderGate
 from app.runtime.route_policy import decide_route
@@ -95,6 +96,9 @@ class RuntimeDispatcher:
         self.notebook_manager = notebook_manager
         self.successful_turn_store = successful_turn_store
         self._event_lock = threading.RLock()
+        self.last_submitted_tts_text = ""
+        self.last_submitted_tts_event_id = ""
+        self.last_submitted_tts_at = ""
         # Health counters (lock-free, read by /api/health/watchdog)
         self.event_loop_tick: float = perf_counter()
         self.agent_inflight_start: float = 0.0
@@ -341,6 +345,7 @@ class RuntimeDispatcher:
                     run.final_action = {
                         "reply": fast_action.reply[:200],
                         "mood": fast_action.mood or "idle",
+                        "expression_key": fast_action.expression_key,
                         "action": fast_action.action or "",
                         "voice_style": fast_action.voice_style,
                     }
@@ -361,6 +366,7 @@ class RuntimeDispatcher:
                         "reply": action.reply[:200],
                         "mood": action.mood,
                         "face_type": action.face_type,
+                        "expression_key": action.expression_key,
                         "animation": action.animation,
                         "voice_style": action.voice_style,
                     }
@@ -486,6 +492,9 @@ class RuntimeDispatcher:
             if synthesize_voice:
                 tts_text = fast_action.reply if is_fast_reply else action.reply
                 tts_style = fast_action.voice_style if is_fast_reply else action.voice_style
+                self.last_submitted_tts_text = tts_text
+                self.last_submitted_tts_event_id = event.id
+                self.last_submitted_tts_at = datetime.utcnow().isoformat()
                 if self.audio_job_manager is not None:
                     audio_job_id = self.audio_job_manager.enqueue(
                         tts_text,
@@ -583,6 +592,7 @@ class RuntimeDispatcher:
                 reply=fast_action.reply,
                 mood=resp_mood,
                 face_type=resp_mood,
+                expression_key=fast_action.expression_key,
                 animation=MOOD_ANIMATION_MAP.get(resp_mood, "breathing"),
                 vibration="none",
                 voice_url=voice_url,
@@ -609,6 +619,7 @@ class RuntimeDispatcher:
                 reply=action.reply,
                 mood=action.mood,
                 face_type=action.face_type,
+                expression_key=normalize_expression_key(action.expression_key, action.mood),
                 animation=action.animation,
                 vibration=action.vibration,
                 voice_url=voice_url,
@@ -661,6 +672,7 @@ class RuntimeDispatcher:
             reply="",
             mood=str(pet_state.get("mood") or "idle"),
             face_type=str(pet_state.get("mood") or "idle"),
+            expression_key=normalize_expression_key(None, str(pet_state.get("mood") or "idle")),
             animation="breathing",
             vibration="none",
             pet_state=dict(pet_state),

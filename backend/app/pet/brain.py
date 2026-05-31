@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from app.config import Settings
 from app.pet.prompt_builder import (
+    build_ambient_bubble_messages,
     build_fast_reply_messages,
     build_pet_messages,
     build_skill_plan_messages,
@@ -38,5 +39,26 @@ class PetBrain:
     ) -> Dict[str, Any]:
         messages = build_skill_plan_messages(
             self.settings, event, context, skill_catalog=skill_catalog,
+        )
+        return self.provider.complete_json(messages)
+
+    def generate_ambient_bubble(
+        self,
+        *,
+        scene: str,
+        idle_step: int,
+        idle_minutes: int,
+        suggested_activity: str,
+        pet_state: Dict[str, Any],
+        recent_dialogue: list,
+    ) -> Dict[str, Any]:
+        messages = build_ambient_bubble_messages(
+            self.settings,
+            scene=scene,
+            idle_step=idle_step,
+            idle_minutes=idle_minutes,
+            suggested_activity=suggested_activity,
+            pet_state=pet_state,
+            recent_dialogue=recent_dialogue,
         )
         return self.provider.complete_json(messages)

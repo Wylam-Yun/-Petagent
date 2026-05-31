@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { PetBubble } from "./components/PetBubble";
+import { DoudouSprite } from "./components/DoudouSprite";
 import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
 import { TextInputBar } from "./components/TextInputBar";
@@ -9,22 +10,32 @@ import { VoiceButton } from "./components/VoiceButton";
 import {
   exitMomo,
   getAudioJob,
+  getAmbientCheck,
   getInteractions,
   getPetState,
-  getProactiveCheck,
+  cancelAmbientBubble,
+  confirmAmbientBubble,
   postAudioRetry,
   postPetEvent,
   reportDeviceState,
   resetRuntime,
   sendHeartbeat,
   sendTextChat,
-  triggerProactiveEvent,
+  triggerAmbientBubble,
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
+import {
+  buildAmbientClientState,
+  getLocalDateString,
+  loadAmbientState,
+  saveAmbientState,
+  shouldRequestAmbient
+} from "./pet/ambient";
 import { detectActivationIntent } from "./pet/activation";
+import { BehaviorDirector } from "./pet/behaviorDirector";
+import { isValidDoudouAction, type DoudouAction } from "./pet/doudouSprites";
 import { getErrorBubble } from "./pet/errorMessages";
-import { shouldApplyProactive } from "./pet/proactive";
 import { useClientConfig } from "./hooks/useClientConfig";
 import { useNetworkState } from "./hooks/useNetworkState";
 import type {
@@ -77,24 +88,108 @@ const terminalAudioStatuses = new Set<AudioJob["status"]>([
 function App() {
   const [petState, setPetState] = useState<PetState>(fallbackState);
   const [faceType, setFaceType] = useState<Mood>("idle");
+  const [expressionKey, setExpressionKey] = useState<string>("idle_soft");
   const [animation, setAnimation] = useState<AnimationName>("breathing");
-  const [bubbleText, setBubbleText] = useState("豆豆在这里。");
+  const [spriteAction, setSpriteAction] = useState<DoudouAction>("idle");
+  const [bubbleText, setBubbleText] = useState("我在这里。");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<PetUIPhase>("idle");
+  const [inputActive, setInputActive] = useState(false);
+  const [recordingActive, setRecordingActive] = useState(false);
+  const initialAmbient = useMemo(
+    () => loadAmbientState(window.localStorage, getLocalDateString()),
+    [],
+  );
+  const [idleAnchorAt, setIdleAnchorAt] = useState(initialAmbient?.idleAnchorAt ?? Date.now());
+  const [idleStep, setIdleStep] = useState(initialAmbient?.idleStep ?? 0);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [interactions, setInteractions] = useState<InteractionDefinition[]>([]);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
   const audioRunRef = useRef(0);
   const phaseRef = useRef<PetUIPhase>("idle");
+  const busyRef = useRef(false);
+  const inputActiveRef = useRef(false);
+  const recordingActiveRef = useRef(false);
+  const idleAnchorAtRef = useRef(idleAnchorAt);
+  const idleStepRef = useRef(idleStep);
+  const ambientInFlightRef = useRef(false);
+  const pendingAmbientEventRef = useRef<string | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentPlaybackRef = useRef<PlaybackController | null>(null);
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
 
-  function setPetPhase(nextPhase: PetUIPhase) {
+  function setPetPhase(nextPhase: PetUIPhase, preserveSpriteAction = false) {
     phaseRef.current = nextPhase;
     setPhase(nextPhase);
+    if (!preserveSpriteAction) {
+      setSpriteAction(BehaviorDirector.phaseToAction(nextPhase));
+    }
+  }
+
+  function setBusyState(nextBusy: boolean) {
+    busyRef.current = nextBusy;
+    setBusy(nextBusy);
+  }
+
+  function setInputActiveState(active: boolean) {
+    inputActiveRef.current = active;
+    setInputActive(active);
+    if (active) cancelPendingAmbientDisplay();
+  }
+
+  function setRecordingActiveState(active: boolean) {
+    recordingActiveRef.current = active;
+    setRecordingActive(active);
+    if (active) cancelPendingAmbientDisplay();
+  }
+
+  function markIdleAnchor(resetStep = true) {
+    const now = Date.now();
+    const localDate = getLocalDateString();
+    const nextStep = resetStep ? 0 : idleStepRef.current;
+    idleAnchorAtRef.current = now;
+    idleStepRef.current = nextStep;
+    setIdleAnchorAt(now);
+    setIdleStep(nextStep);
+    saveAmbientState(window.localStorage, {
+      idleAnchorAt: now,
+      idleStep: nextStep,
+      localDate,
+    });
+  }
+
+  function advanceAmbientStep() {
+    const now = Date.now();
+    const nextStep = idleStepRef.current + 1;
+    const localDate = getLocalDateString();
+    idleAnchorAtRef.current = now;
+    idleStepRef.current = nextStep;
+    setIdleAnchorAt(now);
+    setIdleStep(nextStep);
+    saveAmbientState(window.localStorage, {
+      idleAnchorAt: now,
+      idleStep: nextStep,
+      localDate,
+    });
+  }
+
+  function cancelPendingAmbientDisplay() {
+    const eventId = pendingAmbientEventRef.current;
+    if (!eventId) return;
+    pendingAmbientEventRef.current = null;
+    void cancelAmbientBubble({ event_id: eventId }).catch(() => undefined);
+  }
+
+  function isAmbientDisplayStillVisible() {
+    return (
+      document.visibilityState === "visible" &&
+      phaseRef.current === "idle" &&
+      !busyRef.current &&
+      !inputActiveRef.current &&
+      !recordingActiveRef.current
+    );
   }
 
   useEffect(() => {
@@ -104,11 +199,13 @@ function App() {
         if (!alive) return;
         setPetState(state);
         setFaceType(state.mood);
+        setExpressionKey(state.mood);
         setAnimation(animationMap[state.mood] ?? "breathing");
+        setSpriteAction("idle");
       })
       .catch(() => {
         if (!alive) return;
-        setBubbleText("豆豆先用本地状态陪你。");
+        setBubbleText("我先用本地状态陪你。");
       });
     return () => {
       alive = false;
@@ -162,21 +259,96 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!isOnline) return;
     const timer = window.setInterval(() => {
-      if (!isOnline) return;
-      if (!shouldApplyProactive({ phase, busy })) return;
-      void getProactiveCheck()
+      if (ambientInFlightRef.current) return;
+      const now = Date.now();
+      const visible = document.visibilityState === "visible";
+      const currentPhase = phaseRef.current;
+      const currentBusy = busyRef.current;
+      const currentInput = inputActiveRef.current;
+      const currentRecording = recordingActiveRef.current;
+      const commonState = {
+        visible,
+        foreground: visible,
+        screenOn: visible,
+        phase: currentPhase,
+        busy: currentBusy,
+        inputActive: currentInput,
+        recording: currentRecording,
+        waitingLlm: currentPhase === "thinking",
+        waitingTts: currentPhase === "waiting_voice",
+        playingTts: currentPhase === "speaking",
+      };
+      if (!shouldRequestAmbient({
+        now,
+        idleAnchorAt: idleAnchorAtRef.current,
+        idleStep: idleStepRef.current,
+        ...commonState,
+      })) {
+        return;
+      }
+
+      ambientInFlightRef.current = true;
+      const payload = {
+        local_date: getLocalDateString(),
+        scene: "post_conversation_idle",
+        idle_step: idleStepRef.current,
+        idle_elapsed_ms: now - idleAnchorAtRef.current,
+        client_state: buildAmbientClientState(commonState),
+      };
+      void getAmbientCheck(payload)
         .then((check) => {
-          if (!check.active || !shouldApplyProactive({ phase, busy })) return;
-          return triggerProactiveEvent();
+          if (!check.eligible) return null;
+          return triggerAmbientBubble(payload);
         })
-        .then((response) => {
-          if (response && response.active) applyPetResponse(response);
+        .then((ambient) => {
+          if (!ambient?.active || !ambient.bubble) return;
+          if (!isAmbientDisplayStillVisible()) {
+            if (ambient.event_id) void cancelAmbientBubble({ event_id: ambient.event_id }).catch(() => undefined);
+            return;
+          }
+          setBubbleText(ambient.bubble);
+          setExpressionKey(ambient.expression_key ?? "idle_soft");
+          if (ambient.action && isValidDoudouAction(ambient.action)) {
+            setSpriteAction(ambient.action);
+          }
+          if (ambient.event_id) {
+            pendingAmbientEventRef.current = ambient.event_id;
+            if (!isAmbientDisplayStillVisible()) {
+              pendingAmbientEventRef.current = null;
+              void cancelAmbientBubble({ event_id: ambient.event_id }).catch(() => undefined);
+              markIdleAnchor(false);
+              return;
+            }
+            void confirmAmbientBubble({ event_id: ambient.event_id })
+              .then((result) => {
+                if (pendingAmbientEventRef.current === ambient.event_id) {
+                  pendingAmbientEventRef.current = null;
+                }
+                if (result.ok) {
+                  advanceAmbientStep();
+                } else {
+                  markIdleAnchor(false);
+                }
+              })
+              .catch(() => {
+                if (pendingAmbientEventRef.current === ambient.event_id) {
+                  pendingAmbientEventRef.current = null;
+                }
+                markIdleAnchor(false);
+              });
+          } else {
+            markIdleAnchor(false);
+          }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          ambientInFlightRef.current = false;
+        });
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [phase, busy, isOnline]);
+  }, [isOnline]);
 
   useEffect(() => {
     if (!isOnline) return;
@@ -202,21 +374,26 @@ function App() {
   }, [interactions]);
 
   async function handlePetEvent(interaction: InteractionDefinition) {
+    markIdleAnchor(true);
+    cancelPendingAmbientDisplay();
     const event = interaction.event_id;
     const preview = interactionPreview[event] ?? {
       mood: "thinking" as Mood,
       animation: "blink" as AnimationName,
-      text: "豆豆收到啦。"
+      text: "我收到啦。"
     };
     setFaceType(preview.mood);
+    setExpressionKey(preview.mood);
     setAnimation(preview.animation);
+    setSpriteAction("greet");
     setBubbleText(preview.text);
 
     if (interaction.requires_model !== true) {
+      markIdleAnchor(true);
       return;
     }
 
-    setBusy(true);
+    setBusyState(true);
 
     try {
       const response = await postPetEvent(event);
@@ -224,26 +401,38 @@ function App() {
       vibrate(response.vibration);
     } catch {
       setFaceType("concerned");
+      setExpressionKey("concerned");
       setAnimation("tilt");
-      setBubbleText("豆豆刚刚没接稳，但还在这儿。");
+      setSpriteAction("confused");
+      setBubbleText("我刚刚没接稳，但还在这儿。");
+      markIdleAnchor(true);
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
   function applyPetResponse(response: PetResponse) {
     setPetState(response.pet_state);
     setFaceType(response.face_type);
+    setExpressionKey(response.expression_key ?? response.face_type ?? response.mood);
     setAnimation(response.animation);
+    setSpriteAction(
+      response.action && isValidDoudouAction(response.action)
+        ? response.action
+        : "idle"
+    );
     setBubbleText(response.reply);
 
     const hasAudio = !!(response.audio_job_id || response.voice_url);
     if (hasAudio) {
-      setBubbleText("豆豆准备开口…");
-      setBusy(true);
+      setBubbleText("我准备开口…");
+      setBusyState(true);
     }
     playResponseAudio(response);
     vibrate(response.vibration);
+    if (!hasAudio) {
+      markIdleAnchor(true);
+    }
   }
 
   async function playResponseAudio(response: PetResponse) {
@@ -254,17 +443,18 @@ function App() {
     try {
       if (response.audio_job_id) {
         setLastAudioJobId(response.audio_job_id);
-        setPetPhase("waiting_voice");
+        setPetPhase("waiting_voice", true);
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
           setLastAudioJobId(null);
-          setPetPhase("speaking");
-          setBubbleText("豆豆在说…");
+          setPetPhase("speaking", true);
+          setBubbleText("我在说…");
           await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
             setPetPhase("idle");
-            setBubbleText("豆豆说完啦。");
+            setBubbleText("我说完啦。");
+            markIdleAnchor(true);
           }
           return;
         }
@@ -272,27 +462,35 @@ function App() {
       }
 
       if (response.voice_url) {
-        setPetPhase("speaking");
-        setBubbleText("豆豆在说…");
+        setPetPhase("speaking", true);
+        setBubbleText("我在说…");
         await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
-          setBubbleText("豆豆说完啦。");
+          setBubbleText("我说完啦。");
+          markIdleAnchor(true);
         }
         return;
       }
 
       setPetPhase("idle");
+      markIdleAnchor(true);
     } catch (error) {
       if (audioRunRef.current !== runId) return;
       const errBubble = getErrorBubble(errorClassForAudioError(error));
       setPetPhase("audio_error");
       setFaceType(errBubble.mood);
+      setExpressionKey(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
+      window.setTimeout(() => {
+        if (audioRunRef.current !== runId) return;
+        setPetPhase("idle");
+        markIdleAnchor(true);
+      }, 1500);
     } finally {
       if (audioRunRef.current === runId) {
-        setBusy(false);
+        setBusyState(false);
       }
     }
   }
@@ -315,7 +513,7 @@ function App() {
       for (let i = thresholds.length - 1; i >= 0; i--) {
         if (elapsed >= thresholds[i] && i > lastThresholdIdx) {
           lastThresholdIdx = i;
-          setBubbleText(progressive[String(thresholds[i])] ?? "豆豆准备声音…");
+          setBubbleText(progressive[String(thresholds[i])] ?? "我准备声音…");
           break;
         }
       }
@@ -332,9 +530,11 @@ function App() {
 
   async function handleRetryAudio() {
     if (!lastAudioJobId || busy) return;
-    setBusy(true);
-    setPetPhase("waiting_voice");
-    setBubbleText("豆豆再试试…");
+    markIdleAnchor(true);
+    cancelPendingAmbientDisplay();
+    setBusyState(true);
+    setPetPhase("waiting_voice", true);
+    setBubbleText("我再试试…");
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
     try {
@@ -346,16 +546,19 @@ function App() {
       if (!job || audioRunRef.current !== runId) return;
       if (job.voice_url) {
         setLastAudioJobId(null);
-        setPetPhase("speaking");
-        setBubbleText("豆豆在说…");
+        setPetPhase("speaking", true);
+        setBubbleText("我在说…");
         await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
-          setBubbleText("豆豆说完啦。");
+          setBubbleText("我说完啦。");
+          markIdleAnchor(true);
         }
       } else {
         const errBubble = getErrorBubble(job.error_class);
         setPetPhase("audio_error");
+        setFaceType(errBubble.mood);
+        setExpressionKey(errBubble.mood);
         setBubbleText(errBubble.text);
         setLastAudioJobId(null);
       }
@@ -364,6 +567,7 @@ function App() {
       const errBubble = getErrorBubble(errorClassForAudioError(error));
       setPetPhase("audio_error");
       setFaceType(errBubble.mood);
+      setExpressionKey(errBubble.mood);
       setAnimation("tilt");
       setBubbleText(errBubble.text);
       if (error instanceof AudioJobError && error.status === "superseded") {
@@ -371,7 +575,7 @@ function App() {
       }
     } finally {
       if (audioRunRef.current === runId) {
-        setBusy(false);
+        setBusyState(false);
       }
     }
   }
@@ -380,8 +584,10 @@ function App() {
     if (response.error_class) {
       const errBubble = getErrorBubble(response.error_class);
       setFaceType(errBubble.mood);
+      setExpressionKey(errBubble.mood);
       setAnimation("slowBlink");
       setBubbleText(errBubble.text);
+      markIdleAnchor(true);
       return;
     }
 
@@ -427,35 +633,51 @@ function App() {
   }
 
   function handleVoicePhase(nextPhase: PetUIPhase) {
+    if (nextPhase === "listening" || nextPhase === "thinking") {
+      markIdleAnchor(true);
+      cancelPendingAmbientDisplay();
+    }
     setPetPhase(nextPhase);
+    setRecordingActiveState(nextPhase === "listening" || nextPhase === "thinking");
 
     if (nextPhase === "listening") {
       setFaceType("thinking");
+      setExpressionKey("thinking");
       setAnimation("blink");
-      setBubbleText("嗯嗯，豆豆听着呢。");
+      setBubbleText("嗯嗯，我听着呢。");
     } else if (nextPhase === "thinking") {
       setFaceType("thinking");
+      setExpressionKey("thinking");
       setAnimation("blink");
-      setBubbleText("豆豆想一下…");
+      setBubbleText("我想一下…");
     } else if (nextPhase === "waiting_voice") {
       setFaceType("thinking");
+      setExpressionKey("thinking");
       setAnimation("blink");
-      setBubbleText("豆豆准备开口…");
+      setBubbleText("我准备开口…");
     } else if (nextPhase === "audio_error") {
       setFaceType("concerned");
+      setExpressionKey("concerned");
       setAnimation("tilt");
       setBubbleText("声音刚刚没出来。");
+      markIdleAnchor(true);
     } else if (nextPhase === "error") {
       setFaceType("concerned");
+      setExpressionKey("concerned");
       setAnimation("tilt");
+      markIdleAnchor(true);
+    } else if (nextPhase === "idle") {
+      markIdleAnchor(true);
     }
   }
 
   function interruptVoiceRun() {
     audioRunRef.current += 1;
     stopCurrentAudioPlayback();
-    setBusy(false);
+    setBusyState(false);
+    setRecordingActiveState(false);
     setLastAudioJobId(null);
+    markIdleAnchor(true);
   }
 
   function stopCurrentAudioPlayback() {
@@ -479,31 +701,40 @@ function App() {
 
   async function handleResetRuntime() {
     if (busy) return;
+    markIdleAnchor(true);
+    cancelPendingAmbientDisplay();
     const confirmed = window.confirm(
       "豆豆会忘掉之前的记忆，并回到初始状态。确定要重新认识吗？"
     );
     if (!confirmed) return;
-    setBusy(true);
+    setBusyState(true);
     try {
       const response = await resetRuntime();
       setPetState(response.pet_state);
       setBubbleText(response.reply);
       setFaceType("idle");
+      setExpressionKey("idle_soft");
       setAnimation("breathing");
+      setSpriteAction("idle");
       setActiveSession(null);
     } catch {
       setBubbleText("重新认识的时候出了点小状况。");
     } finally {
-      setBusy(false);
+      setBusyState(false);
+      markIdleAnchor(true);
     }
   }
 
   async function handleTextSubmit(text: string): Promise<boolean> {
     if (busy) return false;
-    setBusy(true);
+    markIdleAnchor(true);
+    cancelPendingAmbientDisplay();
+    setBusyState(true);
     setFaceType("thinking");
+    setExpressionKey("thinking");
     setAnimation("blink");
-    setBubbleText("豆豆想一下…");
+    setSpriteAction("think");
+    setBubbleText("我想一下…");
     try {
       const response: TextChatResponse = await sendTextChat(text);
       if (response.activation) {
@@ -512,20 +743,24 @@ function App() {
       if (response.error_class) {
         const errBubble = getErrorBubble(response.error_class);
         setFaceType(errBubble.mood);
+        setExpressionKey(errBubble.mood);
         setAnimation("slowBlink");
         setBubbleText(errBubble.text);
-        setBusy(false);
+        setBusyState(false);
+        markIdleAnchor(true);
         return false;
       }
       applyPetResponse(response);
       return true;
     } catch {
       setFaceType("concerned");
+      setExpressionKey("concerned");
       setAnimation("tilt");
       setBubbleText("文字没发出去，再试一次？");
+      markIdleAnchor(true);
       return false;
     } finally {
-      setBusy(false);
+      setBusyState(false);
     }
   }
 
@@ -543,11 +778,16 @@ function App() {
       <StatusBar state={petState} />
       <section className="pet-stage" aria-label={`豆豆当前心情 ${titleMood}`}>
         <h1>豆豆</h1>
-        <PetFace faceType={faceType} animation={animation} />
+        <DoudouSprite action={spriteAction} />
+        <PetFace faceType={faceType} animation={animation} expressionKey={expressionKey} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck">
-        <TextInputBar disabled={isTextDisabled} onSubmit={handleTextSubmit} />
+        <TextInputBar
+          disabled={isTextDisabled}
+          onSubmit={handleTextSubmit}
+          onActiveChange={setInputActiveState}
+        />
         <VoiceButton
           disabled={isVoiceDisabled}
           phase={phase}

@@ -4,9 +4,10 @@ import { useState } from "react";
 type TextInputBarProps = {
   disabled: boolean;
   onSubmit: (text: string) => Promise<boolean | void> | boolean | void;
+  onActiveChange?: (active: boolean) => void;
 };
 
-export function TextInputBar({ disabled, onSubmit }: TextInputBarProps) {
+export function TextInputBar({ disabled, onSubmit, onActiveChange }: TextInputBarProps) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -16,14 +17,17 @@ export function TextInputBar({ disabled, onSubmit }: TextInputBarProps) {
     const text = value.trim();
     if (!text || isDisabled) return;
     setSubmitting(true);
+    onActiveChange?.(true);
     setError("");
     try {
       const ok = await onSubmit(text);
       if (ok !== false) {
         setValue("");
+        onActiveChange?.(false);
       }
     } catch {
       setError("发送没成功，文字还留着。");
+      onActiveChange?.(true);
     } finally {
       setSubmitting(false);
     }
@@ -42,7 +46,15 @@ export function TextInputBar({ disabled, onSubmit }: TextInputBarProps) {
         disabled={isDisabled}
         placeholder="输入一句话……"
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onFocus={() => onActiveChange?.(true)}
+        onBlur={() => onActiveChange?.(!!value.trim())}
+        onCompositionStart={() => onActiveChange?.(true)}
+        onCompositionEnd={() => onActiveChange?.(!!value.trim())}
+        onChange={(event) => {
+          const next = event.target.value;
+          setValue(next);
+          onActiveChange?.(document.activeElement === event.currentTarget || !!next.trim());
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();

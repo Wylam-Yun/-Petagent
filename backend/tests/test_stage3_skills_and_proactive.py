@@ -137,10 +137,10 @@ def test_proactive_api_returns_inactive_when_no_candidate():
     response = client.get("/api/pet/proactive")
 
     assert response.status_code == 200
-    assert "active" in response.json()
+    assert response.json() == {"active": False, "legacy_disabled": True}
 
 
-def test_proactive_api_uses_low_cost_response_without_tts_for_active_event():
+def test_proactive_api_low_cost_trigger_is_disabled_for_v16():
     app = create_app(testing=True)
     state = app.state.state_store.get_state()
     state["last_interaction_at"] = (datetime.utcnow() - timedelta(hours=2)).isoformat()
@@ -150,15 +150,11 @@ def test_proactive_api_uses_low_cost_response_without_tts_for_active_event():
 
     response = client.post("/api/pet/proactive/trigger")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["active"] is True
-    assert body["voice_url"] is None
-    assert body["reply"]
-    assert body["runtime"]["proactive_mode"] == "low_cost"
+    assert response.status_code == 410
+    assert response.json()["detail"]["error_class"] == "legacy_proactive_disabled"
 
 
-def test_proactive_api_can_use_llm_mode_for_active_event():
+def test_proactive_api_llm_mode_trigger_is_disabled_for_v16():
     app = create_app(testing=True)
     state = app.state.state_store.get_state()
     state["last_interaction_at"] = (datetime.utcnow() - timedelta(hours=2)).isoformat()
@@ -169,7 +165,5 @@ def test_proactive_api_can_use_llm_mode_for_active_event():
 
     response = client.post("/api/pet/proactive/trigger?mode=llm")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["active"] is True
-    assert body["runtime"]["proactive_mode"] == "llm"
+    assert response.status_code == 410
+    assert response.json()["detail"]["error_class"] == "legacy_proactive_disabled"

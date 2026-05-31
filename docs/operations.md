@@ -24,7 +24,8 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/health/deep
 On Nubia:
 
 ```bash
-ssh nubia 'TOKEN="$(cat ~/Petagent/backend/secrets/internal_token)" && curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/health/deep'
+adb forward tcp:18022 tcp:8022
+ssh nubia-adb 'TOKEN="$(cat ~/Petagent/backend/secrets/internal_token)" && curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/health/deep'
 ```
 
 Rotate/re-pair:
@@ -48,9 +49,10 @@ path, method, client host, and reason. Token values are not stored.
 Basic checks:
 
 ```bash
-ssh nubia 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health'
-ssh nubia 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health/watchdog'
-ssh nubia 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
+adb forward tcp:18022 tcp:8022
+ssh nubia-adb 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health'
+ssh nubia-adb 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health/watchdog'
+ssh nubia-adb 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
 ```
 
 Watchdog fields to inspect during V1.1 validation:
@@ -112,7 +114,8 @@ low-memory Android 6 devices.
 Run from Nubia after deployment:
 
 ```bash
-ssh nubia 'cd ~/Petagent/backend && PETAGENT_TEST_URL=http://127.0.0.1:8000 PETAGENT_INTERNAL_TOKEN_FILE=../backend/secrets/internal_token ../.venv/bin/python -m pytest tests/test_live_nubia.py -q'
+adb forward tcp:18022 tcp:8022
+ssh nubia-adb 'cd ~/Petagent/backend && PETAGENT_TEST_URL=http://127.0.0.1:8000 PETAGENT_INTERNAL_TOKEN_FILE=../backend/secrets/internal_token ../.venv/bin/python -m pytest tests/test_live_nubia.py -q'
 ```
 
 The live suite covers ten V1.1 scenarios: light health, watchdog, public client

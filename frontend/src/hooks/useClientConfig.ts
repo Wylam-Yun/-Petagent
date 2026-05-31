@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { getClientConfig } from "../pet/api";
+
 export type ClientConfig = {
   audio_wait_ms: number;
   audio_progressive: Record<string, string>;
@@ -9,8 +11,8 @@ export type ClientConfig = {
 const DEFAULT_CONFIG: ClientConfig = {
   audio_wait_ms: 90_000,
   audio_progressive: {
-    "0": "豆豆准备声音…",
-    "5000": "豆豆有点慢，再等一下…",
+    "0": "我准备声音…",
+    "5000": "我有点慢，再等一下…",
     "30000": "声音可能要再等一会儿…",
   },
   pet_name: "豆豆",
@@ -21,8 +23,7 @@ export function useClientConfig(): ClientConfig {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/runtime/client-config")
-      .then((r) => (r.ok ? r.json() : null))
+    getClientConfig()
       .then((data) => {
         if (alive && data) {
           setConfig({

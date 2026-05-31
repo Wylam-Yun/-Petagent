@@ -6,7 +6,7 @@ type PetBubbleProps = {
 export function PetBubble({ text, busy = false }: PetBubbleProps) {
   return (
     <div className="pet-bubble" aria-live="polite">
-      {busy ? "唔，豆豆想一下…" : text}
+      {busy ? "唔，我想一下…" : text}
     </div>
   );
 }

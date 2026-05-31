@@ -109,9 +109,9 @@ export function VoiceButton({
       if (uploadRunRef.current !== uploadRun) return;
       changePhase("error");
       if (error instanceof RecordingTooShortError) {
-        onError("豆豆刚刚只听到一点点。");
+        onError("我刚刚只听到一点点。");
       } else if (error instanceof Error && (error.message.includes("timeout") || error.message.includes("aborted"))) {
-        onError("豆豆还在路上卡住了，再点一下试试。");
+        onError("我还在路上卡住了，再点一下试试。");
       } else if (error instanceof TypeError || (error instanceof Error && error.message.includes("fetch"))) {
         onError("网络好像有点慢，再试一次？");
       } else {

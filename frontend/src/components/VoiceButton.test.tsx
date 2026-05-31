@@ -6,7 +6,7 @@ import { VoiceButton } from "./VoiceButton";
 import type { VoiceChatResponse } from "../pet/types";
 
 const voiceResponse: VoiceChatResponse = {
-  reply: "辛苦啦。豆豆陪你缓一下。",
+  reply: "辛苦啦。我陪你缓一下。",
   mood: "concerned",
   face_type: "concerned",
   animation: "tilt",
@@ -229,6 +229,6 @@ describe("VoiceButton", () => {
     await waitFor(() => screen.getByRole("button", { name: "点一下发送" }));
     fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
 
-    await waitFor(() => expect(onError).toHaveBeenCalledWith("豆豆还在路上卡住了，再点一下试试。"));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("我还在路上卡住了，再点一下试试。"));
   });
 });

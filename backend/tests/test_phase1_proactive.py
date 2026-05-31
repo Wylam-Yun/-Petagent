@@ -92,19 +92,15 @@ def test_proactive_scheduler_stale_frontend_blocks_non_deterministic():
     assert result is True
 
 
-def test_stale_frontend_proactive_trigger_forces_low_cost_without_voice():
-    """Stale frontend must not trigger LLM/TTS load even if mode=llm is requested."""
+def test_stale_frontend_proactive_trigger_is_legacy_disabled():
+    """Legacy proactive trigger is disabled; V1.6 ambient endpoints replace it."""
     app = create_app(testing=True)
     client = TestClient(app)
 
     response = client.post("/api/pet/proactive/trigger?mode=llm")
-    body = response.json()
 
-    if body.get("active"):
-        assert body["runtime"]["frontend_stale"] is True
-        assert body["runtime"]["proactive_mode"] == "low_cost"
-        assert body["voice_url"] is None
-        assert body["audio_job_id"] is None
+    assert response.status_code == 410
+    assert response.json()["detail"]["error_class"] == "legacy_proactive_disabled"
 
 
 def test_proactive_scheduler_drain():

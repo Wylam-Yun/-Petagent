@@ -102,6 +102,7 @@ class PetAction(BaseModel):
     reply: str
     mood: str = "idle"
     face_type: str = "idle"
+    expression_key: str = "idle_soft"
     animation: str = "breathing"
     voice_style: str = "soft"
     vibration: str = "none"
@@ -117,6 +118,7 @@ class PetAction(BaseModel):
 class FastReplyAction(BaseModel):
     reply: str
     mood: Optional[str] = None
+    expression_key: str = "idle_soft"
     action: Optional[str] = None
     voice_style: str = "soft"
 
@@ -126,6 +128,7 @@ class PetResponse(BaseModel):
     reply: str
     mood: str
     face_type: str
+    expression_key: str = "idle_soft"
     animation: str
     vibration: str
     pet_state: Dict[str, Any]

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from app.config import Settings
 from app.runtime.context import RuntimeContext
 from app.runtime.events import PetEvent
+from app.runtime.expressions import EXPRESSION_KEYS, activity_recommendation
 from app.runtime.interaction_catalog import button_event_ids, get_interaction
 
 
@@ -33,9 +34,10 @@ def _selected_notebook_lines(selected: Any, max_items: int) -> List[str]:
 
 
 OUTPUT_SCHEMA_HINT = {
-    "reply": "自然简短的回复；需要解释或完成任务时可以适度展开；不输出 kaomoji",
+    "reply": "自然简短的回复；需要解释或完成任务时可以适度展开；必须使用第一人称“我”；不输出 kaomoji；不要自称豆豆",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
     "face_type": "同 mood 枚举",
+    "expression_key": "/".join(sorted(EXPRESSION_KEYS)),
     "animation": "breathing/bounce/droop/slowBlink/shake/wiggle/blink/tilt/jump/small",
     "voice_style": "soft/normal/happy/sleepy/shy",
     "vibration": "none/light/medium",
@@ -207,9 +209,11 @@ def build_pet_messages(
 
 
 FAST_REPLY_SCHEMA = {
-    "reply": "自然简短的回复，不超过 80 字",
+    "reply": "自然简短的回复，不超过 80 字；必须使用第一人称“我”；不要输出颜表情；不要自称豆豆",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
+    "expression_key": "/".join(sorted(EXPRESSION_KEYS)),
     "action": BEHAVIOR_ACTION_SCHEMA,
+    "voice_style": "soft/normal/happy/sleepy/shy",
 }
 
 
@@ -232,6 +236,10 @@ def build_unified_foreground_messages(
         "\n2. 文本和 ASR 成功后的语音都使用同一上下文。"
         "\n3. 不要提示用户打开思考模式或回忆模式。"
         "\n4. 严格输出 JSON，reply 必须是给用户看的自然回复。"
+        "\n\nV1.6 表情规则："
+        "\n1. 根据当前用户语境选择 expression_key。"
+        "\n2. reply 里不要输出颜表情，颜表情只能通过 expression_key 表示。"
+        "\n3. 台词主语必须用“我”，不要自称“豆豆”。"
     )
     cognition = context.cognition_context or {}
     payload = {
@@ -256,10 +264,67 @@ def build_fast_reply_messages(
     return build_unified_foreground_messages(settings, event, context)
 
 
+def build_ambient_bubble_messages(
+    settings: Settings,
+    *,
+    scene: str,
+    idle_step: int,
+    idle_minutes: int,
+    suggested_activity: str,
+    pet_state: Dict[str, Any],
+    recent_dialogue: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    system_prompt = settings.persona_config.get("system_prompt", "")
+    system_prompt += (
+        "\n\nV1.6 空闲气泡规则："
+        "\n1. 你是住在手机里的调皮小猫桌宠，但台词必须只用第一人称“我”。"
+        "\n2. 只能输出 JSON。"
+        "\n3. bubble 最多 20 个中文字符左右，只能一句。"
+        "\n4. 不要自称豆豆，不要输出颜表情，不要主动开启复杂话题。"
+        "\n5. 规则给你的 suggested_activity 是灵感，台词不能照抄模板。"
+        "\n6. expression_key 必须从 recommended_expression_keys 中选择。"
+        "\n7. action 必须从 recommended_actions 中选择。"
+        "\n8. 失败或不确定时宁可短一点，不要解释内部规则。"
+    )
+    rec = activity_recommendation(suggested_activity)
+    payload = {
+        "event_type": "ambient_bubble",
+        "scene": scene,
+        "idle_step": idle_step,
+        "idle_minutes": idle_minutes,
+        "suggested_activity": suggested_activity,
+        "activity_hint": {
+            "activity_class": rec.activity_class,
+            "recommended_expression_keys": rec.expression_keys,
+            "recommended_actions": rec.actions,
+        },
+        "tone": "调皮、轻、不要打扰",
+        "constraints": {
+            "max_chars": 20,
+            "first_person_only": True,
+            "no_tts": True,
+            "do_not_start_complex_topic": True,
+            "no_kaomoji_in_bubble": True,
+        },
+        "pet_state": pet_state,
+        "recent_dialogue": recent_dialogue,
+        "response_schema": {
+            "bubble": "一句短气泡，必须包含“我”，不能包含豆豆或颜表情",
+            "expression_key": "必须是 recommended_expression_keys 之一",
+            "action": "必须是 recommended_actions 之一",
+        },
+    }
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
 THINKING_RESPONSE_SCHEMA = {
-    "reply": "完整但简洁的自然回复；不输出思考过程",
+    "reply": "完整但简洁的自然回复；必须使用第一人称“我”；不输出思考过程；不要输出颜表情；不要自称豆豆",
     "mood": "idle/happy/sad/sleepy/angry/shy/thinking/concerned/excited/lonely",
     "face_type": "同 mood 枚举",
+    "expression_key": "/".join(sorted(EXPRESSION_KEYS)),
     "animation": "breathing/bounce/droop/slowBlink/shake/wiggle/blink/tilt/jump/small",
     "voice_style": "soft/normal/happy/sleepy/shy",
     "vibration": "none/light/medium",
