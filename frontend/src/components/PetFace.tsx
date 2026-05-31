@@ -11,8 +11,9 @@ export function PetFace({ faceType, animation, expressionKey }: PetFaceProps) {
   return (
     <div
       aria-label="豆豆表情"
-      className={`pet-face animation-${animation}`}
+      className="pet-face"
       data-face-type={faceType}
+      data-animation={animation}
       data-expression-key={expressionKey ?? ""}
     >
       {expressionForKey(expressionKey, faceType)}

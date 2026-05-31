@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { PetBubble } from "./components/PetBubble";
-import { DoudouSprite } from "./components/DoudouSprite";
 import { PetFace } from "./components/PetFace";
 import { StatusBar } from "./components/StatusBar";
 import { TextInputBar } from "./components/TextInputBar";
@@ -33,8 +32,6 @@ import {
   shouldRequestAmbient
 } from "./pet/ambient";
 import { detectActivationIntent } from "./pet/activation";
-import { BehaviorDirector } from "./pet/behaviorDirector";
-import { isValidDoudouAction, type DoudouAction } from "./pet/doudouSprites";
 import { getErrorBubble } from "./pet/errorMessages";
 import { useClientConfig } from "./hooks/useClientConfig";
 import { useNetworkState } from "./hooks/useNetworkState";
@@ -90,7 +87,6 @@ function App() {
   const [faceType, setFaceType] = useState<Mood>("idle");
   const [expressionKey, setExpressionKey] = useState<string>("idle_soft");
   const [animation, setAnimation] = useState<AnimationName>("breathing");
-  const [spriteAction, setSpriteAction] = useState<DoudouAction>("idle");
   const [bubbleText, setBubbleText] = useState("我在这里。");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<PetUIPhase>("idle");
@@ -120,12 +116,9 @@ function App() {
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
 
-  function setPetPhase(nextPhase: PetUIPhase, preserveSpriteAction = false) {
+  function setPetPhase(nextPhase: PetUIPhase) {
     phaseRef.current = nextPhase;
     setPhase(nextPhase);
-    if (!preserveSpriteAction) {
-      setSpriteAction(BehaviorDirector.phaseToAction(nextPhase));
-    }
   }
 
   function setBusyState(nextBusy: boolean) {
@@ -201,7 +194,6 @@ function App() {
         setFaceType(state.mood);
         setExpressionKey(state.mood);
         setAnimation(animationMap[state.mood] ?? "breathing");
-        setSpriteAction("idle");
       })
       .catch(() => {
         if (!alive) return;
@@ -310,9 +302,6 @@ function App() {
           }
           setBubbleText(ambient.bubble);
           setExpressionKey(ambient.expression_key ?? "idle_soft");
-          if (ambient.action && isValidDoudouAction(ambient.action)) {
-            setSpriteAction(ambient.action);
-          }
           if (ambient.event_id) {
             pendingAmbientEventRef.current = ambient.event_id;
             if (!isAmbientDisplayStillVisible()) {
@@ -385,7 +374,6 @@ function App() {
     setFaceType(preview.mood);
     setExpressionKey(preview.mood);
     setAnimation(preview.animation);
-    setSpriteAction("greet");
     setBubbleText(preview.text);
 
     if (interaction.requires_model !== true) {
@@ -403,7 +391,6 @@ function App() {
       setFaceType("concerned");
       setExpressionKey("concerned");
       setAnimation("tilt");
-      setSpriteAction("confused");
       setBubbleText("我刚刚没接稳，但还在这儿。");
       markIdleAnchor(true);
     } finally {
@@ -416,11 +403,6 @@ function App() {
     setFaceType(response.face_type);
     setExpressionKey(response.expression_key ?? response.face_type ?? response.mood);
     setAnimation(response.animation);
-    setSpriteAction(
-      response.action && isValidDoudouAction(response.action)
-        ? response.action
-        : "idle"
-    );
     setBubbleText(response.reply);
 
     const hasAudio = !!(response.audio_job_id || response.voice_url);
@@ -443,12 +425,12 @@ function App() {
     try {
       if (response.audio_job_id) {
         setLastAudioJobId(response.audio_job_id);
-        setPetPhase("waiting_voice", true);
+        setPetPhase("waiting_voice");
         const job = await waitForReadyAudio(response.audio_job_id, runId);
         if (audioRunRef.current !== runId) return;
         if (job.voice_url) {
           setLastAudioJobId(null);
-          setPetPhase("speaking", true);
+          setPetPhase("speaking");
           setBubbleText("我在说…");
           await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
@@ -462,7 +444,7 @@ function App() {
       }
 
       if (response.voice_url) {
-        setPetPhase("speaking", true);
+        setPetPhase("speaking");
         setBubbleText("我在说…");
         await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
@@ -533,7 +515,7 @@ function App() {
     markIdleAnchor(true);
     cancelPendingAmbientDisplay();
     setBusyState(true);
-    setPetPhase("waiting_voice", true);
+    setPetPhase("waiting_voice");
     setBubbleText("我再试试…");
     const runId = audioRunRef.current + 1;
     audioRunRef.current = runId;
@@ -546,7 +528,7 @@ function App() {
       if (!job || audioRunRef.current !== runId) return;
       if (job.voice_url) {
         setLastAudioJobId(null);
-        setPetPhase("speaking", true);
+        setPetPhase("speaking");
         setBubbleText("我在说…");
         await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
@@ -715,7 +697,6 @@ function App() {
       setFaceType("idle");
       setExpressionKey("idle_soft");
       setAnimation("breathing");
-      setSpriteAction("idle");
       setActiveSession(null);
     } catch {
       setBubbleText("重新认识的时候出了点小状况。");
@@ -733,7 +714,6 @@ function App() {
     setFaceType("thinking");
     setExpressionKey("thinking");
     setAnimation("blink");
-    setSpriteAction("think");
     setBubbleText("我想一下…");
     try {
       const response: TextChatResponse = await sendTextChat(text);
@@ -778,7 +758,6 @@ function App() {
       <StatusBar state={petState} />
       <section className="pet-stage" aria-label={`豆豆当前心情 ${titleMood}`}>
         <h1>豆豆</h1>
-        <DoudouSprite action={spriteAction} />
         <PetFace faceType={faceType} animation={animation} expressionKey={expressionKey} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>

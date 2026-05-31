@@ -172,7 +172,7 @@ test("local more interaction updates kaomoji without backend post", async () => 
   fireEvent.click(screen.getByRole("button", { name: "更多互动" }));
   fireEvent.click(screen.getByRole("button", { name: "摸摸头" }));
 
-  expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-wiggle");
+  expect(screen.getByLabelText("豆豆表情")).not.toHaveClass("animation-wiggle");
   expect(screen.getByText("摸摸头…")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(4);
 });
@@ -317,9 +317,9 @@ describe("text chat", () => {
       await vi.advanceTimersByTimeAsync(100);
     });
 
-    expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-bounce");
+    expect(screen.getByLabelText("豆豆表情")).not.toHaveClass("animation-bounce");
     expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "happy_big");
-    expect(screen.getByLabelText("豆豆")).toHaveAttribute("data-action", "happy");
+    expect(screen.queryByRole("img", { name: "豆豆" })).not.toBeInTheDocument();
     expect(screen.getByText("我准备开口…")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/audio/jobs/aud-fast-action")).toBe(true);
 
@@ -327,8 +327,8 @@ describe("text chat", () => {
       await vi.advanceTimersByTimeAsync(600);
     });
 
-    expect(screen.getByLabelText("豆豆表情")).toHaveClass("animation-bounce");
-    expect(screen.getByLabelText("豆豆")).toHaveAttribute("data-action", "happy");
+    expect(screen.getByLabelText("豆豆表情")).not.toHaveClass("animation-bounce");
+    expect(screen.queryByRole("img", { name: "豆豆" })).not.toBeInTheDocument();
   });
 });
 
@@ -392,7 +392,7 @@ test("ambient idle bubble displays without audio and confirms after display", as
 
   expect(screen.getByText("我没有偷吃。")).toBeInTheDocument();
   expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "playful");
-  expect(screen.getByLabelText("豆豆")).toHaveAttribute("data-action", "sneak_eat");
+  expect(screen.queryByRole("img", { name: "豆豆" })).not.toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/audio/jobs/ambient-1")).toBe(false);
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/pet/ambient/confirm")).toBe(true);
   expect(JSON.parse(window.localStorage.getItem("petagent:v16:ambient-state") ?? "{}").idleStep).toBe(1);
