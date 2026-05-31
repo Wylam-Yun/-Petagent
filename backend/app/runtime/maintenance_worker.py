@@ -17,11 +17,11 @@ DEFAULT_MAX_LOG_BYTES = 512 * 1024  # 512 KB
 class MaintenanceWorker:
     """Single long-lived thread for maintenance tasks.
 
-    Design:
-    - Fed by queue.Queue(maxsize=1) — notifications coalesce
-    - notify() method: puts to queue (non-blocking, drops if full)
-    - Loop: q.get(timeout=300) → calls maintenance_service.tick() → sleep until next slot
-    - Wall-clock fallback: tick every 5 minutes regardless of notifications
+Design:
+- Fed by queue.Queue(maxsize=1) — notifications coalesce
+- notify() method: puts to queue (non-blocking, drops if full)
+- Loop: q.get(timeout=300) → notification calls maintenance_service.tick(force=True)
+- Wall-clock fallback: tick every 5 minutes with normal interval gating
     - stop() method: sets shutdown flag, joins thread with timeout
     """
 
@@ -100,16 +100,16 @@ class MaintenanceWorker:
         while not self._shutdown.is_set():
             try:
                 # Wait for notification or timeout (wall-clock fallback)
-                self._queue.get(timeout=self.TICK_INTERVAL_SECONDS)
+                notified = self._queue.get(timeout=self.TICK_INTERVAL_SECONDS)
             except queue.Empty:
                 # Timeout — proceed with tick anyway (wall-clock fallback)
-                pass
+                notified = False
 
             if self._shutdown.is_set():
                 break
 
             try:
-                self._service.tick()
+                self._service.tick(force=bool(notified))
             except Exception:
                 logger.warning("Maintenance tick failed", exc_info=True)
 

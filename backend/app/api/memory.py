@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.auth import require_internal_token
+from app.api.auth import is_loopback, require_internal_token
 from app.runtime.context_store import desensitize_text
 
 router = APIRouter()
@@ -162,8 +162,9 @@ def memory_summarize(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/api/runtime/reset")
 def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     """Reset all runtime data. Requires { "confirm": "重新认识" }."""
-    require_internal_token(request)
     confirm = body.get("confirm", "")
+    if not is_loopback(request):
+        require_internal_token(request)
     if confirm != _RESET_CONFIRM_TEXT:
         raise HTTPException(
             status_code=400,
@@ -184,6 +185,9 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     episode_manager = request.app.state.episode_manager
     interaction_log = getattr(request.app.state, "interaction_log", None)
     activation_manager = getattr(request.app.state, "activation_manager", None)
+    successful_turn_store = getattr(request.app.state, "successful_turn_store", None)
+    memory_judgment_queue = getattr(request.app.state, "memory_judgment_queue", None)
+    notebook_manager = getattr(request.app.state, "notebook_manager", None)
 
     if memory_manager:
         memory_manager.clear_all()
@@ -197,6 +201,10 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
         daily_summary_store.clear_all()
     if maintenance_state:
         maintenance_state.clear_all()
+    if successful_turn_store:
+        successful_turn_store.clear_all()
+    if memory_judgment_queue:
+        memory_judgment_queue.clear()
 
     # Clear memory cards
     memory_card_manager = getattr(request.app.state, "memory_card_manager", None)
@@ -205,6 +213,8 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
             memory_card_manager.clear()
         except Exception:
             pass
+    if notebook_manager:
+        notebook_manager.overwrite_memory_lines([])
 
     if event_log_store:
         with event_log_store.connection.locked():
@@ -235,5 +245,5 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "pet_state": new_state,
-        "reply": "\u4f60\u597d\u5440\uff0c\u6211\u662f\u8c46\u8c46\u3002\u6211\u4eec\u91cd\u65b0\u5f00\u59cb\u8ba4\u8bc6\u5427\u3002",  # 你好呀，我是豆豆。我们重新开始认识吧。
+        "reply": "\u4f60\u597d\u5440\uff0c\u6211\u5728\u8fd9\u91cc\u3002\u6211\u4eec\u91cd\u65b0\u5f00\u59cb\u8ba4\u8bc6\u5427\u3002",  # 你好呀，我在这里。我们重新开始认识吧。
     }

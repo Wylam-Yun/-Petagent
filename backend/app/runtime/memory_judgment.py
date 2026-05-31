@@ -62,6 +62,7 @@ class MemoryJudgmentQueue:
         pet_reply: str,
         route: str,
         selected_memory: Optional[List[str]] = None,
+        recent_conversation_context: Optional[List[Dict[str, Any]]] = None,
         trigger_categories: Optional[List[str]] = None,
     ) -> bool:
         """Enqueue an after-turn summary job without blocking the response."""
@@ -77,6 +78,7 @@ class MemoryJudgmentQueue:
             "pet_reply": pet_reply,
             "route": route or "fast_reply",
             "selected_memory": list(selected_memory or [])[:10],
+            "recent_conversation_context": list(recent_conversation_context or [])[-5:],
             "trigger_categories": triggers,
             "priority": bool("explicit" in triggers),
         })
@@ -157,9 +159,9 @@ class MemoryJudgmentQueue:
             user_text=str(job.get("user_text") or ""),
             pet_reply=str(job.get("pet_reply") or ""),
             route=str(job.get("route") or "fast_reply"),
-            selected_memory=list(job.get("selected_memory") or []),
             memory_content=memory_content,
             trigger_categories=list(job.get("trigger_categories") or []),
+            recent_conversation_context=list(job.get("recent_conversation_context") or []),
         )
         result = retry_provider_call(
             lambda: self._provider.complete_json(messages),
@@ -168,6 +170,15 @@ class MemoryJudgmentQueue:
         memories = self._validate_memories(result)
         if memories is None:
             return {"should_write": False, "memories": None}
+        existing_entries = []
+        if self._notebook_manager is not None:
+            existing_entries = self._notebook_manager.parse_memory()
+        if existing_entries and memories == []:
+            return {
+                "should_write": False,
+                "memories": [],
+                "error": "empty_summary_would_clear_existing_memory",
+            }
         wrote = False
         if self._notebook_manager is not None:
             wrote = self._notebook_manager.overwrite_memory_lines(memories)
@@ -176,6 +187,11 @@ class MemoryJudgmentQueue:
     def pending_count(self) -> int:
         with self._lock:
             return len(self._pending)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._pending.clear()
+            self._seen.clear()
 
     def _validate_judgment(self, result: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(result, dict):

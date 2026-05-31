@@ -157,16 +157,15 @@ def test_fast_reply_tts_debug_uses_sanitized_reply_only():
     assert app.state.dispatcher.last_submitted_tts_at
 
 
-def test_fast_reply_skips_state_delta():
-    """Fast reply does not apply state_delta from LLM."""
+def test_fast_reply_applies_guarded_state_delta():
+    """Unified fast reply applies only guarded energy/intimacy deltas."""
     app = create_app(testing=True)
     provider = app.state.dispatcher.brain.provider
     original = provider.complete_json
 
     def patched(messages):
         result = original(messages)
-        # LLM tries to output state_delta (should be ignored in fast reply)
-        result["state_delta"] = {"energy": -100, "intimacy": 100}
+        result["state_delta"] = {"energy": -2, "intimacy": 1, "sleepiness": 99}
         return result
 
     provider.complete_json = patched
@@ -179,8 +178,9 @@ def test_fast_reply_skips_state_delta():
             "payload": {"user_text": "你好"},
         }
     )
-    # Energy should not have changed by -100
-    assert response.pet_state["energy"] >= state_before.get("energy", 0) - 10
+    assert response.pet_state["energy"] == state_before.get("energy", 0) - 2
+    assert response.pet_state["intimacy"] == state_before.get("intimacy", 0) + 2
+    assert response.pet_state["sleepiness"] == state_before.get("sleepiness", 0)
 
 
 def test_fast_reply_prompt_excludes_forbidden_fields():
@@ -210,16 +210,21 @@ def test_fast_reply_prompt_excludes_forbidden_fields():
     user_payload = json.loads(messages[1]["content"])
 
     # Must have these
-    assert "user_input" in user_payload
+    assert "current_user_message" in user_payload
+    assert "recent_conversation_context" in user_payload
+    assert "long_term_memory" in user_payload
     assert "pet_state" in user_payload
     assert "response_schema" in user_payload
+    assert "current_time" in user_payload
+    assert "sleepiness" not in user_payload["pet_state"]
+    assert set(user_payload["response_schema"]["state_delta"]) == {"energy", "intimacy"}
 
     # Must NOT have these
     forbidden = [
-        "current_time", "device_state", "skill_results",
+        "device_state", "skill_results",
         "temporal_recall_events", "episode_summaries", "daily_digest",
         "relevant_memories", "important_quotes",
-        "state_delta", "state_affect", "memory_update",
+        "user_input", "recent_dialogue", "state_affect", "memory_update",
         "behavior_plan", "output_schema",
     ]
     for field in forbidden:

@@ -5,6 +5,7 @@ import {
   buildAmbientClientState,
   getLocalDateString,
   loadAmbientState,
+  resetAmbientState,
   saveAmbientState,
   shouldRequestAmbient,
 } from "./ambient";
@@ -92,4 +93,19 @@ test("ambient state persists idle step and local date", () => {
     localDate: "2026-05-31",
   });
   expect(loadAmbientState(fakeStorage, "2026-06-01")?.idleStep).toBe(0);
+});
+
+test("resetAmbientState clears persisted idle state", () => {
+  const storage = new Map<string, string>();
+  const fakeStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    length: 0,
+    clear: () => storage.clear(),
+    key: () => null,
+  } as Storage;
+  saveAmbientState(fakeStorage, { idleAnchorAt: 1000, idleStep: 2, localDate: "2026-05-31" });
+  resetAmbientState(fakeStorage);
+  expect(loadAmbientState(fakeStorage, "2026-05-31")).toBeNull();
 });

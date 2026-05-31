@@ -118,34 +118,6 @@ def _sanitize_behavior_intent(raw: Any) -> Optional[str]:
         return raw
     return None
 
-FALLBACK_ACTION = {
-    "reply": "嗯嗯，豆豆在这儿。",
-    "mood": "happy",
-    "face_type": "happy",
-    "animation": "breathing",
-    "voice_style": "soft",
-    "vibration": "light",
-    "intent": "fallback",
-    "autonomy_notes": "provider unavailable or invalid output",
-    "state_delta": {
-        "energy": 0,
-        "intimacy": 0,
-        "hunger": 0,
-        "cleanliness": 0,
-        "loneliness": -1,
-        "sleepiness": 0,
-    },
-    "memory_update": {"should_save": False, "content": ""},
-}
-
-FAST_REPLY_FALLBACK = {
-    "reply": "嗯嗯，豆豆在这儿。",
-    "mood": "happy",
-    "expression_key": "happy",
-    "action": "idle",
-    "voice_style": "soft",
-}
-
 
 class InvalidActionError(ValueError):
     def __init__(self, error_class: str = "llm_invalid_output", message: str = "") -> None:
@@ -217,6 +189,28 @@ def _guard_state_affect(raw: Any) -> StateAffect:
         emotional_effect=effect,
         reason=reason,
     )
+
+
+FAST_STATE_DELTA_KEYS = {"energy", "intimacy"}
+FAST_STATE_DELTA_LIMIT = 5
+
+
+def _sanitize_fast_state_delta(raw: Any) -> Dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    guarded: Dict[str, int] = {}
+    for key in FAST_STATE_DELTA_KEYS:
+        value = raw.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if abs(number) > FAST_STATE_DELTA_LIMIT:
+            continue
+        guarded[key] = number
+    return guarded
 
 
 _PROMPT_LEAK_PATTERNS = re.compile(
@@ -409,4 +403,5 @@ def guard_fast_reply_action(
         expression_key=expression_key,
         action=action,
         voice_style=voice_style,
+        state_delta=_sanitize_fast_state_delta(data.get("state_delta") or {}),
     )

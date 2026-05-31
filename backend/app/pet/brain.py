@@ -9,6 +9,7 @@ from app.pet.prompt_builder import (
     build_pet_messages,
     build_skill_plan_messages,
     build_thinking_messages,
+    build_unified_retry_messages,
     build_unified_foreground_messages,
 )
 from app.providers.llm_mimo import LLMProvider
@@ -28,6 +29,22 @@ class PetBrain:
     def generate_fast_reply_action(self, event: PetEvent, context: RuntimeContext) -> Dict[str, Any]:
         messages = build_unified_foreground_messages(self.settings, event, context)
         return self.provider.complete_json(messages)
+
+    def retry_unified_action(
+        self,
+        event: PetEvent,
+        context: RuntimeContext,
+        *,
+        rejected_reply: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        messages = build_unified_foreground_messages(self.settings, event, context)
+        retry_messages = build_unified_retry_messages(
+            messages,
+            rejected_reply=rejected_reply,
+            reason=reason,
+        )
+        return self.provider.complete_json(retry_messages)
 
     def generate_thinking_action(self, event: PetEvent, context: RuntimeContext) -> Dict[str, Any]:
         messages = build_unified_foreground_messages(self.settings, event, context)

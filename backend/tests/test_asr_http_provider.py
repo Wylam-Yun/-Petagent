@@ -325,23 +325,36 @@ def test_http_asr_does_not_retry_client_errors(tmp_path: Path, monkeypatch):
     assert transcript.error_code == "asr_http_400"
 
 
-def test_http_asr_does_not_retry_timeouts(tmp_path: Path, monkeypatch):
+def test_http_asr_retries_timeout_then_succeeds(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
     config = provider_config()
     config.extra["transient_retries"] = 2
+    config.extra["retry_backoff_seconds"] = 0
     calls = []
+
+    class SuccessResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "超时后听清了"}
 
     def fake_post(url, **kwargs):
         calls.append((url, kwargs))
-        raise requests.Timeout("read timed out")
+        if len(calls) == 1:
+            raise requests.Timeout("read timed out")
+        return SuccessResponse()
 
     monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
 
     transcript = HttpASRProvider(config).transcribe(audio, "audio/wav")
 
-    assert len(calls) == 1
-    assert transcript.error_code == "asr_timeout"
+    assert len(calls) == 2
+    assert transcript.text == "超时后听清了"
+    assert transcript.error_code == ""
 
 
 def test_http_asr_does_not_retry_bad_json(tmp_path: Path, monkeypatch):
@@ -397,3 +410,32 @@ def test_timeout_tuple_reserves_more_time_for_asr_read(tmp_path: Path, monkeypat
     HttpASRProvider(config).transcribe(audio, "audio/wav")
 
     assert captured["timeout"] == (2, 4)
+
+
+def test_configured_timeout_tuple_can_separate_connect_and_read(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = provider_config()
+    config.timeout_seconds = 12
+    config.extra["connect_timeout_seconds"] = 4
+    config.extra["read_timeout_seconds"] = 12
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "你好"}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("app.providers.asr_http.requests.post", fake_post)
+
+    HttpASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert captured["timeout"] == (4, 12)

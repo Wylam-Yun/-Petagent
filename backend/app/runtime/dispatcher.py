@@ -11,6 +11,7 @@ from time import perf_counter
 
 from app.pet.brain import PetBrain
 from app.pet.guard import InvalidActionError, guard_action, guard_fast_reply_action
+from app.pet.reply_quality import is_unified_reply_contract_violation
 from app.pet.rules import apply_event_rules, apply_state_delta, clamp_state
 from app.pet.state import PetStateStore
 from app.providers.tts_mimo import MockTTSProvider
@@ -21,12 +22,15 @@ from app.runtime.context_manager import ContextManager
 from app.runtime.context_store import EpisodeStore, EventLogStore
 from app.runtime.events import normalize_event
 from app.runtime.expressions import normalize_expression_key
+from app.runtime.interaction_catalog import button_event_ids
 from app.runtime.registry import SkillRegistry
 from app.runtime.concurrency import ProviderBusyError, ProviderGate
 from app.runtime.route_policy import decide_route
 from app.runtime.memory_triggers import detect_memory_triggers
 
 logger = logging.getLogger(__name__)
+
+BUTTON_EVENTS = set(button_event_ids())
 
 _PROFILE_TO_GATE = {
     "fast_llm": "llm_fast",
@@ -326,7 +330,7 @@ class RuntimeDispatcher:
             run.error = llm_error_class or "LLM provider exception"
             return self._failure_response(
                 event=event,
-                pet_state=ruled_state,
+                pet_state=state_before,
                 run=run,
                 episode_id=episode_id,
                 cognition_context=cognition_context,
@@ -341,6 +345,90 @@ class RuntimeDispatcher:
         try:
             if is_fast_reply:
                 fast_action = guard_fast_reply_action(raw_action)
+                if is_unified_reply_contract_violation(
+                    user_text=user_text,
+                    reply=fast_action.reply,
+                    recent_context=(cognition_context or {}).get("recent_exact_events") if cognition_context else None,
+                ):
+                    retry_raw_action = None
+                    retry_error_class = ""
+                    retry_gate_acquired = False
+                    retry_start = perf_counter()
+                    try:
+                        if self.provider_gate is not None:
+                            self.provider_gate.acquire(provider_type)
+                            retry_gate_acquired = True
+                        retry_raw_action = active_brain.retry_unified_action(
+                            event,
+                            context,
+                            rejected_reply=fast_action.reply,
+                            reason="context_contract_violation",
+                        )
+                    except ProviderBusyError:
+                        retry_error_class = "provider_busy"
+                        retry_raw_action = None
+                    except Exception:
+                        retry_error_class = "llm_provider_error"
+                        retry_raw_action = None
+                    finally:
+                        if retry_gate_acquired and self.provider_gate is not None:
+                            try:
+                                self.provider_gate.release(provider_type)
+                            except Exception:
+                                pass
+                    if run:
+                        run.timings_ms["llm"] = int(
+                            run.timings_ms.get("llm", 0)
+                            + (perf_counter() - retry_start) * 1000
+                        )
+                        run.record(
+                            "unified_contract_retry",
+                            {"reason": "context_contract_violation"},
+                        )
+                    if retry_raw_action is not None:
+                        retry_fast_action = guard_fast_reply_action(retry_raw_action)
+                        if not is_unified_reply_contract_violation(
+                            user_text=user_text,
+                            reply=retry_fast_action.reply,
+                            recent_context=(cognition_context or {}).get("recent_exact_events") if cognition_context else None,
+                        ):
+                            fast_action = retry_fast_action
+                        else:
+                            retry_error_class = "llm_context_contract_violation"
+                            fast_action = retry_fast_action
+                    else:
+                        retry_error_class = retry_error_class or "llm_context_contract_violation"
+                    if retry_error_class:
+                        error_class = retry_error_class
+                        if retry_raw_action is not None:
+                            error_class = "llm_context_contract_violation"
+                        else:
+                            error_class = retry_error_class
+                    else:
+                        error_class = ""
+                    if error_class:
+                        if run:
+                            run.final_action = {
+                                "reply": fast_action.reply[:200],
+                                "mood": fast_action.mood or "idle",
+                                "expression_key": fast_action.expression_key,
+                                "action": fast_action.action or "",
+                                "voice_style": fast_action.voice_style,
+                                "state_delta": dict(fast_action.state_delta),
+                                "rejected_reason": "context_contract_violation",
+                            }
+                            run.set_status("failed")
+                            run.error = error_class
+                        return self._failure_response(
+                            event=event,
+                            pet_state=state_before,
+                            run=run,
+                            episode_id=episode_id,
+                            cognition_context=cognition_context,
+                            error_class=error_class,
+                            provider=decision.provider_profile if decision else provider_type,
+                            pipeline_start=pipeline_start,
+                        )
                 if run:
                     run.final_action = {
                         "reply": fast_action.reply[:200],
@@ -348,9 +436,10 @@ class RuntimeDispatcher:
                         "expression_key": fast_action.expression_key,
                         "action": fast_action.action or "",
                         "voice_style": fast_action.voice_style,
+                        "state_delta": dict(fast_action.state_delta),
                     }
-                # Minimal state update: mood + last_interaction_at only
                 final_state = dict(ruled_state)
+                final_state = apply_state_delta(final_state, fast_action.state_delta)
                 if fast_action.mood:
                     final_state["mood"] = fast_action.mood
                 final_state["mode"] = "idle"
@@ -398,7 +487,7 @@ class RuntimeDispatcher:
                 run.error = exc.error_class
             return self._failure_response(
                 event=event,
-                pet_state=ruled_state,
+                pet_state=state_before,
                 run=run,
                 episode_id=episode_id,
                 cognition_context=cognition_context,
@@ -419,6 +508,8 @@ class RuntimeDispatcher:
                 ruled_state = apply_event_rules(current_state, event.type)
                 if is_fast_reply:
                     final_state = dict(ruled_state)
+                    if fast_action:
+                        final_state = apply_state_delta(final_state, fast_action.state_delta)
                     if fast_action and fast_action.mood:
                         final_state["mood"] = fast_action.mood
                     final_state["mode"] = "idle"
@@ -532,7 +623,10 @@ class RuntimeDispatcher:
                 trigger_categories = []
         keyword_trigger = bool(trigger_categories)
         turn_result = None
-        if self.successful_turn_store is not None:
+        eligible_successful_turn = event.type in {"text_message", "voice_message"} or (
+            event.type in BUTTON_EVENTS and bool(reply_text)
+        )
+        if eligible_successful_turn and self.successful_turn_store is not None:
             try:
                 turn_result = self.successful_turn_store.record_successful_turn(
                     event.id,
@@ -540,19 +634,26 @@ class RuntimeDispatcher:
                 )
             except Exception:
                 logger.warning("successful turn counter failed", exc_info=True)
-        should_enqueue_memory = bool(turn_result.should_enqueue_memory) if turn_result else keyword_trigger
+        should_enqueue_memory = (
+            bool(turn_result.should_enqueue_memory) if turn_result else (keyword_trigger and eligible_successful_turn)
+        )
         if should_enqueue_memory and user_text and self.memory_judgment_queue is not None:
             try:
                 selected_memory = []
+                recent_context = []
                 if cognition_context:
                     raw_selected = cognition_context.get("selected_card_items") or []
                     if isinstance(raw_selected, list):
                         selected_memory = [str(item) for item in raw_selected[:10] if item]
+                    raw_recent = cognition_context.get("recent_exact_events") or []
+                    if isinstance(raw_recent, list):
+                        recent_context = list(raw_recent)[-5:]
                 self.memory_judgment_queue.enqueue_turn_summary(
                     user_text=user_text,
                     pet_reply=reply_text,
                     route=route,
                     selected_memory=selected_memory,
+                    recent_conversation_context=recent_context,
                     trigger_categories=trigger_categories,
                 )
             except Exception:

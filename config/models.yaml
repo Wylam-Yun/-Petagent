@@ -42,7 +42,9 @@ providers:
     api_key_env:
       - SILICONFLOW_API_KEY
       - ASR_API_KEY
-    timeout_seconds: 8
+    timeout_seconds: 12
+    connect_timeout_seconds: 4
+    read_timeout_seconds: 12
     protocol: http
     endpoint: /audio/transcriptions
     request_format: multipart

@@ -121,6 +121,7 @@ class FastReplyAction(BaseModel):
     expression_key: str = "idle_soft"
     action: Optional[str] = None
     voice_style: str = "soft"
+    state_delta: Dict[str, int] = Field(default_factory=dict)
 
 
 class PetResponse(BaseModel):

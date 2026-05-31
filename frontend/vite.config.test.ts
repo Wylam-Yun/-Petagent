@@ -13,4 +13,5 @@ test("Vite build keeps a legacy bundle for Android 6 era browsers", () => {
   expect(config).toContain("Android >= 6");
   expect(config).toContain("renderModernChunks: false");
   expect(config).toContain("renderLegacyChunks: true");
+  expect(config).toContain("?v=");
 });

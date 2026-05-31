@@ -10,11 +10,23 @@ from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
 
-def _timeout_tuple(scalar: int, connect: int = 2) -> tuple:
+def _timeout_tuple(scalar: int, connect: Optional[int] = None, read: Optional[int] = None) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
-    scalar = max(1, int(scalar))
-    connect_timeout = min(connect, scalar)
+    scalar = _positive_int(scalar, 1)
+    if connect is not None or read is not None:
+        connect_timeout = _positive_int(connect, min(2, scalar))
+        read_timeout = _positive_int(read, max(scalar - min(2, scalar), 1))
+        return (connect_timeout, read_timeout)
+    connect_timeout = min(2, scalar)
     return (connect_timeout, max(scalar - connect_timeout, 1))
+
+
+def _positive_int(raw: Any, default: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, value)
 
 
 def parse_transcript_json(
@@ -191,7 +203,7 @@ class HttpASRProvider:
     def _should_retry(self, error_code: str, attempt: int, attempts: int) -> bool:
         if not error_code or attempt >= attempts - 1:
             return False
-        if error_code in {"asr_request_error", "asr_provider_error", "asr_empty"}:
+        if error_code in {"asr_request_error", "asr_provider_error", "asr_empty", "asr_timeout"}:
             return True
         if error_code.startswith("asr_http_"):
             try:
@@ -220,7 +232,11 @@ class HttpASRProvider:
             ),
             "params": self._params(),
             "proxies": self._proxies(),
-            "timeout": _timeout_tuple(self.config.timeout_seconds),
+            "timeout": _timeout_tuple(
+                self.config.timeout_seconds,
+                connect=self.config.extra.get("connect_timeout_seconds"),
+                read=self.config.extra.get("read_timeout_seconds"),
+            ),
         }
         if request_format == "binary":
             common["data"] = audio_path.read_bytes()

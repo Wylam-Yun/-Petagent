@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.config import Settings
@@ -214,25 +215,89 @@ FAST_REPLY_SCHEMA = {
     "expression_key": "/".join(sorted(EXPRESSION_KEYS)),
     "action": BEHAVIOR_ACTION_SCHEMA,
     "voice_style": "soft/normal/happy/sleepy/shy",
+    "state_delta": {
+        "energy": "可选，小整数 delta，范围 -5 到 5；过大或非数字会被忽略",
+        "intimacy": "可选，小整数 delta，范围 -5 到 5；过大或非数字会被忽略",
+    },
+}
+
+UNIFIED_REPLY_CONTRACT = {
+    "must_answer_current_user_message_first": True,
+    "recent_context_is_not_style_template": True,
+    "long_term_memory_only_when_relevant": True,
+    "invalid_if_reply_uses_context_or_memory_as_refusal_reason": True,
+    "invalid_if_reply_repeats_recent_pet_phrase_pattern": True,
+    "on_invalid_output_backend_fails_this_turn_without_fallback": True,
 }
 
 
+def _level(value: Any) -> str:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = 0
+    if number < 34:
+        return "low"
+    if number < 67:
+        return "medium"
+    return "high"
+
+
 def _foreground_pet_state(context: RuntimeContext) -> Dict[str, Any]:
+    energy = context.pet_state.get("energy", 50)
+    intimacy = context.pet_state.get("intimacy", 0)
     return {
         "mood": context.pet_state.get("mood", "idle"),
-        "energy": context.pet_state.get("energy", 50),
-        "intimacy": context.pet_state.get("intimacy", 0),
-        "sleepiness": context.pet_state.get("sleepiness", 0),
+        "energy": energy,
+        "energy_level": _level(energy),
+        "intimacy": intimacy,
+        "intimacy_level": _level(intimacy),
     }
 
 
+def _unified_current_time(cognition: Dict[str, Any]) -> Dict[str, Any]:
+    current = cognition.get("current_time")
+    if not isinstance(current, dict):
+        return {}
+    local = str(current.get("local") or "")
+    utc = str(current.get("utc") or "")
+    timezone_name = str(current.get("timezone") or "")
+    result: Dict[str, Any] = {}
+    if local:
+        result["local"] = local
+        try:
+            local_dt = datetime.fromisoformat(local)
+            result["local_date"] = local_dt.date().isoformat()
+            result["local_time"] = local_dt.strftime("%H:%M")
+            result["weekday"] = [
+                "星期一",
+                "星期二",
+                "星期三",
+                "星期四",
+                "星期五",
+                "星期六",
+                "星期日",
+            ][local_dt.weekday()]
+        except ValueError:
+            pass
+    if utc:
+        result["utc"] = utc
+    if timezone_name:
+        result["timezone"] = timezone_name
+    return result
+
+
 def build_unified_foreground_messages(
-    settings: Settings, event: PetEvent, context: RuntimeContext
+    settings: Settings,
+    event: PetEvent,
+    context: RuntimeContext,
+    *,
+    include_current_time: bool = True,
 ) -> List[Dict[str, str]]:
     system_prompt = settings.persona_config.get("system_prompt", "")
     system_prompt += (
         "\n\nV1.5 统一对话规则："
-        "\n1. 你是豆豆，直接回复用户，不输出思考过程。"
+        "\n1. 直接回复用户，不输出思考过程。"
         "\n2. 文本和 ASR 成功后的语音都使用同一上下文。"
         "\n3. 不要提示用户打开思考模式或回忆模式。"
         "\n4. 严格输出 JSON，reply 必须是给用户看的自然回复。"
@@ -240,22 +305,72 @@ def build_unified_foreground_messages(
         "\n1. 根据当前用户语境选择 expression_key。"
         "\n2. reply 里不要输出颜表情，颜表情只能通过 expression_key 表示。"
         "\n3. 台词主语必须用“我”，不要自称“豆豆”。"
+        "\n\nV1.7 上下文使用规则："
+        "\n1. current_user_message 是本轮最高优先级输入，必须先回应它。"
+        "\n2. recent_conversation_context 是最近上下文，只用于理解连续对话，不是措辞模板。"
+        "\n3. long_term_memory 是长期记忆和背景事实，只在相关时使用，不要每轮主动复述。"
+        "\n4. 不要把自己上一轮的口头表达、玩笑、情绪当成长期事实。"
+        "\n5. pet_state 是当前状态参考，不能压过本轮用户意图；mood 不代表必须延续上一轮情绪。"
+        "\n6. energy 低可以影响语气，但不能成为拒绝正常回答的理由。"
+        "\n7. 每轮都要根据当前用户输入重新选择 expression_key 和 action。"
+        "\n8. 回复主语必须用“我”，不要自称豆豆。"
+        "\n9. 如果 current_user_message 是问题、事实询问、总结请求或解释请求，reply 必须先给出直接答案，再保留一点桌宠语气。"
+        "\n10. 不能把 recent_conversation_context、long_term_memory 或 pet_state 当作拒绝回答当前问题的理由。"
+        "\n11. 如果 recent_conversation_context 里连续出现相似句式、相似借口或相同梗，本轮必须换一种表达，并避免继续使用这些重复模式。"
+        "\n12. 只有当前用户明确问到长期偏好、记忆、用户习惯或相关话题时，才主动提 long_term_memory。"
+        "\n13. 如果用户询问今天日期、星期或当前时间，必须以 current_time 为准，不要猜。"
     )
     cognition = context.cognition_context or {}
     payload = {
-        "user_input": str(event.payload.get("user_text") or event.payload.get("text") or ""),
-        "recent_dialogue": list(cognition.get("recent_exact_events") or [])[-5:],
+        "current_user_message": str(event.payload.get("user_text") or event.payload.get("text") or ""),
+        "recent_conversation_context": list(cognition.get("recent_exact_events") or [])[-5:],
         "long_term_memory": _selected_notebook_lines(
             cognition.get("selected_card_items"),
             10,
         ),
         "pet_state": _foreground_pet_state(context),
+        "reply_contract": UNIFIED_REPLY_CONTRACT,
         "response_schema": FAST_REPLY_SCHEMA,
     }
+    if include_current_time:
+        payload["current_time"] = _unified_current_time(cognition)
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+
+
+def build_unified_retry_messages(
+    messages: List[Dict[str, str]],
+    *,
+    rejected_reply: str,
+    reason: str,
+) -> List[Dict[str, str]]:
+    retry_messages = list(messages)
+    retry_messages.append(
+        {
+            "role": "assistant",
+            "content": json.dumps({"reply": rejected_reply}, ensure_ascii=False),
+        }
+    )
+    retry_messages.append(
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "retry_reason": reason,
+                    "required_fix": (
+                        "上一条 reply 违反 V1.7：没有优先回答 current_user_message，"
+                        "或把 recent_conversation_context/long_term_memory/pet_state 当成拒答理由。"
+                        "请重新输出完整 JSON；必须先直接回答当前用户消息，避免复用上一条的借口或句式。"
+                    ),
+                    "failure_policy": "如果再次违反，后端会把本轮作为失败处理，不会写入历史。",
+                },
+                ensure_ascii=False,
+            ),
+        }
+    )
+    return retry_messages
 
 
 def build_fast_reply_messages(
@@ -352,7 +467,12 @@ THINKING_RESPONSE_SCHEMA = {
 def build_thinking_messages(
     settings: Settings, event: PetEvent, context: RuntimeContext
 ) -> List[Dict[str, str]]:
-    return build_unified_foreground_messages(settings, event, context)
+    return build_unified_foreground_messages(
+        settings,
+        event,
+        context,
+        include_current_time=False,
+    )
 
 
 def build_skill_plan_messages(
@@ -429,30 +549,37 @@ def build_memory_summary_messages(
     user_text: str,
     pet_reply: str,
     route: str,
-    selected_memory: list,
     memory_content: str,
     trigger_categories: list,
+    recent_conversation_context: Optional[List[Dict[str, Any]]] = None,
+    selected_memory: Optional[list] = None,
 ) -> list:
     """Build prompt for after-turn notebook summarization."""
     system_prompt = (
-        "你是豆豆的小本本后台整理器。当前回复已经给用户了，你只判断这一轮对话是否需要更新 memory.md。\n"
+        "你是豆豆的小本本后台整理器。当前回复已经给用户了，你只整理 memory.md。\n"
         "用户体验规则：\n"
         "1. 只记录会让豆豆以后更懂主人的信息。\n"
         "2. 明确说“记住/别忘了/写进小本本”的内容优先判断。\n"
         "3. 不记录普通寒暄、短暂情绪、重复信息、密钥、口令、token 或大段原话。\n"
-        "4. 输出完整替换后的 memories 列表，0 到 10 条，不输出时间戳。\n"
-        "5. 当前对话证据最高优先级，现有 memory.md 次之，旧历史最低。\n"
-        "6. 没有值得保留的内容时输出 {\"memories\":[]}。"
+        "4. 输出是完整替换后的长期记忆列表，不是本轮新增列表，0 到 10 条，不输出时间戳。\n"
+        "5. current_turn.current_user_message 是最高优先级证据。\n"
+        "6. recent_conversation_context 只辅助判断最近上下文。\n"
+        "7. long_term_memory_file 是已有长期记忆基线。\n"
+        "8. 如果 long_term_memory_file 里已有有效记忆，默认原样保留旧记忆，只在当前证据明确要求时更新、合并或移除。\n"
+        "9. 不能因为本轮没有新增长期信息就输出空列表。\n"
+        "10. 只有 long_term_memory_file 本来没有有效记忆，且 current_turn 与 recent_conversation_context 都没有长期价值信息时，才允许输出 {\"memories\":[]}。\n"
+        "11. 相似事实必须合并成一条，每条 memory 必须表达不同事实。\n"
+        "12. 不要保存自己的口头癖、玩笑、临时情绪，也不要把“正在记小本本”这类回复写成用户长期事实。"
     )
     payload = {
-        "turn": {
-            "user_text": user_text,
-            "pet_reply": pet_reply,
+        "current_turn": {
+            "current_user_message": user_text,
+            "current_pet_reply": pet_reply,
             "route": route,
             "trigger_categories": trigger_categories,
         },
-        "selected_memory": [str(item) for item in selected_memory[:10] if item],
-        "memory_md": memory_content or "（空）",
+        "recent_conversation_context": list(recent_conversation_context or [])[-5:],
+        "long_term_memory_file": memory_content or "（空）",
         "output_schema": MEMORY_SUMMARY_SCHEMA,
     }
     return [

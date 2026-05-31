@@ -57,13 +57,15 @@ def test_thinking_prompt_excludes_forbidden_fields():
     )
     payload = json.loads(messages[1]["content"])
 
-    assert payload["user_input"] == "认真帮我想想"
+    assert payload["current_user_message"] == "认真帮我想想"
     assert "notebook_user" not in payload
     assert payload["long_term_memory"] == ["用户喜欢短回复", "正在修 PetAgent V1.4"]
-    assert payload["recent_dialogue"] == [{"user": "前一句", "pet": "回应"}]
+    assert payload["recent_conversation_context"] == [{"user": "前一句", "pet": "回应"}]
     assert "memory_update" not in json.dumps(payload, ensure_ascii=False)
 
     forbidden = [
+        "user_input",
+        "recent_dialogue",
         "current_time",
         "device_state",
         "skill_results",
@@ -79,7 +81,7 @@ def test_thinking_prompt_excludes_forbidden_fields():
         assert field not in payload
 
 
-def test_brain_generate_thinking_uses_thinking_builder():
+def test_dispatcher_ignores_thinking_mode_and_uses_unified_prompt():
     app = create_app(testing=True)
     captured = {}
     provider = app.state.dispatcher.brain.provider
@@ -115,7 +117,8 @@ def test_brain_generate_thinking_uses_thinking_builder():
 
     payload = json.loads(captured["messages"][1]["content"])
     serialized = json.dumps(payload, ensure_ascii=False)
-    assert "current_time" not in payload
+    assert payload["current_user_message"] == "认真帮我想想"
+    assert "current_time" in payload
     assert "device_state" not in payload
     assert "memory_cards" not in payload
     assert "memory_update" not in serialized

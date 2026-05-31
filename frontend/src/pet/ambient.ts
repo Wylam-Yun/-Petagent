@@ -52,6 +52,14 @@ export function saveAmbientState(storage: Storage, state: AmbientPersistedState)
   }
 }
 
+export function resetAmbientState(storage: Storage): void {
+  try {
+    storage.removeItem(AMBIENT_STORAGE_KEY);
+  } catch {
+    // Ambient bubbles are optional; private-mode storage failures should stay silent.
+  }
+}
+
 export type AmbientEligibilityInput = {
   now: number;
   idleAnchorAt: number;

@@ -32,12 +32,24 @@ function buildInfoPlugin() {
       try {
         gitSha = execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
       } catch { /* not in git repo */ }
+      const sourceHash = hashDirectory(resolve(__dirname, "src"));
       const info = {
         git_sha: gitSha,
         build_time: new Date().toISOString(),
-        source_hash: hashDirectory(resolve(__dirname, "src")),
+        source_hash: sourceHash,
       };
       writeFileSync(resolve(__dirname, "dist/build-info.json"), JSON.stringify(info, null, 2));
+      const indexPath = resolve(__dirname, "dist/index.html");
+      const version = sourceHash.slice(0, 16);
+      try {
+        const html = readFileSync(indexPath, "utf-8").replace(
+          /((?:src|data-src)="\/assets\/[^"?]+\.js)(?:\?v=[^"]*)?(")/g,
+          `$1?v=${version}$2`,
+        );
+        writeFileSync(indexPath, html);
+      } catch {
+        // The dist index can be absent in non-standard build modes.
+      }
     },
   };
 }

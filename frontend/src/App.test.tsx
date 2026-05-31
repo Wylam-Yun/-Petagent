@@ -822,6 +822,157 @@ test("mic tap during speaking stops current audio and starts a new recording", a
   vi.stubGlobal("MediaRecorder", originalMediaRecorder);
 });
 
+test("voice response keeps latest expression after upload and TTS completion", async () => {
+  const audioInstances: MockAudio[] = [];
+  class ManualAudio extends MockAudio {
+    constructor(src: string) {
+      super(src);
+      audioInstances.push(this);
+    }
+
+    play() {
+      return Promise.resolve();
+    }
+  }
+  vi.stubGlobal("Audio", ManualAudio);
+
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const voiceResponse = {
+    reply: "我听到了。",
+    mood: "sleepy",
+    face_type: "sleepy",
+    expression_key: "sleepy",
+    animation: "slowBlink",
+    vibration: "none",
+    voice_url: null,
+    audio_job_id: "aud-voice-sleepy",
+    user_text: "你能听到吗",
+    audio_understanding: {
+      user_text: "你能听到吗",
+      detected_emotion: "calm",
+      tone_notes: "",
+      non_verbal: "",
+      confidence: 0.9
+    },
+    pet_state: { ...petStateResponse, mood: "sleepy" as const },
+    runtime: { event_id: "evt-voice", skills_used: [] },
+    voice_route: {
+      requested: "auto",
+      selected: "unified",
+      thinking_mode: false,
+      asr_provider: "test",
+      brain_provider: "test",
+      fallback_reason: "",
+      timings_ms: {}
+    }
+  };
+  const originalMediaDevices = navigator.mediaDevices;
+  const originalMediaRecorder = window.MediaRecorder;
+  class FakeMediaRecorder {
+    static isTypeSupported() {
+      return true;
+    }
+
+    state = "inactive";
+    ondataavailable: ((event: { data: Blob }) => void) | null = null;
+    onstop: (() => void) | null = null;
+
+    constructor(readonly stream: MediaStream) {}
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      this.state = "inactive";
+      this.ondataavailable?.({ data: new Blob(["voice"], { type: "audio/webm" }) });
+      this.onstop?.();
+    }
+  }
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => voiceResponse })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job_id: "aud-voice-sleepy",
+        status: "ready",
+        voice_url: "/static/audio/voice-sleepy.wav",
+        error: null,
+        created_at: "now",
+        updated_at: "now"
+      })
+    });
+  vi.stubGlobal("fetch", fetchMock);
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop: vi.fn() }]
+      })
+    }
+  });
+  vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+
+  render(<App />);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", { name: "点一下说话" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "thinking");
+
+  fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/voice/chat",
+    expect.objectContaining({ method: "POST" })
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "sleepy");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(-_-) zzz");
+  expect(screen.getByRole("button", { name: "打断并说话" })).toBeInTheDocument();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  expect(audioInstances).toHaveLength(1);
+  audioInstances[0].onended?.();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(screen.getByText("我说完啦。")).toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "sleepy");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(-_-) zzz");
+
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: originalMediaDevices
+  });
+  vi.stubGlobal("MediaRecorder", originalMediaRecorder);
+});
+
 describe("more menu", () => {
   test("more toggle button exists and toggles touch area", async () => {
     const fetchMock = vi.fn()
@@ -1011,4 +1162,54 @@ test("audio retry failure keeps retry button visible with original job id", asyn
 
   expect(screen.getByRole("button", { name: "重试发声" })).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith("/api/audio/jobs/aud-failed/retry", expect.any(Object));
+});
+
+test("runtime reset clears ambient storage and transient audio UI", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const resetResponse = {
+    ok: true,
+    pet_state: petStateResponse,
+    reply: "你好呀，我在这里。我们重新开始认识吧。"
+  };
+  window.localStorage.setItem("petagent:v16:ambient-state", JSON.stringify({
+    idleAnchorAt: 1000,
+    idleStep: 3,
+    localDate: "2026-05-31"
+  }));
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 1000, audio_progressive: {}, pet_name: "豆豆" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => resetResponse });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", { name: "重新认识" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(window.localStorage.getItem("petagent:v16:ambient-state")).toBeNull();
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "idle_soft");
+  expect(screen.queryByRole("button", { name: "重试发声" })).not.toBeInTheDocument();
+  const resetCall = fetchMock.mock.calls.find(([url]) => url === "/api/runtime/reset");
+  expect(resetCall).toBeTruthy();
+  const resetInit = resetCall?.[1] as RequestInit;
+  expect(JSON.parse(resetInit.body as string)).toEqual({ confirm: "重新认识" });
+  expect(JSON.parse(resetInit.body as string)).not.toHaveProperty("thinking_mode");
 });

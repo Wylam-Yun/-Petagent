@@ -28,6 +28,7 @@ import {
   buildAmbientClientState,
   getLocalDateString,
   loadAmbientState,
+  resetAmbientState,
   saveAmbientState,
   shouldRequestAmbient
 } from "./pet/ambient";
@@ -113,6 +114,15 @@ function App() {
   const pendingAmbientEventRef = useRef<string | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentPlaybackRef = useRef<PlaybackController | null>(null);
+  const latestResponseFaceRef = useRef<{
+    faceType: Mood;
+    expressionKey: string;
+    animation: AnimationName;
+  }>({
+    faceType: "idle",
+    expressionKey: "idle_soft",
+    animation: "breathing",
+  });
   const clientConfig = useClientConfig();
   const { isOnline } = useNetworkState();
 
@@ -136,6 +146,20 @@ function App() {
     recordingActiveRef.current = active;
     setRecordingActive(active);
     if (active) cancelPendingAmbientDisplay();
+  }
+
+  function applyFaceState(faceType: Mood, expressionKey: string, animation: AnimationName) {
+    latestResponseFaceRef.current = { faceType, expressionKey, animation };
+    setFaceType(faceType);
+    setExpressionKey(expressionKey);
+    setAnimation(animation);
+  }
+
+  function restoreLatestResponseFace() {
+    const latest = latestResponseFaceRef.current;
+    setFaceType(latest.faceType);
+    setExpressionKey(latest.expressionKey);
+    setAnimation(latest.animation);
   }
 
   function markIdleAnchor(resetStep = true) {
@@ -191,9 +215,7 @@ function App() {
       .then((state) => {
         if (!alive) return;
         setPetState(state);
-        setFaceType(state.mood);
-        setExpressionKey(state.mood);
-        setAnimation(animationMap[state.mood] ?? "breathing");
+        applyFaceState(state.mood, state.mood, animationMap[state.mood] ?? "breathing");
       })
       .catch(() => {
         if (!alive) return;
@@ -400,9 +422,11 @@ function App() {
 
   function applyPetResponse(response: PetResponse) {
     setPetState(response.pet_state);
-    setFaceType(response.face_type);
-    setExpressionKey(response.expression_key ?? response.face_type ?? response.mood);
-    setAnimation(response.animation);
+    applyFaceState(
+      response.face_type,
+      response.expression_key ?? response.face_type ?? response.mood,
+      response.animation,
+    );
     setBubbleText(response.reply);
 
     const hasAudio = !!(response.audio_job_id || response.voice_url);
@@ -435,6 +459,7 @@ function App() {
           await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
           if (audioRunRef.current === runId) {
             setPetPhase("idle");
+            restoreLatestResponseFace();
             setBubbleText("我说完啦。");
             markIdleAnchor(true);
           }
@@ -449,6 +474,7 @@ function App() {
         await playVoice(response.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
+          restoreLatestResponseFace();
           setBubbleText("我说完啦。");
           markIdleAnchor(true);
         }
@@ -456,6 +482,7 @@ function App() {
       }
 
       setPetPhase("idle");
+      restoreLatestResponseFace();
       markIdleAnchor(true);
     } catch (error) {
       if (audioRunRef.current !== runId) return;
@@ -533,6 +560,7 @@ function App() {
         await playVoice(job.voice_url, currentAudioRef, currentPlaybackRef);
         if (audioRunRef.current === runId) {
           setPetPhase("idle");
+          restoreLatestResponseFace();
           setBubbleText("我说完啦。");
           markIdleAnchor(true);
         }
@@ -687,19 +715,35 @@ function App() {
     );
     if (!confirmed) return;
     setBusyState(true);
+    let resetSucceeded = false;
     try {
       const response = await resetRuntime();
+      resetSucceeded = true;
+      resetAmbientState(window.localStorage);
+      audioRunRef.current += 1;
+      stopCurrentAudioPlayback();
+      const now = Date.now();
+      idleAnchorAtRef.current = now;
+      idleStepRef.current = 0;
+      setIdleAnchorAt(now);
+      setIdleStep(0);
+      pendingAmbientEventRef.current = null;
+      ambientInFlightRef.current = false;
       setPetState(response.pet_state);
       setBubbleText(response.reply);
-      setFaceType("idle");
-      setExpressionKey("idle_soft");
-      setAnimation("breathing");
+      applyFaceState("idle", "idle_soft", "breathing");
+      setPetPhase("idle");
+      setLastAudioJobId(null);
+      setRecordingActiveState(false);
+      setInputActiveState(false);
       setActiveSession(null);
     } catch {
       setBubbleText("重新认识的时候出了点小状况。");
     } finally {
       setBusyState(false);
-      markIdleAnchor(true);
+      if (!resetSucceeded) {
+        markIdleAnchor(true);
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 """Tests for V1.3 MemoryJudgmentQueue."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -172,6 +173,9 @@ def test_enqueue_turn_summary_processes_operations():
     assert result["should_write"] is True
     assert result["memories"] == [{"category": "preference", "content": "喜欢短回复"}]
     assert provider.last_messages is not None
+    payload = json.loads(provider.last_messages[1]["content"])
+    assert "long_term_memory_file" in payload
+    assert "selected_memory" not in payload
 
 
 def test_explicit_turn_summary_evicts_oldest_normal_job_when_full():
@@ -204,3 +208,48 @@ def test_invalid_turn_summary_output_is_ignored_safely():
     result = q.process_one()
 
     assert result == {"should_write": False, "memories": None}
+
+
+def test_turn_summary_prompt_includes_current_and_recent_context():
+    provider = MockProvider(result={
+        "memories": [{"category": "preference", "content": "用户喜欢短回复"}],
+    })
+    tmp = Path(mkdtemp())
+    notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
+    q = MemoryJudgmentQueue(provider=provider, notebook_manager=notebook)
+
+    q.enqueue_turn_summary(
+        user_text="我喜欢短回复",
+        pet_reply="我记住啦",
+        route="unified",
+        recent_conversation_context=[
+            {"user": "上一句", "pet": "上一答", "created_at": "2026-05-31T10:00:00"},
+        ],
+        trigger_categories=["preference"],
+    )
+    q.process_one()
+    payload = json.loads(provider.last_messages[1]["content"])
+
+    assert payload["current_turn"]["current_user_message"] == "我喜欢短回复"
+    assert payload["current_turn"]["current_pet_reply"] == "我记住啦"
+    assert payload["recent_conversation_context"][-1]["user"] == "上一句"
+    assert all(item.get("user") != "我喜欢短回复" for item in payload["recent_conversation_context"])
+    assert "long_term_memory_file" in payload
+    assert "selected_memory" not in payload
+
+
+def test_empty_summary_does_not_clear_existing_memory():
+    provider = MockProvider(result={"memories": []})
+    tmp = Path(mkdtemp())
+    notebook = NotebookManager(tmp / "user.md", tmp / "memory.md")
+    assert notebook.overwrite_memory_lines([
+        {"category": "preference", "content": "用户喜欢咖啡。"}
+    ])
+    q = MemoryJudgmentQueue(provider=provider, notebook_manager=notebook)
+
+    q.enqueue_turn_summary("今天星期几", "星期日", "unified")
+    result = q.process_one()
+
+    assert result["should_write"] is False
+    assert result["error"] == "empty_summary_would_clear_existing_memory"
+    assert "用户喜欢咖啡" in notebook.read_raw("memory.md")

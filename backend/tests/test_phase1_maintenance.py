@@ -26,6 +26,7 @@ def test_worker_calls_tick_on_notify():
     worker.notify()
     time.sleep(0.2)  # Give worker time to process
     service.tick.assert_called()
+    assert service.tick.call_args.kwargs.get("force") is True
     worker.stop(timeout=2)
 
 
@@ -58,6 +59,7 @@ def test_worker_wall_clock_fallback():
     # Don't notify — wait for wall-clock fallback
     time.sleep(0.5)
     service.tick.assert_called()
+    assert service.tick.call_args.kwargs.get("force") is False
     worker.stop(timeout=2)
 
 

@@ -91,7 +91,7 @@ def test_runtime_reset_requires_confirmation():
 
     client = TestClient(app)
 
-    # Without confirm field → 400
+    # Non-loopback requests still require auth before confirmation is checked.
     assert client.post("/api/runtime/reset", json={}).status_code == 403
     response = client.post("/api/runtime/reset", json={}, headers=_auth_headers(app))
     assert response.status_code == 400
@@ -106,6 +106,17 @@ def test_runtime_reset_requires_confirmation():
 
     # Memory should still exist
     assert mm.count() >= 1
+
+
+def test_runtime_reset_allows_loopback_frontend_without_token(monkeypatch):
+    app = create_app(testing=True)
+    client = TestClient(app)
+    monkeypatch.setattr("app.api.memory.is_loopback", lambda request: True)
+
+    response = client.post("/api/runtime/reset", json={"confirm": "重新认识"})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
 def test_runtime_reset_clears_everything():
@@ -132,7 +143,7 @@ def test_runtime_reset_clears_everything():
     assert body["ok"] is True
     assert "pet_state" in body
     assert "reply" in body
-    assert "豆豆" in body["reply"]
+    assert "豆豆" not in body["reply"]
 
     # All data cleared
     assert mm.count() == 0
