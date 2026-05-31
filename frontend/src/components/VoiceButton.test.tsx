@@ -43,7 +43,7 @@ function recorderFactory(blob = new Blob(["voice"], { type: "audio/webm" })) {
 }
 
 describe("VoiceButton", () => {
-  test("tap starts recording, second tap uploads, then waits for voice", async () => {
+  test("tap starts recording, second tap uploads, and lets App own response phase", async () => {
     const onPhaseChange = vi.fn();
     const onVoiceResponse = vi.fn();
     const uploadVoice = vi.fn().mockResolvedValue(voiceResponse);
@@ -66,10 +66,11 @@ describe("VoiceButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "点一下发送" }));
 
     await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("thinking"));
-    await waitFor(() => expect(onPhaseChange).toHaveBeenCalledWith("waiting_voice"));
     expect(uploadVoice).toHaveBeenCalledTimes(1);
     expect(uploadVoice).toHaveBeenCalledWith(expect.any(Blob));
-    expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse);
+    await waitFor(() => expect(onVoiceResponse).toHaveBeenCalledWith(voiceResponse));
+    expect(onPhaseChange).not.toHaveBeenCalledWith("waiting_voice");
+    expect(onPhaseChange).not.toHaveBeenCalledWith("idle");
   });
 
   test("structured ASR failure shows error without applying voice response", async () => {

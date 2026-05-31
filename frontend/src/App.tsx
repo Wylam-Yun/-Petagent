@@ -633,9 +633,6 @@ function App() {
       setAnimation("blink");
       setBubbleText("我想一下…");
     } else if (nextPhase === "waiting_voice") {
-      setFaceType("thinking");
-      setExpressionKey("thinking");
-      setAnimation("blink");
       setBubbleText("我准备开口…");
     } else if (nextPhase === "audio_error") {
       setFaceType("concerned");

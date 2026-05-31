@@ -194,9 +194,9 @@ describe("text chat", () => {
 
     const textChatResponse = {
       reply: "好呀，我帮你想。",
-      mood: "thinking",
-      face_type: "thinking",
-      expression_key: "thinking",
+      mood: "angry",
+      face_type: "angry",
+      expression_key: "annoyed",
       animation: "tilt",
       vibration: "none",
       voice_url: null,
@@ -208,7 +208,7 @@ describe("text chat", () => {
         brain_provider: "test",
         timings_ms: {}
       },
-      pet_state: { ...petStateResponse, mood: "thinking" as const },
+      pet_state: { ...petStateResponse, mood: "angry" as const },
       runtime: { event_id: "evt-text", skills_used: [] }
     };
 
@@ -246,7 +246,8 @@ describe("text chat", () => {
     }
 
     expect(screen.getByText("我说完啦。")).toBeInTheDocument();
-    expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "thinking");
+    expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
+    expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
 
     const [, textInit] = fetchMock.mock.calls[4];
     expect(textInit.method).toBe("POST");
@@ -396,6 +397,101 @@ test("ambient idle bubble displays without audio and confirms after display", as
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/audio/jobs/ambient-1")).toBe(false);
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/pet/ambient/confirm")).toBe(true);
   expect(JSON.parse(window.localStorage.getItem("petagent:v16:ambient-state") ?? "{}").idleStep).toBe(1);
+});
+
+test("ambient idle bubble can replace the latest conversation expression", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const textChatResponse = {
+    reply: "哼，我记得。",
+    mood: "angry",
+    face_type: "angry",
+    expression_key: "annoyed",
+    animation: "tilt",
+    vibration: "none",
+    voice_url: null,
+    audio_job_id: null,
+    user_text: "你还记得吗",
+    text_route: {
+      selected: "fast_reply",
+      thinking_mode: false,
+      brain_provider: "test",
+      timings_ms: {}
+    },
+    pet_state: { ...petStateResponse, mood: "angry" as const },
+    runtime: { event_id: "evt-text", skills_used: [] }
+  };
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === "/api/client-config") {
+      return { ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) };
+    }
+    if (url === "/api/pet/state") {
+      return { ok: true, json: async () => petStateResponse };
+    }
+    if (url === "/api/interactions") {
+      return { ok: true, json: async () => interactionCatalogResponse };
+    }
+    if (url === "/api/frontend/heartbeat") {
+      return { ok: true, json: async () => ({ ok: true, received_at: "now" }) };
+    }
+    if (url === "/api/text/chat") {
+      return { ok: true, json: async () => textChatResponse };
+    }
+    if (url === "/api/pet/ambient/check") {
+      return { ok: true, json: async () => ({ eligible: true, block_reason: "", next_activity: "sneak_snack" }) };
+    }
+    if (url === "/api/pet/ambient/trigger") {
+      return {
+        ok: true,
+        json: async () => ({
+          active: true,
+          event_id: "ambient-after-chat",
+          bubble: "我没有在偷吃零食。",
+          expression_key: "playful",
+          action: "sneak_snack",
+          audio_job_id: null,
+          voice_url: null,
+          runtime: { source: "llm_generated" }
+        })
+      };
+    }
+    if (url === "/api/pet/ambient/confirm") {
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  fireEvent.change(screen.getByPlaceholderText("输入一句话……"), { target: { value: "你还记得吗" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(screen.getByText("哼，我记得。")).toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+  });
+
+  expect(screen.getByText("我没有在偷吃零食。")).toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "playful");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧");
 });
 
 test("ambient idle bubble does not advance backoff when confirm fails", async () => {
@@ -584,6 +680,10 @@ test("mic tap during speaking stops current audio and starts a new recording", a
   };
   const voiceResponse = {
     ...textChatResponse,
+    reply: "哼，我听见了。",
+    mood: "angry",
+    face_type: "angry",
+    expression_key: "annoyed",
     user_text: "打断一下",
     audio_understanding: {
       user_text: "打断一下",
@@ -692,6 +792,12 @@ test("mic tap during speaking stops current audio and starts a new recording", a
     "/api/voice/chat",
     expect.objectContaining({ method: "POST" })
   );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
+  expect(screen.queryByText("我想一下…")).not.toBeInTheDocument();
 
   for (let i = 0; i < 10; i++) {
     await act(async () => {
@@ -700,6 +806,7 @@ test("mic tap during speaking stops current audio and starts a new recording", a
   }
 
   expect(audioInstances).toHaveLength(2);
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
   expect(audioInstances[0].paused).toBe(true);
   expect(audioInstances[0].loaded).toBe(true);
 

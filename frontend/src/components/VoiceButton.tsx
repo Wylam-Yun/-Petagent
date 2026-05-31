@@ -104,7 +104,6 @@ export function VoiceButton({
         return;
       }
       onVoiceResponse(response);
-      changePhase(response.audio_job_id || response.voice_url ? "waiting_voice" : "idle");
     } catch (error) {
       if (uploadRunRef.current !== uploadRun) return;
       changePhase("error");
