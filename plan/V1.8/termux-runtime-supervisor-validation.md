@@ -360,3 +360,59 @@ Post-deploy manager evidence:
   - `Browser relaunch am command path=/data/data/com.termux/files/usr/bin/am`
   - `Browser relaunch am start exit=134 output=`
   - `WARNING: am start failed with empty stderr; check adb logcat for Termux am wrapper or ActivityManager access errors`
+
+## 2026-06-01 Task 8 Disruptive Recovery Validation
+
+Preconditions:
+
+- User provided automatic authorization to continue runtime validation.
+- Manager was restored through Termux SSH with
+  `scripts/termux_start_services.sh --ensure`.
+- Pre-kill manager pid: `15805`
+- Pre-kill backend pid: `14471`
+- Manager context: ok, `3003(inet)` present
+
+8A backend process death recovery:
+
+- Killed backend pid `14471` once from Termux SSH.
+- Waited about 50 seconds for the manager loop.
+- `scripts/status.sh` after recovery showed:
+  - `manager: running (15805)`
+  - `manager_context: ok`
+  - `process: running (17453)`
+  - `/api/health`: `ok=true`, `build_hash=ec528f8`
+  - `database: ok`
+- `logs/manager.log` recorded:
+  - `PetAgent process not running; starting runtime`
+  - `Starting PetAgent runtime`
+  - `PetAgent runtime is healthy on port 8000`
+- Result: passed. The supervisor restored uvicorn without manual backend start.
+
+8B frontend relaunch / page recovery:
+
+- Manager attempted browser relaunch while the frontend heartbeat was stale,
+  but Termux-side launch remains blocked by the Termux app/tooling state:
+  - `termux-am` socket missing
+  - legacy `am` exits `134`
+- Used ADB `am start` only as a field-validation assist:
+  - `adb shell am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/`
+  - result: `adb_am_status:0`
+- First screenshot was black because the device was asleep and keyguard was
+  showing:
+  - `mWakefulness=Asleep`
+  - `Display Power: state=OFF`
+  - `mShowingLockscreen=true`
+- After waking/unlocking with ADB input and reopening the URL:
+  - screenshot `/private/tmp/petagent-v18-task8b-awake.png` showed the PetAgent
+    page in Via browser
+  - `frontend_heartbeat_age_s` returned to about `7.5`
+  - `watchdog_stuck: false`
+- Result: partially passed. Page recovery by ADB validation works and manager
+  failures are explicit, but autonomous Termux browser relaunch still needs
+  Termux `am` socket/tooling repair or a future shell APK/WebView path.
+
+8C reboot recovery:
+
+- Deferred.
+- Reason: `com.termux.boot` is still missing, so reboot recovery cannot be a
+  valid V1.8 pass condition yet.
