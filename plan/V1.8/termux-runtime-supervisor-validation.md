@@ -283,3 +283,80 @@ Task 7 status:
   failure.
 - Browser relaunch observability: passed; relaunch attempt is logged, but
   `am start` currently exits `134`.
+
+## 2026-06-01 Termux App And Browser Relaunch Diagnostics
+
+Follow-up app state check:
+
+- Opened Termux once with `adb shell monkey -p com.termux 1`.
+- `dumpsys package com.termux` then showed:
+  - `versionName=0.119.0-beta.2`
+  - `User 0: installed=true hidden=false stopped=false notLaunched=false enabled=0`
+- This cleared the Android stopped state for Termux, but did not fix wake lock
+  or Termux-side browser launch.
+
+Wake lock evidence:
+
+- `termux-wake-lock` from Termux SSH still returned `Aborted`, exit status
+  `134`.
+- ADB `dumpsys power` still showed:
+  - `mWakeLockSummary=0x0`
+  - `Wake Locks: size=0`
+- `logs/manager.log` continued to make this explicit:
+  - `termux-wake-lock command found`
+  - `WARNING: termux-wake-lock returned non-zero`
+
+Browser relaunch root cause evidence:
+
+- `termux-am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/`
+  returned:
+  - `Could not connect to socket: No such file or directory`
+  - exit status `1`
+- `am start ...` from Termux returned exit status `134`.
+- `adb logcat` for the Termux `am` wrapper showed:
+  - `ClassLoader referenced unknown path: /data/data/com.termux/files/usr/libexec/termux-am/am.apk`
+  - `ERROR: could not find class 'com.example.termuxam.Am'`
+  - fatal `SIGABRT`
+- `/system/bin/am start ...` from Termux returned `Can't connect to activity
+  manager; is the system running?`
+- ADB-side `adb shell am start -a android.intent.action.VIEW -d
+  http://127.0.0.1:8000/` remains usable for field validation, but is not a
+  manager runtime path.
+
+Follow-up script hardening:
+
+- Added browser relaunch command diagnostics in `scripts/termux_service_manager.sh`:
+  - try `termux-am` first and log socket failure explicitly
+  - fall back to `am`
+  - log the `am` command path
+  - warn if `$PREFIX/libexec/termux-am/am.apk` is missing
+  - log empty-stderr `am` aborts as a logcat investigation hint
+- Added a `/proc/$pid/cmdline` readability guard in:
+  - `scripts/status.sh`
+  - `scripts/termux_start_services.sh`
+  - `scripts/termux_service_manager.sh`
+  This avoids noisy redirection errors when a manager pid exits between process
+  discovery and cmdline inspection.
+- Local verification:
+  - `sh -n` passed for the five runtime shell scripts
+  - `backend/tests/test_phase1_startup.py`: `15 passed`
+- Phone SHA-256 after redeploy:
+  - `scripts/status.sh`:
+    `b83542b9297d1e26ce30376296bd3945c57db4bb7c7787a42833af670e4c26bf`
+  - `scripts/termux_start_services.sh`:
+    `3b35ed2e963d8e690cf499b1cb083616aa157916726ca33ec88606171cbac176`
+  - `scripts/termux_service_manager.sh`:
+    `0175df0dbec731fae1542382bdd36b2e4ddec3934b9571a4cb025d82e62f71d4`
+  - `docs/operations.md`:
+    `590c7270c7898f98364239b36d6039bd2582a801bd88febca56d5d7ffeabdcaf`
+
+Post-deploy manager evidence:
+
+- Backend pid stayed `14471`.
+- Manager remained running in the real Termux SSH context with `3003(inet)`.
+- New `logs/manager.log` entries showed:
+  - `Browser relaunch termux-am start exit=1 output=Could not connect to socket: No such file or directory`
+  - `WARNING: termux-am socket unavailable; open Termux and enable its am socket server, or use adb am only for field validation`
+  - `Browser relaunch am command path=/data/data/com.termux/files/usr/bin/am`
+  - `Browser relaunch am start exit=134 output=`
+  - `WARNING: am start failed with empty stderr; check adb logcat for Termux am wrapper or ActivityManager access errors`

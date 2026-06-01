@@ -121,6 +121,7 @@ process_uid() {
 
 process_cmdline() {
     pid="$1"
+    [ -r "/proc/$pid/cmdline" ] || return 0
     tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
 }
 
@@ -402,6 +403,16 @@ petagent_watchdog() {
     return 0
 }
 
+run_browser_relaunch_command() {
+    label="$1"
+    shift
+
+    cmd_output="$("$@" 2>&1)"
+    cmd_status=$?
+    log "Browser relaunch $label exit=$cmd_status output=$cmd_output"
+    return "$cmd_status"
+}
+
 ensure_browser() {
     # Relaunch browser if frontend heartbeat is stale and runtime is healthy
     target_url="http://127.0.0.1:$PETAGENT_PORT/"
@@ -422,13 +433,35 @@ ensure_browser() {
     age_int="${heartbeat_age%%.*}"
     if [ "${age_int:-0}" -gt "$FRONTEND_STARTUP_SECONDS" ]; then
         log "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser target=$target_url"
+
+        if command -v termux-am >/dev/null 2>&1; then
+            if run_browser_relaunch_command "termux-am start" termux-am start -a android.intent.action.VIEW -d "$target_url"; then
+                return 0
+            fi
+            case "$cmd_output" in
+                *"Could not connect to socket"*|*"TermuxAm server is not enabled"*)
+                    log "WARNING: termux-am socket unavailable; open Termux and enable its am socket server, or use adb am only for field validation"
+                    ;;
+            esac
+        else
+            log "WARNING: termux-am command not available; trying am fallback"
+        fi
+
         if ! command -v am >/dev/null 2>&1; then
             log "WARNING: am command not available; cannot relaunch browser target=$target_url"
             return 0
         fi
-        am_output="$(am start -a android.intent.action.VIEW -d "$target_url" 2>&1)"
-        am_status=$?
-        log "Browser relaunch am start exit=$am_status output=$am_output"
+
+        am_path="$(command -v am 2>/dev/null || true)"
+        log "Browser relaunch am command path=${am_path:-unknown}"
+        if [ -n "$PREFIX_DIR" ] && [ "$am_path" = "$PREFIX_DIR/bin/am" ] && [ ! -f "$PREFIX_DIR/libexec/termux-am/am.apk" ]; then
+            log "WARNING: Termux am wrapper apk missing at $PREFIX_DIR/libexec/termux-am/am.apk; am may abort before returning stderr"
+        fi
+        run_browser_relaunch_command "am start" am start -a android.intent.action.VIEW -d "$target_url" || {
+            if [ -z "$cmd_output" ]; then
+                log "WARNING: am start failed with empty stderr; check adb logcat for Termux am wrapper or ActivityManager access errors"
+            fi
+        }
     fi
 }
 

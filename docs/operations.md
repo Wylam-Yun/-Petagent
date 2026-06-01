@@ -150,7 +150,17 @@ The Termux manager relaunches the default browser when frontend heartbeat is
 stale:
 
 ```bash
-am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/
+termux-am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/
+```
+
+If the Termux `am` socket is unavailable, the manager falls back to the legacy
+`am` wrapper and records the exact exit code/output. On the current Nubia field
+state, `termux-am` reported a missing socket and the legacy wrapper aborted
+because `$PREFIX/libexec/termux-am/am.apk` was absent. For validation only, ADB
+can still open the page:
+
+```bash
+adb shell am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/
 ```
 
 V1.1 uses `FRONTEND_STARTUP_SECONDS=120` by default. Fully Kiosk or a WebView

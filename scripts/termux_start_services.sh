@@ -115,8 +115,9 @@ process_uid() {
 }
 
 process_cmdline() {
-    pid="$1"
-    tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
+  pid="$1"
+  [ -r "/proc/$pid/cmdline" ] || return 0
+  tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
 }
 
 is_manager_process() {

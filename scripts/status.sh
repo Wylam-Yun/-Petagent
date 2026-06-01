@@ -47,6 +47,7 @@ process_has_android_inet_group() {
 
 process_cmdline() {
   pid="$1"
+  [ -r "/proc/$pid/cmdline" ] || return 0
   tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
 }
 

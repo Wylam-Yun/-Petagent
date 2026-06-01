@@ -230,8 +230,12 @@ def test_v18_manager_logs_wake_lock_and_browser_relaunch_results():
         "wake lock post-check:",
         "termux-wake-lock succeeded but dumpsys did not show a Termux wake lock",
         "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser target=$target_url",
+        "Browser relaunch $label exit=$cmd_status output=$cmd_output",
+        'run_browser_relaunch_command "termux-am start"',
+        "termux-am socket unavailable",
+        "Termux am wrapper apk missing",
         "WARNING: am command not available; cannot relaunch browser target=$target_url",
-        "Browser relaunch am start exit=$am_status output=$am_output",
+        'run_browser_relaunch_command "am start"',
         "android.intent.action.VIEW",
     ]:
         assert expected in text
