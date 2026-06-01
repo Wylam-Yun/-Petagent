@@ -416,3 +416,96 @@ Preconditions:
 - Deferred.
 - Reason: `com.termux.boot` is still missing, so reboot recovery cannot be a
   valid V1.8 pass condition yet.
+
+## 2026-06-01 Task 10 Real Nubia Web Voice Chain Regression
+
+Important interaction correction:
+
+- The deployed frontend voice button is click-to-record, not press-and-hold.
+- An initial ADB long-press attempt did not add a `voice_debug.jsonl` row and
+  is not counted as proof.
+- The valid proof below used:
+  - tap voice button to start recording
+  - Mac `say` playback near the Nubia microphone
+  - tap voice button again to send
+  - screenshot after each turn
+
+Pre-check:
+
+- Backend health: `ok=true`, build hash `ec528f8`, pid `17453`
+- Manager: running pid `15805`, `manager_context: ok`
+- Frontend page: open in Via browser at `http://127.0.0.1:8000/`
+- Frontend heartbeat was fresh before voice validation.
+- Screenshot before voice validation:
+  `/private/tmp/petagent-v18-before-voice.png`
+
+Five required click-to-record web microphone attempts:
+
+| Attempt | Screenshot | Filename | Size | ASR text | Result |
+| --- | --- | --- | ---: | --- | --- |
+| 1 | `/private/tmp/petagent-v18-voice-1-tap.png` | `voice-20260601-133230-26050bfd.webm` | 56576 | `11.8真实网页语音链路第一轮点击测试123456789。` | ok |
+| 2 | `/private/tmp/petagent-v18-voice-2-tap.png` | `voice-20260601-133402-69ec5fbb.webm` | 56952 | `V1.8真实网页语音链路第二轮点击测试123456789` | ok |
+| 3 | `/private/tmp/petagent-v18-voice-3-tap.png` | `voice-20260601-133448-af214eec.webm` | 57744 | `V1.8真实网页语音链路第三轮点击测试123456789` | ok |
+| 4 | `/private/tmp/petagent-v18-voice-4-tap.png` | `voice-20260601-133536-ee456859.webm` | 57492 | `V1.8真实网页语音链路第四轮点击测试123456789` | ok |
+| 5 | `/private/tmp/petagent-v18-voice-5-tap.png` | `voice-20260601-133622-14312eda.webm` | 57359 | `11.8真实网页语音链路第五轮点击测试123456789。` | ok |
+
+For all five required attempts:
+
+- `event`: `voice_chat`
+- `content_type`: `audio/webm`
+- `selected`: `unified`
+- `thinking_mode`: `false`
+- `asr_provider`: `configurable_http_asr`
+- `brain_provider`: `siliconflow_fast_with_mimo_fast_fallback_fallback`
+- `error_class`: `None`
+
+Additional natural-topic checks requested by the user:
+
+| Topic attempt | Screenshot | Filename | Size | ASR text | Result |
+| --- | --- | --- | ---: | --- | --- |
+| Natural 1 | `/private/tmp/petagent-v18-topic-voice-2.png` | `voice-20260601-133821-97fa3992.webm` | 47137 | `豆豆今天外面有点热，你觉得晚上散步好不好？` | ok |
+| Natural 2 | `/private/tmp/petagent-v18-final-voice.png` | `voice-20260601-133907-a40656c7.webm` | 39326 | `我刚刚喝了一杯咖啡，感觉精神好多了。` | ok |
+
+Invalid/ignored attempt:
+
+- `voice-20260601-133735-4ec9c40d.webm`, size `13255`, `ok=false`,
+  `error_class=asr_empty`.
+- Cause: local shell array bug produced an empty Mac `say` utterance during a
+  discarded natural-topic batch.
+- This row is intentionally not counted toward the five successful attempts.
+
+Recent dialogue evidence:
+
+- The latest durable foreground turns include the five click-to-record voice
+  attempts and the two natural-topic voice attempts as `voice_message`
+  / `voice_unified`.
+- The two natural-topic replies were:
+  - User: `豆豆今天外面有点热，你觉得晚上散步好不好？`
+    Reply: `外面还热乎着呢，我刚用爪子摸了下地面，烫得直跳脚～要不咱改天凉快了再去？`
+  - User: `我刚刚喝了一杯咖啡，感觉精神好多了。`
+    Reply: `我闻到咖啡香了～你精神好我就放心啦，不过别喝太多哦，小心晚上睡不着～`
+
+Expression evidence:
+
+- Latest two `agent_run.final_action_json.expression_key` values:
+  - `concerned` for the hot-weather/s walk topic
+  - `happy` for the coffee topic
+- Final screenshot `/private/tmp/petagent-v18-final-voice.png` showed:
+  - mood text: `happy`
+  - visible face: `(^▽^)`
+  - no question-mark fallback after TTS
+- Result: final visible expression matched latest successful backend
+  `expression_key=happy`.
+
+Final runtime state after Task 10:
+
+- Manager: running pid `15805`
+- Backend: running pid `17453`
+- `/api/health`: `ok=true`, build hash `ec528f8`
+- `frontend_heartbeat_age_s`: about `6.8` to `14.5`
+- `watchdog_stuck`: `false`
+- Termux:Boot: still missing
+- Wake lock: still not held (`mWakeLockSummary=0x0`, `Wake Locks: size=0`)
+- `com.termux`: later ADB package check again showed `stopped=true`; SSH,
+  backend, manager, and frontend heartbeat were still functioning, but boot and
+  Termux broadcast/socket behavior remain manual setup risks.
