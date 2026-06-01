@@ -90,6 +90,7 @@ process_has_android_inet_group() {
         case "$line" in
             Groups:*)
                 groups="${line#Groups:}"
+                groups="$(printf '%s' "$groups" | tr '\011' ' ')"
                 case " $groups " in
                     *" 3003 "*)
                         return 0

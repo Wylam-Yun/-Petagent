@@ -127,6 +127,7 @@ def test_termux_scripts_refuse_adb_su_network_context():
         assert "has_android_inet_group" in text
         assert "refuse_non_termux_network_context" in text
         assert "process_has_android_inet_group" in text
+        assert "tr '\\011' ' '" in text
         assert "adb/su u0_a137 lacks Android inet group 3003" in text
 
     assert "android-context-health-guard-20260530" in manager_text
@@ -136,6 +137,7 @@ def test_termux_scripts_refuse_adb_su_network_context():
     assert "process_state()" in start_services_text
     assert "context: not Termux app network context" in status_text
     assert "cannot start the web server socket" in status_text
+    assert "tr '\\011' ' '" in status_text
 
 
 def test_nubia_deploy_excludes_heavy_runtime_artifacts():
