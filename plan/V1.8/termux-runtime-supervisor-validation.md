@@ -11,6 +11,8 @@ Local repo state:
 - Local `main` and `origin/main` after the first validation note: `1236697`
 - V1.8 Task 1-6 implementation commit range:
   - `f04e5b6` through `f6dbba7`
+- Additional V1.8 wrapper regression test commit:
+  - `7310fd5`
 - V1.8 Task 1-6 commits were pushed.
 - Local shell syntax checks passed for:
   - `scripts/start.sh`
@@ -18,7 +20,9 @@ Local repo state:
   - `scripts/status.sh`
   - `scripts/termux_start_services.sh`
   - `scripts/termux_service_manager.sh`
-- `backend/tests/test_phase1_startup.py`: `11 passed`
+- `backend/tests/test_phase1_startup.py`:
+  - initial Task 1-6 check: `11 passed`
+  - after adding V1.8 wrapper regression assertions: `15 passed`
 
 Nubia connection:
 
