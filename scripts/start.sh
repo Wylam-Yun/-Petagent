@@ -97,6 +97,34 @@ is_project_runtime() {
   return 1
 }
 
+is_manager_process() {
+  pid="$1"
+  cmdline="$(process_cmdline "$pid")"
+  case "$cmdline" in
+    *"termux_service_manager.sh"*|*".service_manager.sh"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+manager_running() {
+  for proc in /proc/[0-9]*; do
+    pid="${proc#/proc/}"
+    [ "$pid" = "$$" ] && continue
+    is_manager_process "$pid" || continue
+    process_exists "$pid" && return 0
+  done
+  return 1
+}
+
+warn_if_supervisor_missing() {
+  [ -d /data/data/com.termux/files/usr ] || return 0
+  manager_running && return 0
+  echo "WARNING: PetAgent runtime is healthy but termux_service_manager.sh is not running."
+  echo "Run scripts/termux_start_services.sh --ensure from the Termux app/SSH context to restore watchdog, wake lock, and browser recovery."
+}
+
 terminate_process() {
   pid="$1"
   kill "$pid" 2>/dev/null || true
@@ -197,6 +225,7 @@ if [ -f "$PID_FILE" ]; then
     cleanup_duplicate_runtimes "$OLD_PID"
     if health_ok; then
       echo "PetAgent runtime already healthy: $OLD_PID"
+      warn_if_supervisor_missing
       exit 0
     fi
     age="$(pid_file_age_seconds "$PID_FILE")"
@@ -256,6 +285,7 @@ MAX_ATTEMPTS=60
 while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
   if health_ok; then
     echo "PetAgent runtime ready on $HOST:$PORT"
+    warn_if_supervisor_missing
     exit 0
   fi
   ATTEMPTS=$((ATTEMPTS + 1))
