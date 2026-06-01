@@ -162,3 +162,92 @@ def test_nubia_deploy_excludes_heavy_runtime_artifacts():
     assert "adb-launched background processes do not stay alive reliably" in text
     assert 'START_SERVICES="${START_SERVICES:-1}"' not in text
     assert 'export PATH="$REMOTE_HOME/../usr/bin:$REMOTE_HOME/../usr/bin/applets:/system/bin:/system/xbin:/su/bin"' in text
+
+
+def test_v18_status_script_exposes_supervisor_state():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "status.sh"
+    text = script.read_text()
+
+    for expected in [
+        "manager: running ($MANAGER_PID)",
+        "manager: not running",
+        "manager_context: ok",
+        "manager_context: missing inet group 3003",
+        "manager_context: not running",
+        "sshd: listening",
+        "sshd: not listening",
+        "wake_lock: $(wake_lock_status)",
+        "termux_boot: $(termux_boot_status)",
+        "termux_package: stopped=$(termux_stopped_state)",
+        "frontend_heartbeat_age_s:",
+        "watchdog_stuck:",
+    ]:
+        assert expected in text
+
+    assert "process_has_android_inet_group() {" in text
+    assert "termux_service_manager.sh" in text
+    assert ".service_manager.sh" in text
+    assert "pm list packages" in text
+    assert "dumpsys package com.termux" in text
+    assert "dumpsys power" in text
+    assert "Wake Locks: size=0" in text
+
+
+def test_v18_start_services_has_safe_status_only_and_explicit_ensure_modes():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "termux_start_services.sh"
+    text = script.read_text()
+
+    assert "--status-only)" in text
+    assert "--ensure|--termux-boot)" in text
+    assert 'MODE="status-only"' in text
+    assert 'MODE="ensure"' in text
+    assert "print_status_only() {" in text
+    assert "backend: $(backend_health_status)" in text
+    assert "wake_lock: $(wake_lock_status)" in text
+    assert "start_services: command mode=$MODE" in text
+    assert "start_services: current identity:" in text
+    assert "manager candidate pid=$pid" in text
+    assert "missing Android inet group 3003" in text
+
+    status_branch = text.index('if [ "$MODE" = "status-only" ]; then')
+    ensure_branch = text.index("repair_android_context", status_branch)
+    assert status_branch < ensure_branch
+    assert "start_manager_if_needed" in text[ensure_branch:]
+    assert "scripts/start.sh" not in text
+
+
+def test_v18_manager_logs_wake_lock_and_browser_relaunch_results():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "termux_service_manager.sh"
+    text = script.read_text()
+
+    for expected in [
+        'FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"',
+        "termux-wake-lock command found",
+        "termux-wake-lock returned success",
+        "dumpsys not available; wake lock visibility cannot be verified",
+        "wake lock post-check:",
+        "termux-wake-lock succeeded but dumpsys did not show a Termux wake lock",
+        "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser target=$target_url",
+        "WARNING: am command not available; cannot relaunch browser target=$target_url",
+        "Browser relaunch am start exit=$am_status output=$am_output",
+        "android.intent.action.VIEW",
+    ]:
+        assert expected in text
+
+
+def test_v18_start_script_warns_but_does_not_start_supervisor():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "start.sh"
+    text = script.read_text()
+
+    assert "warn_if_supervisor_missing() {" in text
+    assert "manager_running() {" in text
+    assert "WARNING: PetAgent runtime is healthy but termux_service_manager.sh is not running." in text
+    assert (
+        "Run scripts/termux_start_services.sh --ensure from the Termux app/SSH context "
+        "to restore watchdog, wake lock, and browser recovery."
+    ) in text
+    assert "warn_if_supervisor_missing" in text
+    assert "PetAgent runtime already healthy: $OLD_PID" in text
+    assert "PetAgent runtime ready on $HOST:$PORT" in text
+    assert "termux_start_services.sh --ensure" in text
+    assert "sh scripts/termux_start_services.sh" not in text
