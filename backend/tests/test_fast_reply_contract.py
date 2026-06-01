@@ -395,3 +395,45 @@ def test_maintenance_processes_memory_summary_into_notebook():
 
     assert result.get("memory_summary_rewrite") == 1
     assert "偏好安静回应" in app.state.notebook_manager.read_raw("memory.md")
+
+
+def test_forced_maintenance_does_not_run_manual_nightly_cleanup_after_normal_turn():
+    app = create_app(testing=True)
+    queue = app.state.memory_judgment_queue
+    provider = app.state.nightly_cleanup_runner._provider
+    calls = {"count": 0}
+
+    app.state.notebook_manager.overwrite_memory_lines([])
+
+    def complete_json(messages):
+        calls["count"] += 1
+        return {
+            "add": [
+                {
+                    "target": "memory.md",
+                    "category": "temporary",
+                    "content": "普通对话不应触发 nightly cleanup 写入。",
+                }
+            ],
+            "update": [],
+            "delete": [],
+        }
+
+    provider.complete_json = complete_json
+
+    response = app.state.dispatcher.handle_event(
+        {
+            "type": "text_message",
+            "source": "runtime",
+            "payload": {"user_text": "语音测试123456789"},
+        }
+    )
+    result = app.state.maintenance_service.tick(force=True)
+
+    assert response.route == "unified"
+    assert queue.pending_count() == 0
+    assert calls["count"] == 0
+    assert not any(key.startswith("cleanup_") for key in result)
+    memory = app.state.notebook_manager.read_raw("memory.md")
+    assert "v1.4_single_notebook" in memory
+    assert "普通对话不应触发" not in memory

@@ -106,10 +106,13 @@ class MaintenanceService:
         except Exception:
             logger.warning("Memory judgment processing failed", exc_info=True)
 
-        # Priority 1.5: Nightly cleanup (V1.4, once per day)
+        # Priority 1.5: Nightly cleanup (V1.4, once per day).
+        # V1.7 keeps prompt-facing memory.md changes limited to the memory
+        # judgment queue. A dispatcher notification uses tick(force=True) only
+        # to bypass the tick interval; it must not force this manual cleanup.
         try:
-            if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run(force=force):
-                cleanup_result = self.nightly_cleanup_runner.run(force=force)
+            if self.nightly_cleanup_runner and self.nightly_cleanup_runner.should_run(force=False):
+                cleanup_result = self.nightly_cleanup_runner.run(force=False)
                 if cleanup_result:
                     result.update({"cleanup_%s" % k: v for k, v in cleanup_result.items()})
                     return result
