@@ -1,6 +1,6 @@
 # PetAgent / Momo Operations
 
-This file records the V1.1 operator commands for the Nubia Android 6 + Termux
+This file records the operator commands for the Nubia Android 6 + Termux
 runtime. Keep raw secrets out of logs, issues, and commits.
 
 ## Internal Token
@@ -50,6 +50,9 @@ Basic checks:
 
 ```bash
 adb forward tcp:18022 tcp:8022
+adb forward tcp:18000 tcp:8000
+ssh nubia-adb 'id; cd ~/Petagent && scripts/status.sh'
+curl -fsS http://127.0.0.1:18000/api/health
 ssh nubia-adb 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health'
 ssh nubia-adb 'curl -sS --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/api/health/watchdog'
 ssh nubia-adb 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[u]vicorn|[s]shd"'
@@ -63,12 +66,83 @@ Watchdog fields to inspect during V1.1 validation:
 - `frontend_heartbeat_age_s`
 - `stuck`
 
-Start services manually after a phone reboot if SSH is not up:
+`scripts/status.sh` is read-only. It reports backend health, manager state,
+manager Android `inet` group state, sshd, wake lock visibility, Termux:Boot
+package presence, Termux stopped state, frontend heartbeat age, watchdog stuck
+state, and SQLite quick check.
+
+Preferred manual recovery from a real Termux app or Termux SSH context:
+
+```bash
+ssh nubia-adb 'cd ~/Petagent && scripts/termux_start_services.sh --ensure'
+ssh nubia-adb 'cd ~/Petagent && scripts/status.sh'
+```
+
+Use the status-only entry when you need a non-disruptive check:
+
+```bash
+ssh nubia-adb 'cd ~/Petagent && scripts/termux_start_services.sh --status-only'
+```
+
+Do not start the backend through `adb shell su` or root. Android socket
+permission requires the real Termux app identity with group `3003(inet)`.
+
+`scripts/stop.sh && scripts/start.sh` is backend-only. It does not start or stop
+`termux_service_manager.sh`, and it must be followed by supervisor status:
+
+```bash
+ssh nubia-adb 'cd ~/Petagent && scripts/stop.sh && scripts/start.sh && scripts/status.sh'
+```
+
+Start services manually in Termux after a phone reboot if SSH is not up:
 
 ```bash
 sshd
-~/.start_services.sh
+~/.start_services.sh --ensure
 ```
+
+The current V1.8 field state on the Nubia showed backend healthy while
+`termux_service_manager.sh` was absent, no active Termux wake lock was visible,
+`com.termux.boot` was missing, and `com.termux` had `stopped=true`. Treat those
+as runtime facts to verify on the phone rather than assumptions.
+
+## Termux:Boot Setup
+
+Termux:Boot is a separate package, not part of Termux. On the current Nubia
+field state, `pm list packages | grep -i termux` showed `com.termux` only, so
+boot recovery cannot be assumed until `com.termux.boot` is installed and opened
+once from the launcher. Opening it once clears Android's stopped state so boot
+broadcasts can run.
+
+Expected boot script path:
+
+```text
+~/.termux/boot/start-sshd.sh
+```
+
+Expected delegation:
+
+```sh
+~/.start_services.sh --termux-boot
+```
+
+`~/.start_services.sh` should delegate to:
+
+```sh
+~/Petagent/scripts/termux_start_services.sh
+```
+
+Package and stopped-state checks:
+
+```bash
+adb shell 'pm list packages | grep -i termux'
+adb shell 'dumpsys package com.termux.boot 2>/dev/null | grep -E "Package \\[|versionName|stopped=|enabled=|userId=" | head -n 40'
+adb shell 'dumpsys package com.termux | grep -E "versionName|stopped=|enabled=|userId=" | head -n 40'
+```
+
+Installing Termux:Boot from a mismatched signing source may require reinstalling
+Termux plugins. Do not automate Termux:Boot installation from this repo; confirm
+the signing source and install/open-once step explicitly on the phone.
 
 ## Frontend Recovery
 

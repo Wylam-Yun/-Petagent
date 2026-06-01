@@ -7,6 +7,29 @@ LOCK_DIR="$HOME_DIR/.termux_service_manager.lock"
 SSHD_PORT="${SSHD_PORT:-8022}"
 NETWORK_WAIT_SECONDS="${NETWORK_WAIT_SECONDS:-180}"
 LEGACY_MANAGER_SCRIPT="$HOME_DIR/.service_manager.sh"
+MODE="ensure"
+MODE_ARG="${1:-}"
+
+case "$MODE_ARG" in
+    "")
+        MODE="ensure"
+        ;;
+    --ensure|--termux-boot)
+        MODE="ensure"
+        ;;
+    --status-only)
+        MODE="status-only"
+        ;;
+    -h|--help)
+        echo "Usage: $0 [--ensure|--status-only|--termux-boot]"
+        exit 0
+        ;;
+    *)
+        echo "ERROR: unknown mode: $MODE_ARG" >&2
+        echo "Usage: $0 [--ensure|--status-only|--termux-boot]" >&2
+        exit 2
+        ;;
+esac
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -43,6 +66,9 @@ refuse_non_termux_network_context() {
     log "start_services: ERROR not running in real Termux app network context"
     log "start_services: ERROR adb/su u0_a137 lacks Android inet group 3003; open Termux or use Termux:Boot"
     log "start_services: ERROR current identity: $(android_identity_summary)"
+    echo "context: not Termux app network context" >&2
+    echo "context_detail: $(android_identity_summary)" >&2
+    echo "hint: open Termux on the phone or use Termux:Boot; adb/su u0_a137 cannot start the web server socket" >&2
     return 1
 }
 
@@ -101,6 +127,47 @@ is_manager_process() {
             ;;
     esac
     return 1
+}
+
+manager_candidate_pid() {
+    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+    if process_exists "$lock_pid" && is_manager_process "$lock_pid"; then
+        echo "$lock_pid"
+        return 0
+    fi
+
+    for cmdline in /proc/[0-9]*/cmdline; do
+        [ -r "$cmdline" ] || continue
+        pid="${cmdline%/cmdline}"
+        pid="${pid##*/}"
+        [ "$pid" = "$$" ] && continue
+        if is_manager_process "$pid"; then
+            echo "$pid"
+            return 0
+        fi
+    done
+    return 1
+}
+
+log_manager_candidate() {
+    pid="$1"
+    if [ -z "$pid" ]; then
+        log "start_services: manager candidate pid=none"
+        return 0
+    fi
+
+    pid_uid="$(process_uid "$pid")"
+    if process_has_android_inet_group "$pid"; then
+        inet_result="ok"
+    else
+        inet_result="missing_3003"
+    fi
+    if is_manager_process "$pid"; then
+        manager_result="yes"
+    else
+        manager_result="no"
+    fi
+    log "start_services: manager candidate pid=$pid uid=${pid_uid:-unknown} manager=$manager_result inet=$inet_result"
 }
 
 repair_android_context() {
@@ -219,6 +286,75 @@ check_sshd_listen() {
     grep -qi ":1F56 .* 0A " /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
 
+wake_lock_status() {
+    if ! command -v dumpsys >/dev/null 2>&1; then
+        echo "unknown"
+        return 0
+    fi
+
+    summary="$(dumpsys power 2>/dev/null | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
+    if [ -z "$summary" ]; then
+        echo "unknown"
+        return 0
+    fi
+
+    if printf '%s\n' "$summary" | grep -qi -E 'termux|wake-lock'; then
+        echo "held"
+        return 0
+    fi
+    if printf '%s\n' "$summary" | grep -qi 'Wake Locks: size=0'; then
+        echo "not held"
+        return 0
+    fi
+    if printf '%s\n' "$summary" | grep -qi 'mWakeLockSummary=0x0'; then
+        echo "not held"
+        return 0
+    fi
+    echo "unknown"
+}
+
+backend_health_status() {
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "unknown"
+        return 0
+    fi
+
+    resp="$(curl -fsS --connect-timeout 2 --max-time 5 "http://127.0.0.1:8000/api/health" 2>/dev/null || true)"
+    if printf '%s' "$resp" | grep -q '"ok":true'; then
+        echo "healthy"
+    elif [ -n "$resp" ]; then
+        echo "unhealthy"
+    else
+        echo "unreachable"
+    fi
+}
+
+print_status_only() {
+    echo "context: ok"
+    if check_sshd_listen; then
+        echo "sshd: listening"
+    else
+        echo "sshd: not listening"
+    fi
+
+    pid="$(manager_candidate_pid || true)"
+    log_manager_candidate "$pid"
+    if [ -n "$pid" ] && process_exists "$pid" && is_manager_process "$pid"; then
+        echo "manager: running ($pid)"
+        if process_has_android_inet_group "$pid"; then
+            echo "manager_context: ok"
+        else
+            echo "manager_context: missing inet group 3003"
+        fi
+    else
+        echo "manager: not running"
+        echo "manager_context: not running"
+    fi
+
+    echo "wake_lock: $(wake_lock_status)"
+    echo "backend: $(backend_health_status)"
+}
+
 start_sshd_once() {
     "$PREFIX_DIR/bin/sshd" -4 2>&1
 }
@@ -258,6 +394,7 @@ start_sshd_if_needed() {
 
 manager_is_running() {
     pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+    log_manager_candidate "$pid"
     process_exists "$pid" || return 1
 
     current_uid="$(id -u 2>/dev/null || echo "")"
@@ -267,7 +404,12 @@ manager_is_running() {
     fi
 
     if is_manager_process "$pid"; then
-        log "start_services: stopping foreign service manager process $pid owned by uid ${pid_uid:-unknown} without valid Termux network context"
+        if process_has_android_inet_group "$pid"; then
+            context_reason="uid mismatch"
+        else
+            context_reason="missing Android inet group 3003"
+        fi
+        log "start_services: stopping foreign service manager process $pid owned by uid ${pid_uid:-unknown} without valid Termux network context ($context_reason)"
         kill "$pid" 2>/dev/null || {
             command -v su >/dev/null 2>&1 && su -c "kill -9 '$pid' 2>/dev/null" >/dev/null 2>&1 || true
         }
@@ -317,8 +459,17 @@ start_manager_if_needed() {
     return 1
 }
 
-repair_android_context
+log "start_services: command mode=$MODE arg=${MODE_ARG:-default}"
+log "start_services: current identity: $(android_identity_summary)"
+
 refuse_non_termux_network_context || exit 1
+
+if [ "$MODE" = "status-only" ]; then
+    print_status_only
+    exit 0
+fi
+
+repair_android_context
 install_legacy_manager_shim
 stop_legacy_manager_processes
 stop_duplicate_repo_managers
