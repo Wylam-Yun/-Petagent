@@ -102,3 +102,86 @@ Gate status:
   confirmation.
 - Task 10 five real Nubia web microphone attempts: pending after supervisor
   runtime validation.
+
+## Remaining Validation Gates
+
+These gates are intentionally not satisfied by the read-only preflight above.
+
+### Task 7 Manager Ensure Gate
+
+Required explicit operator approval:
+
+- "Run Task 7 --ensure" or equivalent.
+
+Allowed actions after approval:
+
+- Run `scripts/termux_start_services.sh --ensure` only through `ssh nubia-adb`
+  in the real Termux SSH context.
+- Confirm `id` still includes `3003(inet)`.
+- Confirm backend pid before and after `--ensure`.
+- Inspect `scripts/status.sh`, `~/.service_manager.log`, `logs/manager.log`,
+  `ps`, and ADB `dumpsys power`.
+
+Forbidden actions in this gate:
+
+- Do not kill uvicorn.
+- Do not reboot.
+- Do not use `adb shell su` or root to start backend or manager.
+- Do not install Termux:Boot.
+
+Evidence required to mark Task 7 complete:
+
+- `scripts/status.sh` shows backend healthy.
+- `scripts/status.sh` shows `manager: running (<pid>)`.
+- `scripts/status.sh` shows `manager_context: ok`.
+- `ps` shows exactly one `termux_service_manager.sh`.
+- Backend pid is unchanged unless pre-check health was already bad.
+- Wake lock is held, or manager logs explicitly explain why wake lock
+  visibility cannot be verified.
+
+### Task 8 Destructive Recovery Gate
+
+Required explicit operator approval:
+
+- "Run Task 8 destructive recovery" or equivalent.
+
+Preconditions:
+
+- Task 7 passed.
+- Phone is plugged in or has enough battery.
+
+Actions:
+
+- 8A may kill the current backend pid once and wait for manager recovery.
+- 8B may allow manager/browser relaunch behavior to run.
+- 8C reboot recovery is optional and only valid after Termux:Boot is installed
+  and opened once.
+
+Forbidden actions without separate approval:
+
+- Do not reboot.
+- Do not install APKs.
+- Do not manually start backend after a failed kill-recovery attempt until logs
+  are captured.
+
+### Task 10 Real Nubia Web Voice Gate
+
+Required explicit operator approval:
+
+- "Run Task 10 voice validation" or equivalent.
+
+Preconditions:
+
+- Task 7 passed.
+- Nubia browser page is open at `http://127.0.0.1:8000/`.
+- Browser microphone permission is available.
+- Audible Mac `say` playback is acceptable.
+
+Evidence required:
+
+- Five ADB long-press microphone attempts from the real Nubia web page.
+- Five screenshots pulled from the phone.
+- `voice_debug.jsonl` evidence for the latest attempts.
+- `recent_dialogue_turns` evidence for successful voice turns.
+- `agent_run.final_action_json.expression_key` evidence.
+- Screenshot expression compared with latest successful expression key.
