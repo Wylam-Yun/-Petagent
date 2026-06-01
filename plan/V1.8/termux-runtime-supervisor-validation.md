@@ -185,3 +185,101 @@ Evidence required:
 - `recent_dialogue_turns` evidence for successful voice turns.
 - `agent_run.final_action_json.expression_key` evidence.
 - Screenshot expression compared with latest successful expression key.
+
+## 2026-06-01 Task 7 Non-Disruptive Ensure Validation
+
+Pre-check evidence:
+
+- ADB device online: `9debb82b`, model `NX531J`
+- SSH identity: `uid=10137(u0_a137)`, groups include `3003(inet)`
+- Pre-check backend pid: `14471`
+- Pre-check backend health: `ok=true`, `build_hash=ec528f8`
+- Pre-check manager: not running
+- `scripts/termux_start_services.sh --status-only`: exit `0`, backend healthy
+
+First `--ensure` attempt:
+
+- Result: failed with exit status `1`
+- Backend pid stayed `14471`
+- `scripts/status.sh` still showed backend healthy and manager not running
+- Failure evidence from `~/.service_manager.log`:
+  - manager candidate pid `29421`
+  - uid `10137`
+  - `manager=yes`
+  - `inet=missing_3003`
+  - process was stopped as invalid
+- Follow-up probe showed a normal SSH child process had:
+  - `Groups: 3003 9997 10137 50137`
+- Root cause: `/proc/$pid/status` on Android used a tab after `Groups:`, and
+  the V1.8 parser only matched space-delimited groups. This made a valid
+  manager process look like it lacked group `3003`.
+
+Fix applied:
+
+- Commit `57e53ca`: `fix: parse tabbed android process groups`
+- Updated and redeployed:
+  - `scripts/status.sh`
+  - `scripts/termux_start_services.sh`
+  - `scripts/termux_service_manager.sh`
+- Phone SHA-256 after redeploy:
+  - `scripts/status.sh`:
+    `5c846e1d3bb59a1536c54530468ec5cd073095c6b335f9a3a4348b2db1e2caea`
+  - `scripts/termux_start_services.sh`:
+    `8385f65013f6cb36d0ad3d4ad922cbda2554a796ac52f1248987ca4a0f827e5c`
+  - `scripts/termux_service_manager.sh`:
+    `647af593f470b23f5e1a18b2fde4313579b14e97b9acf4bc879943eeb57df6bc`
+- Local verification after fix:
+  - `backend/tests/test_phase1_startup.py`: `15 passed`
+  - `sh -n` passed for the five runtime shell scripts
+
+Second `--ensure` attempt:
+
+- Command: `scripts/termux_start_services.sh --ensure`
+- Result: exit status `0`
+- Backend pid stayed `14471`
+- `scripts/status.sh` after ensure:
+  - `context: ok`
+  - `manager: running (5091)`
+  - `manager_context: ok`
+  - `sshd: listening`
+  - `process: running (14471)`
+  - `/api/health`: `ok=true`, `build_hash=ec528f8`
+  - `frontend_heartbeat_age_s`: about `29107.1`
+  - `watchdog_stuck: false`
+  - `database: ok`
+- Process check:
+  - exactly one `termux_service_manager.sh`
+  - manager pid `5091`
+  - backend pid `14471`
+  - sshd listening on `8022`
+- `~/.service_manager.log` showed:
+  - command mode `ensure`
+  - current identity included `3003(inet)`
+  - manager candidate pid `5091`, uid `10137`, `manager=yes`, `inet=ok`
+  - `service manager confirmed running`
+
+Manager findings after Task 7:
+
+- `logs/manager.log` showed:
+  - `Service manager started with PID 5091`
+  - `termux-wake-lock command found`
+  - `WARNING: termux-wake-lock returned non-zero`
+  - `WARNING: dumpsys power returned no wake lock summary`
+  - frontend heartbeat stale, browser relaunch attempted
+  - `Browser relaunch am start exit=134 output=`
+- ADB power check still showed:
+  - `mWakeLockSummary=0x0`
+  - `Wake Locks: size=0`
+- ADB package check still showed:
+  - only `package:com.termux`
+  - `com.termux.boot` missing
+  - `com.termux` `stopped=true`
+
+Task 7 status:
+
+- Supervisor startup validation: passed.
+- Backend stability during Task 7: passed, pid stayed `14471`.
+- Wake lock: not held; manager log explicitly records `termux-wake-lock`
+  failure.
+- Browser relaunch observability: passed; relaunch attempt is logged, but
+  `am start` currently exits `134`.
