@@ -215,14 +215,35 @@ take_lock() {
 }
 
 acquire_wake_lock() {
-    if command -v termux-wake-lock >/dev/null 2>&1; then
-        if termux-wake-lock >/dev/null 2>&1; then
-            log "Acquired Termux wake lock"
-        else
-            log "WARNING: termux-wake-lock returned non-zero"
-        fi
-    else
+    if ! command -v termux-wake-lock >/dev/null 2>&1; then
         log "WARNING: termux-wake-lock not found"
+        return 0
+    fi
+
+    log "termux-wake-lock command found"
+    wake_lock_acquired=0
+    if termux-wake-lock >/dev/null 2>&1; then
+        wake_lock_acquired=1
+        log "termux-wake-lock returned success"
+    else
+        log "WARNING: termux-wake-lock returned non-zero"
+    fi
+
+    if ! command -v dumpsys >/dev/null 2>&1; then
+        log "WARNING: dumpsys not available; wake lock visibility cannot be verified"
+        return 0
+    fi
+
+    summary="$(dumpsys power 2>/dev/null | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
+    if [ -z "$summary" ]; then
+        log "WARNING: dumpsys power returned no wake lock summary"
+        return 0
+    fi
+
+    compact_summary="$(printf '%s' "$summary" | tr '\n' ';' | sed 's/[[:space:]][[:space:]]*/ /g')"
+    log "wake lock post-check: $compact_summary"
+    if [ "$wake_lock_acquired" -eq 1 ] && ! printf '%s\n' "$summary" | grep -qi -E 'termux|wake-lock'; then
+        log "WARNING: termux-wake-lock succeeded but dumpsys did not show a Termux wake lock"
     fi
 }
 
@@ -382,15 +403,31 @@ petagent_watchdog() {
 
 ensure_browser() {
     # Relaunch browser if frontend heartbeat is stale and runtime is healthy
-    command -v curl >/dev/null 2>&1 || return 0
-    resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 0
+    target_url="http://127.0.0.1:$PETAGENT_PORT/"
+    command -v curl >/dev/null 2>&1 || {
+        log "Browser relaunch check skipped: curl not available"
+        return 0
+    }
+    resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || {
+        log "Browser relaunch check skipped: watchdog endpoint unreachable"
+        return 0
+    }
     heartbeat_age="$(printf '%s' "$resp" | sed -n 's/.*"frontend_heartbeat_age_s":\([0-9.]*\).*/\1/p')"
-    [ -z "$heartbeat_age" ] && return 0
+    [ -z "$heartbeat_age" ] && {
+        log "Browser relaunch check skipped: frontend_heartbeat_age_s missing"
+        return 0
+    }
     # Compare: if heartbeat_age > FRONTEND_STARTUP_SECONDS, relaunch
     age_int="${heartbeat_age%%.*}"
     if [ "${age_int:-0}" -gt "$FRONTEND_STARTUP_SECONDS" ]; then
-        log "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser"
-        am start -a android.intent.action.VIEW -d "http://127.0.0.1:$PETAGENT_PORT/" 2>/dev/null || true
+        log "Frontend heartbeat stale (${heartbeat_age}s); relaunching browser target=$target_url"
+        if ! command -v am >/dev/null 2>&1; then
+            log "WARNING: am command not available; cannot relaunch browser target=$target_url"
+            return 0
+        fi
+        am_output="$(am start -a android.intent.action.VIEW -d "$target_url" 2>&1)"
+        am_status=$?
+        log "Browser relaunch am start exit=$am_status output=$am_output"
     fi
 }
 
@@ -462,11 +499,10 @@ main() {
     refuse_root_manager
     refuse_non_termux_network_context
     repair_android_context
+    mkdir -p "$PETAGENT_DIR/logs" 2>/dev/null || true
     log "Service manager started with PID $$ ($MANAGER_VERSION)"
     acquire_wake_lock
     start_proxy_once
-
-    mkdir -p "$PETAGENT_DIR/logs" 2>/dev/null || true
 
     ssh_fail_count=0
     petagent_fail_count=0
