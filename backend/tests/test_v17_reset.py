@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -45,3 +47,28 @@ def test_runtime_reset_clears_user_context_but_keeps_debug_tables():
     assert "canonical memory is memory.md" in app.state.notebook_manager.read_raw("user.md")
     assert app.state.agent_run_store.count() == 1
     assert app.state.audio_job_store.get("job-reset-audit") is not None
+
+
+def test_runtime_reset_resets_tick_clock_so_initial_state_is_stable():
+    app = create_app(testing=True)
+    client = TestClient(app)
+    token = app.state.internal_token
+
+    stale_tick = datetime.utcnow() - timedelta(hours=12)
+    app.state.tick_service.set_last_tick(stale_tick)
+
+    response = client.post(
+        "/api/runtime/reset",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirm": "重新认识"},
+    )
+
+    assert response.status_code == 200
+    reset_state = response.json()["pet_state"]
+
+    next_state = app.state.tick_service.apply_if_due()
+
+    assert next_state["energy"] == reset_state["energy"]
+    assert next_state["hunger"] == reset_state["hunger"]
+    assert next_state["loneliness"] == reset_state["loneliness"]
+    assert next_state["sleepiness"] == reset_state["sleepiness"]

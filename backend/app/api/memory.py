@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
@@ -240,6 +241,12 @@ def runtime_reset(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
     initial_state = settings.app_config.get("state", {}).get("initial", {})
     if initial_state:
         state_store.save_state(initial_state)
+    tick_service = getattr(request.app.state, "tick_service", None)
+    if tick_service:
+        try:
+            tick_service.set_last_tick(datetime.utcnow())
+        except Exception:
+            pass
 
     new_state = state_store.get_state()
     return {
