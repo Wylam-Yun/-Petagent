@@ -51,9 +51,34 @@ frontend build output here.
 
 ## Phone Validation Status
 
-- Current ADB status on 2026-06-02 after local build tooling installation:
-  - `adb devices -l` printed no attached devices.
-- Task 6 install/open/unavailable-screen checks: pending until Nubia is online again.
+- Initial ADB status after local build tooling installation:
+  - `adb devices -l` temporarily printed no attached devices.
+- Reconnected ADB status:
+  - `9debb82b device usb:1-1 product:NX531J model:NX531J device:NX531J`
+- ADB forwards restored:
+  - `9debb82b tcp:18000 tcp:8000`
+  - `9debb82b tcp:18022 tcp:8022`
+- Termux runtime verification:
+  - SSH `id` included `3003(inet)`.
+  - `scripts/status.sh` showed `context: ok`, `manager: running`, `manager_context: ok`, `watchdog_stuck: false`, and `database: ok`.
+  - `/api/health` returned `ok=true`, `build_hash=ec528f8`, backend pid `16691`.
+  - `/build-info.json` returned `git_sha=ec528f8`.
+- APK install:
+  - `adb install -r android-shell/app/build/outputs/apk/debug/app-debug.apk`: `Success`.
+- Runtime permission:
+  - `android.permission.RECORD_AUDIO: granted=true`.
+- Healthy backend WebView load:
+  - Screenshot: `/private/tmp/petagent-v19-apk-home.png`.
+  - Result: APK WebView displayed the existing PetAgent UI at the phone-local backend.
+- Backend-unavailable screen:
+  - Launched debug APK with `petagent_debug_health_url=http://127.0.0.1:65535/api/health`.
+  - Screenshot: `/private/tmp/petagent-v19-apk-unavailable.png`.
+  - Result: native unavailable screen showed `本地后端没有连上` with a retry button.
+  - Real backend stayed healthy through `curl -fsS http://127.0.0.1:18000/api/health`.
+- Normal relaunch after unavailable validation:
+  - Screenshot: `/private/tmp/petagent-v19-apk-home-after-unavailable.png`.
+  - Result: APK WebView displayed the existing PetAgent UI again.
+- Disruptive backend stop validation: not run; debug health override covered the unavailable screen without disturbing Termux backend.
 - Task 7 real APK voice validation: pending until APK is installed and opened on Nubia.
 - Task 8 browser coexistence validation: pending until APK install validation is complete.
 
