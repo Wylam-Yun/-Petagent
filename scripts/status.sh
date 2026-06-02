@@ -4,6 +4,7 @@ set -eu
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PORT="${PORT:-8000}"
 SSHD_PORT="${SSHD_PORT:-8022}"
+APK_PACKAGE="${APK_PACKAGE:-com.petagent.shell}"
 HOME_DIR="${HOME_DIR:-${HOME:-/data/data/com.termux/files/home}}"
 PID_FILE="$PROJECT_DIR/backend/data/runtime.pid"
 LOCK_DIR="$HOME_DIR/.termux_service_manager.lock"
@@ -182,6 +183,75 @@ termux_stopped_state() {
   esac
 }
 
+apk_record_audio_permission_status() {
+  if ! command -v dumpsys >/dev/null 2>&1; then
+    echo "unknown"
+    return 0
+  fi
+
+  package_dump="$(dumpsys package "$APK_PACKAGE" 2>/dev/null || true)"
+  if [ -z "$package_dump" ]; then
+    echo "unknown"
+    return 0
+  fi
+  if printf '%s\n' "$package_dump" | grep -qi 'Permission Denial'; then
+    echo "unknown"
+    return 0
+  fi
+  if ! printf '%s\n' "$package_dump" | grep -q "Package \\[$APK_PACKAGE\\]"; then
+    echo "missing"
+    return 0
+  fi
+
+  permission_line="$(printf '%s\n' "$package_dump" | grep 'android.permission.RECORD_AUDIO' | head -n 1 || true)"
+  case "$permission_line" in
+    *"granted=true"*)
+      echo "granted"
+      ;;
+    *"granted=false"*)
+      echo "denied"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
+apk_record_audio_appops_status() {
+  if command -v appops >/dev/null 2>&1; then
+    appops_output="$(appops get "$APK_PACKAGE" RECORD_AUDIO 2>&1 || true)"
+  elif command -v cmd >/dev/null 2>&1; then
+    appops_output="$(cmd appops get "$APK_PACKAGE" RECORD_AUDIO 2>&1 || true)"
+  else
+    echo "unknown"
+    return 0
+  fi
+
+  case "$appops_output" in
+    *"NullPointerException"*|*"Permission Denial"*)
+      echo "unknown"
+      ;;
+    *"Unknown package"*|*"not found"*|*"No such package"*)
+      echo "missing"
+      ;;
+    *"RECORD_AUDIO: allow"*)
+      echo "allow"
+      ;;
+    *"RECORD_AUDIO: ignore"*)
+      echo "ignore"
+      ;;
+    *"RECORD_AUDIO: deny"*)
+      echo "deny"
+      ;;
+    *"No operations."*|"")
+      echo "default"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
 json_field() {
   key="$1"
   json="$2"
@@ -218,6 +288,8 @@ fi
 echo "wake_lock: $(wake_lock_status)"
 echo "termux_boot: $(termux_boot_status)"
 echo "termux_package: stopped=$(termux_stopped_state)"
+echo "apk_record_audio_permission: $(apk_record_audio_permission_status)"
+echo "apk_record_audio_appops: $(apk_record_audio_appops_status)"
 
 if [ -f "$PID_FILE" ]; then
   PID="$(cat "$PID_FILE" 2>/dev/null || true)"

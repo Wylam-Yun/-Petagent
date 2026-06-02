@@ -2,5 +2,6 @@
     <string name="app_name">豆豆桌宠</string>
     <string name="backend_unavailable_title">本地后端没有连上</string>
     <string name="backend_unavailable_body">请先打开 Termux 并启动 PetAgent 服务，然后点重试。</string>
+    <string name="audio_permission_blocked">录音权限被系统权限管理拦截，请在应用权限里允许豆豆桌宠录音。</string>
     <string name="retry">重试</string>
 </resources>

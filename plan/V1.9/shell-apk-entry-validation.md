@@ -148,9 +148,74 @@ frontend build output here.
     `pet_reply`.
   - Screenshot artifact: `/private/tmp/petagent-v19-browser-text-sent.png`.
 
+## Follow-up Operational Hardening
+
+- Follow-up date: 2026-06-02 Asia/Shanghai.
+- Follow-up commit: `fix: harden apk mic diagnostics`.
+- Phone-served `build-info.json` was rebuilt and redeployed after the follow-up
+  commit; the final served SHA was rechecked after committing this validation
+  note.
+- Follow-up APK install:
+  - `adb install -r android-shell/app/build/outputs/apk/debug/app-debug.apk`:
+    `Success`.
+  - `adb shell am start -W -n com.petagent.shell/.MainActivity`: `Status: ok`.
+  - `dumpsys activity` showed `com.petagent.shell/.MainActivity` as the resumed
+    activity.
+  - Screenshot artifact:
+    `/private/tmp/petagent-v19-followup-home-final.png`.
+- ADB permission checks after reinstall:
+  - `android.permission.RECORD_AUDIO: granted=true`.
+  - `RECORD_AUDIO: allow`.
+- `scripts/status.sh` now reports both APK runtime permission and AppOps state
+  when Android allows Termux to inspect them. On this Nubia, ADB can see
+  `RECORD_AUDIO: allow`, while Termux may only report `unknown` because
+  `dumpsys package` and `appops` are not fully available from the Termux UID.
+  This avoids misreporting a permission-denial result as an uninstalled APK.
+- The shell APK now checks `AppOpsManager.OPSTR_RECORD_AUDIO` before granting
+  WebView `RESOURCE_AUDIO_CAPTURE`. If Android's permission manager has blocked
+  recording at AppOps level, the APK denies the WebView permission request and
+  shows a native toast instead of allowing a misleading recording attempt.
+- Added `scripts/install_termux_boot_entry.sh` to install only the Termux-side
+  boot delegation files:
+  `~/.start_services.sh` and `~/.termux/boot/start-sshd.sh`. It does not install
+  `com.termux.boot` and does not use adb/root as runtime support.
+- Follow-up phone deployment:
+  - `scripts/install_termux_boot_entry.sh` ran through Termux SSH with
+    `context: ok`.
+  - `~/.start_services.sh` now delegates to
+    `~/Petagent/scripts/termux_start_services.sh`.
+  - `~/.termux/boot/start-sshd.sh` now delegates to
+    `~/.start_services.sh --termux-boot`.
+  - `adb shell pm list packages | grep -i termux` still printed only
+    `package:com.termux`, so the boot scripts are prepared but cannot run on
+    reboot until `com.termux.boot` is installed and opened once.
+- Wake-lock follow-up:
+  - `termux-wake-lock` exists but direct execution through real Termux SSH
+    returned `Aborted`, exit status `134`.
+  - `adb shell pm list packages | grep -i termux` printed only
+    `package:com.termux`; `com.termux.api` is not installed.
+  - `adb shell dumpsys power` did not show `termux:service-wakelock` in the final
+    follow-up check. This remains a Termux/Termux:API operational limitation,
+    not an APK-shell fix.
+- Context cleanup for the repeated "打节拍" replies:
+  - A text correction was sent through the existing `/api/text/chat` endpoint,
+    not a new backend route.
+  - The new `raw_event_log` row was `id=104`, `event_type=text_message`,
+    `source=text_fast_reply`, and told 豆豆 that the repeated V1.9 recording
+    phrases were engineering tests, not the user's current state.
+- Local checks:
+  - `sh -n scripts/status.sh`
+  - `sh -n scripts/install_termux_boot_entry.sh`
+  - `cd backend && ../.venv/bin/python -m pytest tests/test_phase1_startup.py -q`
+  - `cd android-shell && JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew assembleDebug`
+
 ## Known Limitations Still In Scope
 
-- Termux:Boot status is not changed by this APK work and remains a V1.8/V1.9 operational limitation until rechecked on the phone.
-- Termux wake lock status is not changed by this APK work; the APK only uses `FLAG_KEEP_SCREEN_ON` while its activity is visible.
+- Termux:Boot status is not changed by this APK work. The boot delegation files
+  can be prepared, but automatic reboot recovery still requires
+  `com.termux.boot` to be installed and opened once from the Android launcher.
+- Termux wake lock is Termux service-manager state; the APK only uses
+  `FLAG_KEEP_SCREEN_ON` while its activity is visible and does not keep the
+  backend alive by itself.
 - The APK does not start, embed, or supervise the FastAPI backend.
 - The APK must load `http://127.0.0.1:8000/` on the phone itself; Mac `18000` forwarding is only for validation.

@@ -3,6 +3,8 @@ package com.petagent.shell;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AppOpsManager;
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -24,6 +26,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -97,9 +100,11 @@ public class MainActivity extends Activity {
         pendingAudioPermissionRequest = null;
         if (grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && isRecordAudioAppOpAllowed()
                 && isAllowedLoopbackOrigin(request.getOrigin())) {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
         } else {
+            showAudioPermissionBlockedToast();
             request.deny();
         }
     }
@@ -344,6 +349,11 @@ public class MainActivity extends Activity {
                         return;
                     }
                     if (checkRecordAudioGranted()) {
+                        if (!isRecordAudioAppOpAllowed()) {
+                            showAudioPermissionBlockedToast();
+                            request.deny();
+                            return;
+                        }
                         request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
                         return;
                     }
@@ -356,5 +366,28 @@ public class MainActivity extends Activity {
     private boolean checkRecordAudioGranted() {
         return android.os.Build.VERSION.SDK_INT < 23
                 || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isRecordAudioAppOpAllowed() {
+        if (android.os.Build.VERSION.SDK_INT < 19) {
+            return true;
+        }
+        AppOpsManager appOpsManager = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
+        if (appOpsManager == null) {
+            return true;
+        }
+        try {
+            int mode = appOpsManager.checkOpNoThrow(
+                    AppOpsManager.OPSTR_RECORD_AUDIO,
+                    android.os.Process.myUid(),
+                    getPackageName());
+            return mode == AppOpsManager.MODE_ALLOWED || mode == AppOpsManager.MODE_DEFAULT;
+        } catch (RuntimeException ignored) {
+            return true;
+        }
+    }
+
+    private void showAudioPermissionBlockedToast() {
+        Toast.makeText(this, R.string.audio_permission_blocked, Toast.LENGTH_LONG).show();
     }
 }

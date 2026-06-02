@@ -181,6 +181,8 @@ def test_v18_status_script_exposes_supervisor_state():
         "wake_lock: $(wake_lock_status)",
         "termux_boot: $(termux_boot_status)",
         "termux_package: stopped=$(termux_stopped_state)",
+        "apk_record_audio_permission: $(apk_record_audio_permission_status)",
+        "apk_record_audio_appops: $(apk_record_audio_appops_status)",
         "frontend_heartbeat_age_s:",
         "watchdog_stuck:",
     ]:
@@ -193,6 +195,69 @@ def test_v18_status_script_exposes_supervisor_state():
     assert "dumpsys package com.termux" in text
     assert "dumpsys power" in text
     assert "Wake Locks: size=0" in text
+    assert 'APK_PACKAGE="${APK_PACKAGE:-com.petagent.shell}"' in text
+    assert "apk_record_audio_permission_status() {" in text
+    assert "apk_record_audio_appops_status() {" in text
+    assert 'appops get "$APK_PACKAGE" RECORD_AUDIO' in text
+    assert 'cmd appops get "$APK_PACKAGE" RECORD_AUDIO' in text
+    assert "Permission Denial" in text
+    assert "NullPointerException" in text
+    assert "RECORD_AUDIO: ignore" in text
+
+
+def test_v19_termux_boot_entry_installer_delegates_to_existing_manager():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "install_termux_boot_entry.sh"
+    text = script.read_text()
+
+    for expected in [
+        'BOOT_SCRIPT="$BOOT_DIR/start-sshd.sh"',
+        'START_SERVICES_SH="$HOME_DIR/.start_services.sh"',
+        'exec "$HOME/Petagent/scripts/termux_start_services.sh" "$@"',
+        'exec "$HOME/.start_services.sh" --termux-boot',
+        "termux_boot_status() {",
+        "package:com.termux.boot",
+        "context: not Termux app network context",
+        "hint: install boot entries from Termux or Termux SSH, not adb/su",
+    ]:
+        assert expected in text
+
+
+def test_v19_android_shell_checks_record_audio_appops_before_webview_grant():
+    main_activity = (
+        Path(__file__).resolve().parents[2]
+        / "android-shell"
+        / "app"
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "petagent"
+        / "shell"
+        / "MainActivity.java"
+    )
+    strings = (
+        Path(__file__).resolve().parents[2]
+        / "android-shell"
+        / "app"
+        / "src"
+        / "main"
+        / "res"
+        / "values"
+        / "strings.xml"
+    )
+    text = main_activity.read_text()
+    strings_text = strings.read_text()
+
+    assert "import android.app.AppOpsManager;" in text
+    assert "isRecordAudioAppOpAllowed() {" in text
+    assert "AppOpsManager.OPSTR_RECORD_AUDIO" in text
+    assert "AppOpsManager.MODE_ALLOWED" in text
+    assert "AppOpsManager.MODE_DEFAULT" in text
+    assert "showAudioPermissionBlockedToast();" in text
+    assert text.index("isRecordAudioAppOpAllowed()") < text.index(
+        "request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});"
+    )
+    assert "audio_permission_blocked" in strings_text
 
 
 def test_v18_start_services_has_safe_status_only_and_explicit_ensure_modes():
