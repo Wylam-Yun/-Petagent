@@ -113,6 +113,13 @@ test("App renders 豆豆 and shows kaomoji face", async () => {
 
   expect(screen.getByText("豆豆")).toBeInTheDocument();
   expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(・ω・)");
+  expect(screen.getByRole("main")).toHaveClass("app-shell");
+  expect(screen.getByLabelText("豆豆状态")).toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆当前心情 idle")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "文字输入" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "点一下说话" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "更多互动" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重新认识" })).toBeInTheDocument();
 });
 
 test("does not render thinking mode or topic refresh controls", async () => {
