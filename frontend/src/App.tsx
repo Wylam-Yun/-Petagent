@@ -796,13 +796,23 @@ function App() {
           正在重新连接豆豆…
         </div>
       )}
-      <StatusBar state={petState} />
+      <div className="top-panel">
+        <StatusBar state={petState} />
+      </div>
       <section className="pet-stage" aria-label={`豆豆当前心情 ${titleMood}`}>
-        <h1>豆豆</h1>
+        <div className="pet-stage-room" aria-hidden="true">
+          <span className="room-shelf" />
+          <span className="room-dot room-dot-left" />
+          <span className="room-dot room-dot-right" />
+        </div>
+        <div className="pet-title-row">
+          <p className="pet-kicker">PetAgent</p>
+          <h1>豆豆</h1>
+        </div>
         <PetFace faceType={faceType} animation={animation} expressionKey={expressionKey} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>
-      <div className="control-deck">
+      <div className="control-deck" aria-label="豆豆互动控制">
         <TextInputBar
           disabled={isTextDisabled}
           onSubmit={handleTextSubmit}
@@ -822,14 +832,16 @@ function App() {
           onClick={() => setShowMoreMenu(!showMoreMenu)}
           aria-expanded={showMoreMenu}
         >
-          {showMoreMenu ? "收起" : "更多互动"}
+          {showMoreMenu ? "收起互动" : "更多互动"}
         </button>
         {showMoreMenu && (
-          <TouchArea
-            disabled={isTextDisabled || interactions.length === 0}
-            interactions={interactions}
-            onPetEvent={handlePetEvent}
-          />
+          <div className="interaction-drawer">
+            <TouchArea
+              disabled={isTextDisabled || interactions.length === 0}
+              interactions={interactions}
+              onPetEvent={handlePetEvent}
+            />
+          </div>
         )}
       </div>
       <div className="secondary-actions">
