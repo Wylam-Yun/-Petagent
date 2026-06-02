@@ -14,19 +14,19 @@ case "$MODE_ARG" in
     "")
         MODE="ensure"
         ;;
-    --ensure|--termux-boot)
+    --ensure|--termux-boot|--boot)
         MODE="ensure"
         ;;
     --status-only)
         MODE="status-only"
         ;;
     -h|--help)
-        echo "Usage: $0 [--ensure|--status-only|--termux-boot]"
+        echo "Usage: $0 [--ensure|--status-only|--termux-boot|--boot]"
         exit 0
         ;;
     *)
         echo "ERROR: unknown mode: $MODE_ARG" >&2
-        echo "Usage: $0 [--ensure|--status-only|--termux-boot]" >&2
+        echo "Usage: $0 [--ensure|--status-only|--termux-boot|--boot]" >&2
         exit 2
         ;;
 esac

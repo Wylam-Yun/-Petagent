@@ -209,11 +209,75 @@ frontend build output here.
   - `cd backend && ../.venv/bin/python -m pytest tests/test_phase1_startup.py -q`
   - `cd android-shell && JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew assembleDebug`
 
+## Post-Reboot Termux:Boot Check
+
+- Date: 2026-06-02 Asia/Shanghai.
+- Termux:Boot was installed after the follow-up work:
+  - Package `com.termux.boot`, version `0.8.1`.
+  - `com.termux` and `com.termux.boot` share UID `10137` / shared user
+    `com.termux`.
+  - Their signing certificate SHA-256 matched:
+    `b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`.
+  - `com.termux.boot/.BootActivity` had been opened once and Android package
+    state showed `stopped=false`, `notLaunched=false`.
+- Real reboot validation did not pass automatic backend recovery:
+  - Reboot command was sent at approximately `2026-06-02 22:18`.
+  - ADB returned only after USB was reconnected.
+  - After forwards were restored, `ssh nubia-adb` closed immediately with
+    `Connection closed by 127.0.0.1 port 18022`.
+  - `curl -fsS http://127.0.0.1:18000/api/health` returned
+    `curl: (52) Empty reply from server`.
+  - No healthy `sshd`, manager, or backend service was listening.
+- Failure evidence:
+  - `logcat` during boot contained
+    `Unable to launch app com.termux.boot/... for broadcast ... process is bad`.
+  - A historical root boot hook also ran and called
+    `termux_start_services.sh --boot`; the script previously rejected that
+    argument and exited with status `2`.
+  - The historical root boot hook wrote `~/.boot_services.log` as `root:root`,
+    so the Termux user could not read the log file.
+  - ADB could not simulate Termux:Boot's receiver afterwards because
+    `com.termux.boot/.BootReceiver` is not exported; `logcat` showed a
+    permission denial for the shell-triggered `BOOT_COMPLETED` broadcast.
+- Recovery result:
+  - Bringing the real `com.termux/.app.TermuxActivity` to the foreground caused
+    the existing `.bashrc` auto-start path to run from real Termux app context.
+  - `scripts/termux_start_services.sh` logged a new recovery at
+    `2026-06-02 22:49:17`, with groups including `3003(inet)`.
+  - `sshd` started on `8022`, the manager started as pid `8128`, and the
+    backend started as pid `9932`.
+  - Post-recovery SSH validation passed:
+    `id` included `3003(inet)`, `context: ok`, `manager: running`,
+    `manager_context: ok`, `sshd: listening`, `backend ok=true`,
+    `watchdog_stuck: false`, and `database: ok`.
+  - Post-recovery `curl` checks passed:
+    `/api/health` returned `ok=true`, `build_hash=ee55cfe`, pid `9932`;
+    `/build-info.json` returned `git_sha=ee55cfe`.
+- Script hardening after the failed reboot:
+  - `scripts/termux_start_services.sh` accepts the legacy `--boot` argument as
+    an alias for ensure mode, matching the historical root hook's argument.
+  - `scripts/install_termux_boot_entry.sh` now sets Termux dynamic-library
+    environment variables before using Termux binaries, handles `HOME` being
+    empty or wrong under `run-as`, and generates a boot entry that logs its
+    identity and delegation target.
+  - The generated Termux:Boot entry falls back to a timestamped log file if the
+    historical root-owned `.boot_services.log` is not writable by Termux.
+  - These changes were deployed to the phone's Termux files, and the boot entry
+    was regenerated. This is a boot-script fix, not proof that automatic reboot
+    recovery now passes.
+- Conclusion:
+  - Termux:Boot is installed and the backend can recover once real Termux app
+    context is launched.
+  - Automatic recovery after a real reboot remains unproven after the script
+    hardening and requires another real reboot validation. Do not mark
+    Termux:Boot reboot recovery as passed yet.
+
 ## Known Limitations Still In Scope
 
-- Termux:Boot status is not changed by this APK work. The boot delegation files
-  can be prepared, but automatic reboot recovery still requires
-  `com.termux.boot` to be installed and opened once from the Android launcher.
+- Termux:Boot is installed and the boot delegation files are prepared, but
+  automatic recovery after a real reboot did not pass on the first real reboot.
+  It remains unproven after the follow-up script hardening until another real
+  reboot validation passes.
 - Termux wake lock is Termux service-manager state; the APK only uses
   `FLAG_KEEP_SCREEN_ON` while its activity is visible and does not keep the
   backend alive by itself.

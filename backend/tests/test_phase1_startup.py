@@ -213,6 +213,9 @@ def test_v19_termux_boot_entry_installer_delegates_to_existing_manager():
         'BOOT_SCRIPT="$BOOT_DIR/start-sshd.sh"',
         'START_SERVICES_SH="$HOME_DIR/.start_services.sh"',
         'exec "$HOME/Petagent/scripts/termux_start_services.sh" "$@"',
+        'BOOT_LOG="$HOME/.boot_services.log"',
+        'exec >> "$BOOT_LOG" 2>&1',
+        'boot_entry: delegating to $HOME/.start_services.sh --termux-boot',
         'exec "$HOME/.start_services.sh" --termux-boot',
         "termux_boot_status() {",
         "package:com.termux.boot",
@@ -265,7 +268,8 @@ def test_v18_start_services_has_safe_status_only_and_explicit_ensure_modes():
     text = script.read_text()
 
     assert "--status-only)" in text
-    assert "--ensure|--termux-boot)" in text
+    assert "--ensure|--termux-boot|--boot)" in text
+    assert "--ensure|--status-only|--termux-boot|--boot" in text
     assert 'MODE="status-only"' in text
     assert 'MODE="ensure"' in text
     assert "print_status_only() {" in text
