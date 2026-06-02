@@ -23,6 +23,8 @@ describe("StatusBar", () => {
     expect(screen.getByText("亲密")).toBeInTheDocument();
     expect(screen.getByText("活力")).toBeInTheDocument();
     expect(screen.getByText("心情")).toBeInTheDocument();
+    expect(screen.getByText("开心")).toBeInTheDocument();
+    expect(screen.queryByText("happy")).not.toBeInTheDocument();
     expect(screen.queryByText("想陪")).not.toBeInTheDocument();
     expect(screen.queryByText("困意")).not.toBeInTheDocument();
   });

@@ -813,11 +813,6 @@ function App() {
         <PetBubble text={bubbleText} busy={busy} />
       </section>
       <div className="control-deck" aria-label="豆豆互动控制">
-        <TextInputBar
-          disabled={isTextDisabled}
-          onSubmit={handleTextSubmit}
-          onActiveChange={setInputActiveState}
-        />
         <VoiceButton
           disabled={isVoiceDisabled}
           phase={phase}
@@ -825,6 +820,11 @@ function App() {
           onInterrupt={interruptVoiceRun}
           onPhaseChange={handleVoicePhase}
           onVoiceResponse={handleVoiceResponse}
+        />
+        <TextInputBar
+          disabled={isTextDisabled}
+          onSubmit={handleTextSubmit}
+          onActiveChange={setInputActiveState}
         />
         <button
           className="more-toggle-btn"
