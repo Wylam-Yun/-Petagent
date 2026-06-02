@@ -74,13 +74,17 @@ public class MainActivity extends Activity {
     }
 
     private void configureDebugOverrides() {
-        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+        if (!isDebuggable()) {
             return;
         }
         String debugHealthUrl = getIntent().getStringExtra(DEBUG_HEALTH_URL_EXTRA);
         if (isAllowedLoopbackHttpUrl(debugHealthUrl)) {
             healthUrl = debugHealthUrl;
         }
+    }
+
+    private boolean isDebuggable() {
+        return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
     @Override

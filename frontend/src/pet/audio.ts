@@ -81,6 +81,9 @@ export function assertRecordingDuration(durationMs: number) {
 export async function createVoiceRecordingSession(
   options: RecordingOptions = {}
 ): Promise<VoiceRecordingSession> {
+  if (shouldPreferWavRecorder()) {
+    return createWavRecordingSession(options);
+  }
   try {
     return await createMediaRecorderSession(options);
   } catch (error) {
@@ -89,6 +92,19 @@ export async function createVoiceRecordingSession(
     }
   }
   return createWavRecordingSession(options);
+}
+
+function shouldPreferWavRecorder(): boolean {
+  const ua = navigator.userAgent;
+  const chromeMatch = ua.match(/(?:Chrome|Chromium)\/(\d+)/);
+  if (!chromeMatch) {
+    return false;
+  }
+  const major = Number(chromeMatch[1]);
+  if (!Number.isFinite(major) || major <= 0 || major > 55) {
+    return false;
+  }
+  return /\bwv\b/.test(ua) || /Version\/4\.0/.test(ua);
 }
 
 async function createWavRecordingSession(

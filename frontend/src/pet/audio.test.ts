@@ -147,6 +147,88 @@ describe("audio recording helpers", () => {
     now.mockRestore();
   });
 
+  test("prefers wav recording on Chrome 55 WebView even when MediaRecorder exists", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const userAgent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Linux; Android 6.0.1; NX531J) AppleWebKit/537.36 "
+        + "(KHTML, like Gecko) Version/4.0 Chrome/55.0.2883.91 Mobile Safari/537.36"
+    );
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeAudioContext {
+      sampleRate = 16_000;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      audioContextCtor: FakeAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array([0, 0.25, -0.25])
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    const blob = await session.stop();
+
+    expect(blob.type).toBe("audio/wav");
+    userAgent.mockRestore();
+    now.mockRestore();
+  });
+
+  test("keeps MediaRecorder on non-WebView Chrome 55", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const userAgent = vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Linux; Android 6.0.1; NX531J) AppleWebKit/537.36 "
+        + "(KHTML, like Gecko) Chrome/55.0.2883.91 Mobile Safari/537.36"
+    );
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      mediaRecorderCtor: FakeMediaRecorder as unknown as typeof MediaRecorder
+    });
+
+    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    const blob = await session.stop();
+
+    expect(blob.type).toBe("audio/webm;codecs=opus");
+    userAgent.mockRestore();
+    now.mockRestore();
+  });
+
   test("encodes wav recordings at the ASR sample rate", async () => {
     vi.useRealTimers();
     const now = vi.spyOn(Date, "now").mockReturnValue(0);

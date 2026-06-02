@@ -46,6 +46,14 @@ frontend build output here.
 - `cd frontend && npm test -- --run`: passed, `12` test files and `71` tests.
 - `cd frontend && npm run build`: passed; generated `frontend/dist` remains ignored and untracked.
 - `cd backend && ../.venv/bin/python -m pytest tests/test_voice_pipeline.py tests/test_voice_contract.py tests/test_text_chat.py tests/test_v17_context_memory_state.py -q`: passed, `34` tests.
+- After the WebView 55 voice compatibility change:
+  - `cd frontend && npm test -- --run src/pet/audio.test.ts`: passed,
+    `9` tests.
+  - `cd frontend && npm test -- --run`: passed, `12` test files and `73`
+    tests.
+  - `cd frontend && npm run build`: passed; generated `frontend/dist` remains
+    ignored and untracked.
+  - `cd android-shell && ./gradlew assembleDebug`: passed.
 - Forbidden artifact check:
   - `git ls-files frontend/dist backend/data backend/static/audio backend/secrets logs android-shell/app/build` printed no tracked files.
 
@@ -79,8 +87,66 @@ frontend build output here.
   - Screenshot: `/private/tmp/petagent-v19-apk-home-after-unavailable.png`.
   - Result: APK WebView displayed the existing PetAgent UI again.
 - Disruptive backend stop validation: not run; debug health override covered the unavailable screen without disturbing Termux backend.
-- Task 7 real APK voice validation: pending until APK is installed and opened on Nubia.
-- Task 8 browser coexistence validation: pending until APK install validation is complete.
+- Old WebView 55 voice compatibility:
+  - Initial APK voice attempts reached `/api/voice/chat` but WebView
+    `MediaRecorder` produced invalid WebM uploads that failed before
+    `voice_debug.jsonl`.
+  - The frontend now prefers the existing Web Audio WAV recorder only for old
+    Chrome/Chromium WebView user agents (`Chrome <= 55` with `wv` or
+    `Version/4.0`), preserving the existing `/api/voice/chat` endpoint.
+  - `android.permission.MODIFY_AUDIO_SETTINGS` was added because logcat showed
+    Chromium media requesting it alongside `RECORD_AUDIO`.
+  - During field validation, Android AppOps had `RECORD_AUDIO: ignore` even
+    while package runtime permission showed `granted=true`. `adb shell appops
+    set com.petagent.shell RECORD_AUDIO allow` restored the validation device's
+    permission state; the APK runtime still relies on normal Android permission
+    grant behavior.
+- Task 7 real APK voice validation:
+  - Fresh baseline was written on the phone to
+    `backend/data/logs/petagent_v19_voice_baseline.json`:
+    `voice_debug_rows=79`, `raw_event_log_count=17`,
+    `agent_run_count=95`, `audio_job_count=91`, database
+    `backend/data/pet.db`.
+  - Five APK voice turns after the baseline all created new
+    `event=voice_chat` records in `voice_debug.jsonl`.
+  - All five records were `ok=true`, `content_type=audio/wav`,
+    `format=wav`, non-empty ASR `user_text`, `selected=unified`, and
+    `thinking_mode=false`.
+  - Audio evidence:
+    - turn 1: `size_bytes=1335340`, `duration_s=41.728`, `rms=2981.6`,
+      `max_amp=20006`.
+    - turn 2: `size_bytes=1343532`, `duration_s=41.984`, `rms=3006.4`,
+      `max_amp=19303`.
+    - turn 3: `size_bytes=1368108`, `duration_s=42.752`, `rms=3024.6`,
+      `max_amp=19244`.
+    - turn 4: `size_bytes=1359916`, `duration_s=42.496`, `rms=2997.7`,
+      `max_amp=19526`.
+    - turn 5: `size_bytes=1351724`, `duration_s=42.24`, `rms=2890.5`,
+      `max_amp=19277`.
+  - SQLite deltas after the five turns:
+    - `raw_event_log`: `+5`
+    - `agent_run`: `+5`
+    - `audio_job`: `+5`
+  - The five new raw events were all `event_type=voice_message` and
+    `source=voice_unified`, with non-empty `user_text` and `pet_reply`.
+  - The five latest `agent_run` rows were `status=completed` with
+    `audio_job_id` populated. `final_action_json.expression_key` values were
+    `idle_wink` or `happy`; the final phone screenshot showed mood `happy` and
+    face `(^▽^)`, not the question-mark fallback.
+  - The five latest `audio_job` rows were `status=ready` with non-empty
+    `/static/audio/...mp3` `voice_url` values.
+  - Screenshots are local validation artifacts under `/private/tmp/`:
+    `petagent-v19-voice-01.png` through `petagent-v19-voice-05.png`, plus
+    `petagent-v19-voice-final-state.png`.
+- Task 8 browser coexistence validation:
+  - Installed APK did not break the old browser entry. Via Browser package
+    `mark.via` opened `http://127.0.0.1:8000/` and displayed the existing
+    PetAgent UI.
+  - A browser text interaction sent `browser_v19_coexistence_test` and created
+    a new `raw_event_log` row:
+    `event_type=text_message`, `source=text_fast_reply`, with a non-empty
+    `pet_reply`.
+  - Screenshot artifact: `/private/tmp/petagent-v19-browser-text-sent.png`.
 
 ## Known Limitations Still In Scope
 
