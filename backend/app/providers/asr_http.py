@@ -9,6 +9,8 @@ import requests
 from app.config import ProviderConfig
 from app.runtime.voice_types import ASRTranscript
 
+DIRECT_REQUEST_PROXIES = {"http": None, "https": None, "all": None}
+
 
 def _timeout_tuple(scalar: int, connect: Optional[int] = None, read: Optional[int] = None) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
@@ -231,7 +233,7 @@ class HttpASRProvider:
                 content_type if request_format == "binary" else None
             ),
             "params": self._params(),
-            "proxies": self._proxies(),
+            "proxies": DIRECT_REQUEST_PROXIES,
             "timeout": _timeout_tuple(
                 self.config.timeout_seconds,
                 connect=self.config.extra.get("connect_timeout_seconds"),
@@ -310,9 +312,3 @@ class HttpASRProvider:
         if not isinstance(query_params, dict):
             return {}
         return {str(key): str(value) for key, value in query_params.items()}
-
-    def _proxies(self) -> Dict[str, str]:
-        proxy_url = str(self.config.extra.get("proxy_url") or "").strip()
-        if not proxy_url:
-            return {}
-        return {"http": proxy_url, "https": proxy_url}

@@ -21,6 +21,8 @@ from app.providers.errors import (
 )
 from app.providers.retry import retry_provider_call
 
+DIRECT_REQUEST_PROXIES = {"http": None, "https": None, "all": None}
+
 
 def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
     """Convert a scalar timeout to (connect_timeout, read_timeout) tuple."""
@@ -152,7 +154,7 @@ class MiMoLLMProvider:
                 self.provider_config.base_url.rstrip("/") + "/chat/completions",
                 headers=self._headers(api_key),
                 json=payload,
-                proxies=self._proxies(),
+                proxies=DIRECT_REQUEST_PROXIES,
                 timeout=_timeout_tuple(self.provider_config.timeout_seconds),
             )
             response.raise_for_status()
@@ -218,9 +220,3 @@ class MiMoLLMProvider:
         header = str(self.provider_config.extra.get("api_key_header") or "api-key")
         headers[header] = api_key
         return headers
-
-    def _proxies(self) -> Dict[str, str]:
-        proxy_url = str(self.provider_config.extra.get("proxy_url") or "").strip()
-        if not proxy_url:
-            return {}
-        return {"http": proxy_url, "https": proxy_url}

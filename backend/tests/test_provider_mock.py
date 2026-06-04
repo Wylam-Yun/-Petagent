@@ -11,6 +11,7 @@ from app.providers.tts_mimo import (
     FallbackTTSProvider,
     MockTTSProvider,
     MiMoTTSProvider,
+    SelectableTTSProvider,
     build_voice_prompt,
 )
 from app.pet.guard import guard_action
@@ -112,10 +113,7 @@ def test_llm_provider_can_use_bearer_auth_for_siliconflow(monkeypatch):
     assert result["reply"] == "好呀。"
     assert captured["headers"]["Authorization"] == "Bearer sf-key"
     assert "api-key" not in captured["headers"]
-    assert captured["proxies"] == {
-        "http": "http://127.0.0.1:7897",
-        "https": "http://127.0.0.1:7897",
-    }
+    assert captured["proxies"] == {"http": None, "https": None, "all": None}
 
 
 def test_fallback_llm_provider_uses_secondary_only_after_primary_failure():
@@ -210,10 +208,7 @@ def test_tts_provider_can_use_openai_speech_binary_response(tmp_path: Path, monk
     assert captured["url"] == "https://api.siliconflow.cn/v1/audio/speech"
     assert captured["headers"]["Authorization"] == "Bearer sf-key"
     assert "api-key" not in captured["headers"]
-    assert captured["proxies"] == {
-        "http": "http://127.0.0.1:7897",
-        "https": "http://127.0.0.1:7897",
-    }
+    assert captured["proxies"] == {"http": None, "https": None, "all": None}
     assert captured["json"]["model"] == "FunAudioLLM/CosyVoice2-0.5B"
     assert captured["json"]["voice"] == "FunAudioLLM/CosyVoice2-0.5B:claire"
     assert captured["json"]["response_format"] == "mp3"
@@ -268,6 +263,45 @@ def test_fallback_tts_provider_uses_secondary_when_primary_returns_none(tmp_path
     primary = MockTTSProvider(audio_dir=tmp_path, fail=True)
     fallback = MockTTSProvider(audio_dir=tmp_path)
     provider = FallbackTTSProvider(primary, fallback)
+
+    url = provider.synthesize("豆豆在呢。")
+
+    assert url is not None
+    assert url.startswith("/static/audio/")
+
+
+def test_selectable_tts_provider_switches_mode(tmp_path: Path):
+    provider = SelectableTTSProvider(
+        {
+            "siliconflow": MockTTSProvider(audio_dir=tmp_path),
+            "mimo": MockTTSProvider(audio_dir=tmp_path),
+            "weilin": MockTTSProvider(audio_dir=tmp_path),
+        },
+        mode="siliconflow",
+    )
+
+    assert provider.mode == "siliconflow"
+    assert provider.set_mode("mimo") == "mimo"
+    assert provider.mode == "mimo"
+    assert provider.set_mode("weilin") == "weilin"
+    assert provider.mode == "weilin"
+    status = provider.status()
+    assert status["mode"] == "weilin"
+    assert {item["mode"] for item in status["options"]} == {
+        "siliconflow",
+        "mimo",
+        "weilin",
+    }
+
+
+def test_selectable_tts_provider_falls_back_to_other_configured_provider(tmp_path: Path):
+    provider = SelectableTTSProvider(
+        {
+            "siliconflow": MockTTSProvider(audio_dir=tmp_path, fail=True),
+            "mimo": MockTTSProvider(audio_dir=tmp_path),
+        },
+        mode="siliconflow",
+    )
 
     url = provider.synthesize("豆豆在呢。")
 

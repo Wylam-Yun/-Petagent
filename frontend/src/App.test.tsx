@@ -39,7 +39,7 @@ const interactionCatalogResponse = [
     default_mood: "shy",
     default_animation: "wiggle",
     state_semantics: {},
-    requires_model: false
+    requires_model: true
   }
 ];
 
@@ -111,8 +111,9 @@ test("App renders 豆豆 and shows kaomoji face", async () => {
   render(<App />);
   await flush();
 
-  expect(screen.getByText("豆豆")).toBeInTheDocument();
-  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(・ω・)");
+  expect(screen.queryByText("PetAgent")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "豆豆" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(o.o)");
   expect(screen.getByRole("main")).toHaveClass("app-shell");
   expect(screen.getByLabelText("豆豆状态")).toBeInTheDocument();
   expect(screen.getByLabelText("豆豆当前心情 idle")).toBeInTheDocument();
@@ -120,6 +121,9 @@ test("App renders 豆豆 and shows kaomoji face", async () => {
   expect(screen.getByRole("button", { name: "点一下说话" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "更多互动" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "重新认识" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "更换 API" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重启后端" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "切换语气" })).toBeInTheDocument();
 });
 
 test("does not render thinking mode or topic refresh controls", async () => {
@@ -151,26 +155,37 @@ test("does not render thinking mode or topic refresh controls", async () => {
   expect(screen.queryByText("换个话题")).not.toBeInTheDocument();
 });
 
-test("local more interaction updates kaomoji without backend post", async () => {
+test("more interaction posts pet event and applies model response", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const eventResponse = {
+    reply: "摸摸头收到啦。",
+    mood: "happy",
+    face_type: "happy",
+    expression_key: "happy",
+    animation: "bounce",
+    vibration: "none",
+    voice_url: null,
+    audio_job_id: null,
+    pet_state: { ...petStateResponse, mood: "happy" as const },
+    runtime: { event_id: "evt-pet-head", skills_used: [] }
+  };
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        schema_version: "0.1",
-        name: "豆豆",
-        mood: "idle",
-        energy: 72,
-        intimacy: 40,
-        hunger: 30,
-        cleanliness: 85,
-        loneliness: 35,
-        sleepiness: 15,
-        mode: "idle"
-      })
-    })
+    .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
     .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => eventResponse });
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
@@ -178,10 +193,18 @@ test("local more interaction updates kaomoji without backend post", async () => 
 
   fireEvent.click(screen.getByRole("button", { name: "更多互动" }));
   fireEvent.click(screen.getByRole("button", { name: "摸摸头" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
 
-  expect(screen.getByLabelText("豆豆表情")).not.toHaveClass("animation-wiggle");
-  expect(screen.getByText("摸摸头…")).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(4);
+  expect(screen.getByText("摸摸头收到啦。")).toBeInTheDocument();
+  expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "happy");
+  const eventCall = fetchMock.mock.calls.find(([url]) => url === "/api/pet/event");
+  expect(eventCall).toBeTruthy();
+  expect(JSON.parse((eventCall?.[1] as RequestInit).body as string)).toEqual({
+    event: "pet_head",
+    payload: {}
+  });
 });
 
 describe("text chat", () => {
@@ -254,7 +277,7 @@ describe("text chat", () => {
 
     expect(screen.getByText("我说完啦。")).toBeInTheDocument();
     expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
-    expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
+    expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(>_<)");
 
     const [, textInit] = fetchMock.mock.calls[4];
     expect(textInit.method).toBe("POST");
@@ -490,7 +513,7 @@ test("ambient idle bubble can replace the latest conversation expression", async
 
   expect(screen.getByText("哼，我记得。")).toBeInTheDocument();
   expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
-  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(>_<)");
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
@@ -498,7 +521,7 @@ test("ambient idle bubble can replace the latest conversation expression", async
 
   expect(screen.getByText("我没有在偷吃零食。")).toBeInTheDocument();
   expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "playful");
-  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(^_~)");
 });
 
 test("ambient idle bubble does not advance backoff when confirm fails", async () => {
@@ -803,7 +826,7 @@ test("mic tap during speaking stops current audio and starts a new recording", a
     await Promise.resolve();
   });
   expect(screen.getByLabelText("豆豆表情")).toHaveAttribute("data-expression-key", "annoyed");
-  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(｀へ´)");
+  expect(screen.getByLabelText("豆豆表情")).toHaveTextContent("(>_<)");
   expect(screen.queryByText("我想一下…")).not.toBeInTheDocument();
 
   for (let i = 0; i < 10; i++) {
@@ -1017,26 +1040,37 @@ describe("more menu", () => {
     expect(screen.getByRole("button", { name: "摸摸头" })).toBeInTheDocument();
   });
 
-  test("default interactions stay local and do not post pet event", async () => {
+  test("default interactions post pet event", async () => {
+    const petStateResponse = {
+      schema_version: "0.1",
+      name: "豆豆",
+      mood: "idle",
+      energy: 72,
+      intimacy: 40,
+      hunger: 30,
+      cleanliness: 85,
+      loneliness: 35,
+      sleepiness: 15,
+      mode: "idle"
+    };
+    const modelResponse = {
+      reply: "我认真回应你。",
+      mood: "happy",
+      face_type: "happy",
+      expression_key: "happy",
+      animation: "bounce",
+      vibration: "none",
+      voice_url: null,
+      audio_job_id: null,
+      pet_state: { ...petStateResponse, mood: "happy" as const },
+      runtime: { event_id: "evt-model", skills_used: [] }
+    };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          schema_version: "0.1",
-          name: "豆豆",
-          mood: "idle",
-          energy: 72,
-          intimacy: 40,
-          hunger: 30,
-          cleanliness: 85,
-          loneliness: 35,
-          sleepiness: 15,
-          mode: "idle"
-        })
-      })
+      .mockResolvedValueOnce({ ok: true, json: async () => petStateResponse })
       .mockResolvedValueOnce({ ok: true, json: async () => interactionCatalogResponse })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, received_at: "now" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => modelResponse });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -1044,9 +1078,12 @@ describe("more menu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "更多互动" }));
     fireEvent.click(screen.getByRole("button", { name: "摸摸头" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    expect(screen.getByText("摸摸头…")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url]) => url === "/api/pet/event")).toBe(false);
+    expect(screen.getByText("我认真回应你。")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/pet/event")).toBe(true);
   });
 
   test("requires_model interaction still posts pet event", async () => {
@@ -1219,4 +1256,261 @@ test("runtime reset clears ambient storage and transient audio UI", async () => 
   const resetInit = resetCall?.[1] as RequestInit;
   expect(JSON.parse(resetInit.body as string)).toEqual({ confirm: "重新认识" });
   expect(JSON.parse(resetInit.body as string)).not.toHaveProperty("thinking_mode");
+});
+
+test("API config dialog reads status and posts new SiliconFlow values", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/runtime/client-config") {
+      return { ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) };
+    }
+    if (url === "/api/pet/state") {
+      return { ok: true, json: async () => petStateResponse };
+    }
+    if (url === "/api/interactions") {
+      return { ok: true, json: async () => interactionCatalogResponse };
+    }
+    if (url === "/api/frontend/heartbeat") {
+      return { ok: true, json: async () => ({ ok: true, received_at: "now" }) };
+    }
+    if (url === "/api/runtime/provider-config/siliconflow" && init?.method === "POST") {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          provider: "siliconflow",
+          api_key_configured: true,
+          base_url: "https://api.siliconflow.cn/v1"
+        })
+      };
+    }
+    if (url === "/api/runtime/provider-config/siliconflow") {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          provider: "siliconflow",
+          api_key_configured: true,
+          base_url: "https://api.siliconflow.cn/v1"
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  expect(fetchMock.mock.calls.some(([url]) => url === "/api/runtime/provider-config/siliconflow")).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "更换 API" }));
+  expect(screen.getByRole("dialog", { name: "更换 SiliconFlow API" })).toBeInTheDocument();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(screen.getByText("当前已配置")).toBeInTheDocument();
+  expect(screen.queryByDisplayValue(/sk-/)).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("API Key"), {
+    target: { value: "sk-new-siliconflow-key" }
+  });
+  fireEvent.change(screen.getByLabelText("Base URL"), {
+    target: { value: "https://api.siliconflow.cn/v1" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.queryByRole("dialog", { name: "更换 SiliconFlow API" })).not.toBeInTheDocument();
+  expect(screen.getByText("API 已更新。")).toBeInTheDocument();
+
+  const updateCall = fetchMock.mock.calls.find(
+    ([url, init]) => url === "/api/runtime/provider-config/siliconflow" && init?.method === "POST"
+  );
+  expect(updateCall).toBeTruthy();
+  const updateInit = updateCall?.[1] as RequestInit;
+  expect(JSON.parse(updateInit.body as string)).toEqual({
+    api_key: "sk-new-siliconflow-key",
+    base_url: "https://api.siliconflow.cn/v1"
+  });
+});
+
+test("TTS toggle cycles through configured voice tones through runtime config API", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/runtime/client-config") {
+      return { ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) };
+    }
+    if (url === "/api/pet/state") {
+      return { ok: true, json: async () => petStateResponse };
+    }
+    if (url === "/api/interactions") {
+      return { ok: true, json: async () => interactionCatalogResponse };
+    }
+    if (url === "/api/frontend/heartbeat") {
+      return { ok: true, json: async () => ({ ok: true, received_at: "now" }) };
+    }
+    if (url === "/api/runtime/tts-config" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          mode: body.mode,
+          active_provider: body.mode,
+          options: ttsOptions(),
+          configured: true,
+          last_primary_error: null
+        })
+      };
+    }
+    if (url === "/api/runtime/tts-config") {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          mode: "siliconflow",
+          active_provider: "siliconflow_tts",
+          options: ttsOptions(),
+          configured: true,
+          last_primary_error: null
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", { name: "切换语气" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(screen.getByRole("button", { name: "语气: 冰糖" })).toBeInTheDocument();
+  expect(screen.getByText("语气已切到冰糖。")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "语气: 冰糖" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(screen.getByRole("button", { name: "语气: Weilin" })).toBeInTheDocument();
+  expect(screen.getByText("语气已切到Weilin。")).toBeInTheDocument();
+  const updateCalls = fetchMock.mock.calls.filter(
+    ([url, init]) => url === "/api/runtime/tts-config" && init?.method === "POST"
+  );
+  expect(updateCalls).toHaveLength(2);
+  expect(JSON.parse((updateCalls[0][1] as RequestInit).body as string)).toEqual({ mode: "mimo" });
+  expect(JSON.parse((updateCalls[1][1] as RequestInit).body as string)).toEqual({ mode: "weilin" });
+});
+
+function ttsOptions() {
+  return [
+    {
+      mode: "siliconflow",
+      label: "硅基 Claire",
+      configured: true,
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "claire",
+      format: "mp3"
+    },
+    {
+      mode: "mimo",
+      label: "小米冰糖",
+      configured: true,
+      model: "mimo-v2.5-tts",
+      voice: "冰糖",
+      format: "wav"
+    },
+    {
+      mode: "weilin",
+      label: "Weilin",
+      configured: true,
+      model: "mimo-v2.5-tts-voiceclone",
+      voice: "weilin.wav",
+      format: "wav"
+    }
+  ];
+}
+
+test("runtime restart button posts restart request after confirmation", async () => {
+  const petStateResponse = {
+    schema_version: "0.1",
+    name: "豆豆",
+    mood: "idle",
+    energy: 72,
+    intimacy: 40,
+    hunger: 30,
+    cleanliness: 85,
+    loneliness: 35,
+    sleepiness: 15,
+    mode: "idle"
+  };
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === "/api/runtime/client-config") {
+      return { ok: true, json: async () => ({ audio_wait_ms: 90000, audio_progressive: {}, pet_name: "豆豆" }) };
+    }
+    if (url === "/api/pet/state") {
+      return { ok: true, json: async () => petStateResponse };
+    }
+    if (url === "/api/interactions") {
+      return { ok: true, json: async () => interactionCatalogResponse };
+    }
+    if (url === "/api/frontend/heartbeat") {
+      return { ok: true, json: async () => ({ ok: true, received_at: "now" }) };
+    }
+    if (url === "/api/runtime/restart") {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          accepted: true,
+          message: "PetAgent runtime restart scheduled"
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+  await flush();
+
+  fireEvent.click(screen.getByRole("button", { name: "重启后端" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(screen.getByText("后端正在重启，等我几秒。")).toBeInTheDocument();
+  const restartCall = fetchMock.mock.calls.find(([url]) => url === "/api/runtime/restart");
+  expect(restartCall).toBeTruthy();
+  expect(JSON.parse((restartCall?.[1] as RequestInit).body as string)).toEqual({ confirm: "重启后端" });
 });

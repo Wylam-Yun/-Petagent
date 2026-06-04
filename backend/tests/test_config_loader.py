@@ -62,7 +62,6 @@ runtime:
   pet_name: 豆豆
 voice:
   default_route: fast
-  slow_fallback_enabled: true
   allowed_audio_types:
     - audio/wav
   max_audio_bytes: 4096
@@ -86,12 +85,6 @@ providers:
     timeout_seconds: 20
     chat_template_kwargs:
       enable_thinking: false
-  audio_understanding:
-    name: mimo
-    model: mimo-v2-omni
-    base_url_env: MIMO_BASE_URL
-    api_key_env: MIMO_API_KEY
-    timeout_seconds: 60
   asr:
     name: configurable_http_asr
     model: TeleAI/TeleSpeechASR
@@ -106,9 +99,16 @@ providers:
     endpoint: /v1/audio/transcriptions
     language_code: zh-CN
     auth_scheme: bearer
-    proxy_url_env:
-      - ASR_PROXY_URL
-      - PETAGENT_ASR_PROXY_URL
+  asr_fallback:
+    name: mimo_asr
+    model: mimo-v2.5-asr
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 30
+    protocol: mimo_chat
+    endpoint: /chat/completions
+    auth_scheme: api-key
+    language: auto
   tts:
     name: mimo
     model: mimo-v2.5-tts
@@ -139,9 +139,12 @@ providers:
     max_tokens: 600
   tts_fallback:
     name: mimo
-    model: mimo-v2.5-tts
-    voice: 冰糖
-    format: wav
+    model_env: MIMO_TTS_MODEL
+    default_model: mimo-v2.5-tts
+    voice_env: MIMO_TTS_VOICE
+    default_voice: 冰糖
+    format_env: MIMO_TTS_FORMAT
+    default_format: wav
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 120
@@ -158,9 +161,11 @@ providers:
             "MIMO_BASE_URL": "https://mimo.example/v1",
             "MIMO_API_KEY": "test-mimo-secret",
             "MIMO_MEMORY_MODEL": "mimo-test-memory",
+            "MIMO_TTS_MODEL": "mimo-test-tts",
+            "MIMO_TTS_VOICE": "冰糖测试",
+            "MIMO_TTS_FORMAT": "mp3",
             "ASR_BASE_URL": "https://api.siliconflow.cn",
             "ASR_API_KEY": "test-asr-secret",
-            "PETAGENT_ASR_PROXY_URL": "http://127.0.0.1:7897",
         },
     )
 
@@ -177,7 +182,15 @@ providers:
     assert settings.asr.api_key == "test-asr-secret"
     assert settings.asr.extra["protocol"] == "http"
     assert settings.asr.extra["endpoint"] == "/v1/audio/transcriptions"
-    assert settings.asr.extra["proxy_url"] == "http://127.0.0.1:7897"
+    assert "proxy_url" not in settings.asr.extra
+    assert settings.asr_fallback is not None
+    assert settings.asr_fallback.name == "mimo_asr"
+    assert settings.asr_fallback.model == "mimo-v2.5-asr"
+    assert settings.asr_fallback.base_url == "https://mimo.example/v1"
+    assert settings.asr_fallback.api_key == "test-mimo-secret"
+    assert settings.asr_fallback.extra["protocol"] == "mimo_chat"
+    assert settings.asr_fallback.extra["endpoint"] == "/chat/completions"
+    assert settings.asr_fallback.extra["language"] == "auto"
     assert settings.llm_fallback is not None
     assert settings.llm_fallback.model == "mimo-v2-omni"
     assert settings.llm_fast_fallback is not None
@@ -186,7 +199,10 @@ providers:
     assert settings.memory_summarizer.model == "mimo-test-memory"
     assert settings.memory_summarizer.extra["max_tokens"] == 600
     assert settings.tts_fallback is not None
-    assert settings.tts_fallback.model == "mimo-v2.5-tts"
+    assert settings.tts_fallback.model == "mimo-test-tts"
+    assert settings.tts_fallback.voice == "冰糖测试"
+    assert settings.tts_fallback.audio_format == "mp3"
+    assert settings.tts_mode == "siliconflow"
     assert settings.voice_routing["allowed_audio_types"] == ["audio/wav"]
     assert settings.voice_routing["max_audio_bytes"] == 4096
     rendered = repr(settings)

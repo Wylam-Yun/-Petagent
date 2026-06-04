@@ -33,15 +33,12 @@ from app.config import Settings, load_settings
 from app.db import create_state_store
 from app.pet.brain import PetBrain
 from app.pet.memory import InteractionLogStore
-from app.providers.audio_omni import (
-    MiMoAudioUnderstandingProvider,
-    MockAudioUnderstandingProvider,
-)
 from app.providers.asr_http import HttpASRProvider
+from app.providers.asr_mimo import FallbackASRProvider, MiMoASRProvider
 from app.providers.asr_mock import MockASRProvider
 from app.providers.asr_nvidia import NvidiaParakeetASRProvider
 from app.providers.llm_mimo import FallbackLLMProvider, MiMoLLMProvider, MockLLMProvider
-from app.providers.tts_mimo import FallbackTTSProvider, MiMoTTSProvider, MockTTSProvider
+from app.providers.tts_mimo import MiMoTTSProvider, MockTTSProvider, SelectableTTSProvider
 from app.providers.probes import ProviderProbeManager
 from app.runtime.activation import ActivationManager
 from app.runtime.ambient_bubble import AmbientBubbleService
@@ -123,20 +120,22 @@ def _select_tts_provider(settings: Settings, testing: bool):
     if testing:
         return MockTTSProvider(settings.audio_dir)
     primary = MiMoTTSProvider(settings)
+    providers = {"siliconflow": primary}
     if settings.tts_fallback is not None and settings.tts_fallback.api_key:
         fallback_settings = replace(
             settings,
             tts=settings.tts_fallback,
             api_key=settings.tts_fallback.api_key or settings.api_key,
         )
-        return FallbackTTSProvider(primary, MiMoTTSProvider(fallback_settings))
-    return primary
-
-
-def _select_audio_provider(settings: Settings, testing: bool):
-    if testing:
-        return MockAudioUnderstandingProvider()
-    return MiMoAudioUnderstandingProvider(settings)
+        providers["mimo"] = MiMoTTSProvider(fallback_settings)
+    if settings.tts_voiceclone is not None and settings.tts_voiceclone.api_key:
+        voiceclone_settings = replace(
+            settings,
+            tts=settings.tts_voiceclone,
+            api_key=settings.tts_voiceclone.api_key or settings.api_key,
+        )
+        providers["weilin"] = MiMoTTSProvider(voiceclone_settings)
+    return SelectableTTSProvider(providers, mode=settings.tts_mode)
 
 
 def _select_asr_provider(settings: Settings, testing: bool):
@@ -144,8 +143,17 @@ def _select_asr_provider(settings: Settings, testing: bool):
         return MockASRProvider()
     protocol = str(settings.asr.extra.get("protocol") or "").lower()
     if protocol == "http" or settings.asr.name in {"http_asr", "nvidia_http_asr"}:
-        return HttpASRProvider(settings.asr)
-    return NvidiaParakeetASRProvider(settings.asr)
+        primary = HttpASRProvider(settings.asr)
+    else:
+        primary = NvidiaParakeetASRProvider(settings.asr)
+    fallback = None
+    if settings.asr_fallback is not None and settings.asr_fallback.api_key:
+        fallback_protocol = str(settings.asr_fallback.extra.get("protocol") or "").lower()
+        if fallback_protocol == "mimo_chat":
+            fallback = MiMoASRProvider(settings.asr_fallback)
+    if fallback is not None:
+        return FallbackASRProvider(primary, fallback)
+    return primary
 
 
 def create_app(testing: bool = False) -> FastAPI:
@@ -298,7 +306,6 @@ def create_app(testing: bool = False) -> FastAPI:
         nightly_cleanup_runner=nightly_cleanup_runner,
     )
 
-    audio_provider = _select_audio_provider(settings, testing)
     asr_provider = _select_asr_provider(settings, testing)
     activation_manager = ActivationManager(settings, state_store.connection)
     tts_provider = _select_tts_provider(settings, testing)
@@ -368,15 +375,9 @@ def create_app(testing: bool = False) -> FastAPI:
     voice_pipeline = VoicePipeline(
         dispatcher=dispatcher,
         fast_brain=fast_brain,
-        slow_brain=brain,
         asr_provider=asr_provider,
-        audio_provider=audio_provider,
-        slow_fallback_enabled=bool(
-            settings.voice_routing.get("slow_fallback_enabled", True)
-        ),
         asr_min_confidence=float(settings.voice_routing.get("asr_min_confidence", 0.0)),
         fast_brain_provider_name=str(getattr(fast_llm_provider, "name", "fast_llm")),
-        slow_brain_provider_name=str(getattr(slow_llm_provider, "name", "slow_llm")),
         activation_manager=activation_manager,
         provider_gate=provider_gate,
     )
@@ -489,7 +490,6 @@ def create_app(testing: bool = False) -> FastAPI:
     app.state.registry = registry
     app.state.dispatcher = dispatcher
     app.state.fast_brain = fast_brain
-    app.state.audio_provider = audio_provider
     app.state.asr_provider = asr_provider
     app.state.voice_pipeline = voice_pipeline
     app.state.text_pipeline = text_pipeline

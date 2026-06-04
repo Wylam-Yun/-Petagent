@@ -68,8 +68,14 @@ Watchdog fields to inspect during V1.1 validation:
 
 `scripts/status.sh` is read-only. It reports backend health, manager state,
 manager Android `inet` group state, sshd, wake lock visibility, Termux:Boot
-package presence, Termux stopped state, frontend heartbeat age, watchdog stuck
-state, and SQLite quick check.
+package presence, Termux stopped state, vendor force-stop risk, frontend
+heartbeat age, watchdog stuck state, and SQLite quick check.
+
+`termux_package: stopped=true` is not proof that the current backend is down.
+If SSH, the manager, and `http://127.0.0.1:8000/api/health` are live, treat it
+as a boot/broadcast/vendor-policy risk. `termux_vendor_force_stop_risk` exists
+to keep that risk visible without mixing it into the live backend health
+decision.
 
 Preferred manual recovery from a real Termux app or Termux SSH context:
 
@@ -105,6 +111,29 @@ The current V1.8 field state on the Nubia showed backend healthy while
 `termux_service_manager.sh` was absent, no active Termux wake lock was visible,
 `com.termux.boot` was missing, and `com.termux` had `stopped=true`. Treat those
 as runtime facts to verify on the phone rather than assumptions.
+
+## APK Shell Recovery
+
+The Android WebView shell checks `http://127.0.0.1:8000/api/health` before
+loading the frontend. If health is unavailable, the APK shows a native recovery
+screen, launches Termux, returns to the APK after a short delay, and keeps
+polling health for about a minute. The screen also keeps manual "open Termux"
+and retry controls for the worst case.
+
+This is recovery, not system-level persistence. A normal APK cannot grant
+Termux "highest priority" residency or prevent Nubia NeoSafe/vendor battery
+management from force-stopping Termux. Termux:Boot, Termux wake lock, battery
+whitelisting, auto-start permission, and background protection are still
+device-policy requirements. A Termux wake lock helps sleep behavior but does
+not override a vendor force-stop.
+
+The frontend also exposes two local management controls:
+
+- `重新认识`: clears runtime memory/state after confirmation.
+- `重启后端`: calls loopback-only `POST /api/runtime/restart`, returns
+  immediately, then restarts through the existing Termux `scripts/stop.sh` and
+  `scripts/start.sh` path. It requires the backend to still be reachable; if
+  the backend is already down, use the APK recovery screen or open Termux.
 
 ## Termux:Boot Setup
 
@@ -166,18 +195,11 @@ adb shell am start -a android.intent.action.VIEW -d http://127.0.0.1:8000/
 V1.1 uses `FRONTEND_STARTUP_SECONDS=120` by default. Fully Kiosk or a WebView
 shell is a later option, not required for V1.1.
 
-## Proxy Supervision
+## API Network Path
 
-The manager checks proxy port `7897` on every loop. If it is down and
-`/data/local/tmp/start-proxy.sh` is executable, the manager tries to restart it.
-Repeated proxy restart failures use `PROXY_BACKOFF_SECONDS` and do not change
-the PetAgent runtime backoff counters.
-
-Disable proxy autostart on the phone by creating:
-
-```text
-/data/local/tmp/.petagent_no_proxy_autostart
-```
+External LLM, ASR, and TTS API calls are direct HTTPS requests from the real
+Termux app context. The manager no longer starts or supervises a local API
+proxy.
 
 ## Logs
 

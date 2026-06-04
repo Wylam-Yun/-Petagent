@@ -14,7 +14,7 @@ from app.runtime.interaction_catalog import (
 BUTTON_EVENT_IDS = {
     "pet_head", "poke_face", "hug", "pet_pat", "praise_momo", "feed_momo",
     "tuck_in", "clean_face", "stay_with_me", "comfort_me", "encourage_me",
-    "listen_to_me", "quiet_company", "take_a_break",
+    "listen_to_me", "quiet_company", "take_a_break", "play_with_momo",
 }
 
 DEBUG_EVENT_IDS = {"debug_happy", "debug_sleepy", "debug_angry"}
@@ -208,11 +208,12 @@ def test_api_interactions_endpoint():
         assert "default_mood" in item
         assert "default_animation" in item
         assert "state_semantics" in item
-        assert item["requires_model"] is False
+        assert item["requires_model"] is True
 
 
-def test_catalog_interactions_default_to_local_only():
+def test_catalog_visible_interactions_require_model():
     for item in INTERACTION_CATALOG.values():
         if item.group == "debug":
+            assert item.requires_model is False
             continue
-        assert item.requires_model is False
+        assert item.requires_model is True

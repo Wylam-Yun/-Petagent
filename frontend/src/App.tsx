@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from "react";
 
 import { PetBubble } from "./components/PetBubble";
 import { PetFace } from "./components/PetFace";
@@ -12,15 +12,20 @@ import {
   getAmbientCheck,
   getInteractions,
   getPetState,
+  getSiliconFlowConfig,
+  getTTSConfig,
   cancelAmbientBubble,
   confirmAmbientBubble,
   postAudioRetry,
   postPetEvent,
   reportDeviceState,
+  restartRuntime,
   resetRuntime,
   sendHeartbeat,
   sendTextChat,
   triggerAmbientBubble,
+  updateSiliconFlowConfig,
+  updateTTSConfig,
   wakeMomo
 } from "./pet/api";
 import { animationMap } from "./pet/animations";
@@ -45,10 +50,21 @@ import type {
   PetEventType,
   PetResponse,
   PetState,
+  SiliconFlowConfigStatus,
+  TTSConfigStatus,
+  TTSMode,
   PetUIPhase,
   TextChatResponse,
   VoiceChatResponse
 } from "./pet/types";
+
+const DEFAULT_SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1";
+const TTS_MODE_ORDER: TTSMode[] = ["siliconflow", "mimo", "weilin"];
+const TTS_MODE_LABELS: Record<TTSMode, string> = {
+  siliconflow: "硅基流动",
+  mimo: "冰糖",
+  weilin: "Weilin",
+};
 
 const fallbackState: PetState = {
   schema_version: "0.1",
@@ -83,6 +99,33 @@ const terminalAudioStatuses = new Set<AudioJob["status"]>([
   "failed_shutdown",
 ]);
 
+function ttsModeLabel(mode: TTSMode | null | undefined): string {
+  if (!mode) return "";
+  return TTS_MODE_LABELS[mode] ?? mode;
+}
+
+function availableTTSModes(status: TTSConfigStatus): TTSMode[] {
+  const configuredModes = new Set<TTSMode>();
+  for (const option of status.options) {
+    if (option.configured && TTS_MODE_ORDER.includes(option.mode)) {
+      configuredModes.add(option.mode);
+    }
+  }
+  if (configuredModes.size === 0) {
+    return [...TTS_MODE_ORDER];
+  }
+  return TTS_MODE_ORDER.filter((mode) => configuredModes.has(mode));
+}
+
+function nextTTSMode(status: TTSConfigStatus): TTSMode | null {
+  const modes = availableTTSModes(status);
+  if (modes.length === 0) return null;
+  const currentIndex = modes.indexOf(status.mode);
+  if (modes.length === 1 && currentIndex === 0) return null;
+  if (currentIndex < 0) return modes[0];
+  return modes[(currentIndex + 1) % modes.length];
+}
+
 function App() {
   const [petState, setPetState] = useState<PetState>(fallbackState);
   const [faceType, setFaceType] = useState<Mood>("idle");
@@ -103,6 +146,17 @@ function App() {
   const [interactions, setInteractions] = useState<InteractionDefinition[]>([]);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [lastAudioJobId, setLastAudioJobId] = useState<string | null>(null);
+  const [apiDialogOpen, setApiDialogOpen] = useState(false);
+  const [apiConfigLoading, setApiConfigLoading] = useState(false);
+  const [apiConfigSaving, setApiConfigSaving] = useState(false);
+  const [apiConfigError, setApiConfigError] = useState("");
+  const [apiConfigStatus, setApiConfigStatus] = useState<SiliconFlowConfigStatus | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [apiBaseUrlInput, setApiBaseUrlInput] = useState(DEFAULT_SILICONFLOW_BASE_URL);
+  const [ttsConfigStatus, setTtsConfigStatus] = useState<TTSConfigStatus | null>(null);
+  const [ttsConfigLoading, setTtsConfigLoading] = useState(false);
+  const [ttsConfigSaving, setTtsConfigSaving] = useState(false);
+  const [runtimeRestarting, setRuntimeRestarting] = useState(false);
   const audioRunRef = useRef(0);
   const phaseRef = useRef<PetUIPhase>("idle");
   const busyRef = useRef(false);
@@ -397,11 +451,6 @@ function App() {
     setExpressionKey(preview.mood);
     setAnimation(preview.animation);
     setBubbleText(preview.text);
-
-    if (interaction.requires_model !== true) {
-      markIdleAnchor(true);
-      return;
-    }
 
     setBusyState(true);
 
@@ -747,6 +796,113 @@ function App() {
     }
   }
 
+  async function openApiConfigDialog() {
+    if (apiConfigLoading || apiConfigSaving) return;
+    setApiDialogOpen(true);
+    setApiConfigError("");
+    setApiKeyInput("");
+    setApiConfigLoading(true);
+    try {
+      const status = await getSiliconFlowConfig();
+      setApiConfigStatus(status);
+      setApiBaseUrlInput(status.base_url || DEFAULT_SILICONFLOW_BASE_URL);
+    } catch {
+      setApiConfigStatus(null);
+      setApiBaseUrlInput(DEFAULT_SILICONFLOW_BASE_URL);
+      setApiConfigError("读取当前 API 配置失败。");
+    } finally {
+      setApiConfigLoading(false);
+    }
+  }
+
+  function closeApiConfigDialog() {
+    if (apiConfigSaving) return;
+    setApiDialogOpen(false);
+    setApiConfigError("");
+    setApiKeyInput("");
+  }
+
+  async function handleApiConfigSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (apiConfigSaving) return;
+    const apiKey = apiKeyInput.trim();
+    const baseUrl = apiBaseUrlInput.trim() || DEFAULT_SILICONFLOW_BASE_URL;
+    if (apiKey.length < 12) {
+      setApiConfigError("API Key 太短。");
+      return;
+    }
+    if (!baseUrl.startsWith("https://")) {
+      setApiConfigError("Base URL 必须是 HTTPS。");
+      return;
+    }
+
+    setApiConfigSaving(true);
+    setApiConfigError("");
+    try {
+      const status = await updateSiliconFlowConfig({
+        api_key: apiKey,
+        base_url: baseUrl,
+      });
+      setApiConfigStatus(status);
+      setApiBaseUrlInput(status.base_url || baseUrl);
+      setApiKeyInput("");
+      setApiDialogOpen(false);
+      setBubbleText("API 已更新。");
+      markIdleAnchor(true);
+    } catch {
+      setApiConfigError("API 保存失败，请检查 Key 或网络。");
+    } finally {
+      setApiConfigSaving(false);
+    }
+  }
+
+  async function handleToggleTTSConfig() {
+    if (ttsConfigLoading || ttsConfigSaving) return;
+    setTtsConfigLoading(true);
+    try {
+      const current = ttsConfigStatus ?? (await getTTSConfig());
+      setTtsConfigStatus(current);
+      const nextMode = nextTTSMode(current);
+      if (!nextMode) {
+        setBubbleText("现在只有一种语气可用。");
+        markIdleAnchor(true);
+        return;
+      }
+      setTtsConfigLoading(false);
+      setTtsConfigSaving(true);
+      const next = await updateTTSConfig({ mode: nextMode });
+      setTtsConfigStatus(next);
+      setBubbleText(`语气已切到${ttsModeLabel(next.mode)}。`);
+      markIdleAnchor(true);
+    } catch {
+      setBubbleText("语气切换失败，先检查接口配置。");
+      markIdleAnchor(true);
+    } finally {
+      setTtsConfigLoading(false);
+      setTtsConfigSaving(false);
+    }
+  }
+
+  async function handleRestartRuntime() {
+    if (runtimeRestarting) return;
+    const confirmed = window.confirm("后端会短暂断开并自动恢复。确定重启吗？");
+    if (!confirmed) return;
+    markIdleAnchor(true);
+    cancelPendingAmbientDisplay();
+    setRuntimeRestarting(true);
+    setBubbleText("我去重启一下后端…");
+    try {
+      await restartRuntime();
+      setBubbleText("后端正在重启，等我几秒。");
+    } catch {
+      setBubbleText("重启请求没发出去，可以稍后再试。");
+    } finally {
+      window.setTimeout(() => {
+        setRuntimeRestarting(false);
+      }, 8000);
+    }
+  }
+
   async function handleTextSubmit(text: string): Promise<boolean> {
     if (busy) return false;
     markIdleAnchor(true);
@@ -805,10 +961,6 @@ function App() {
           <span className="room-dot room-dot-left" />
           <span className="room-dot room-dot-right" />
         </div>
-        <div className="pet-title-row">
-          <p className="pet-kicker">PetAgent</p>
-          <h1>豆豆</h1>
-        </div>
         <PetFace faceType={faceType} animation={animation} expressionKey={expressionKey} />
         <PetBubble text={bubbleText} busy={busy} />
       </section>
@@ -861,7 +1013,99 @@ function App() {
         >
           重新认识
         </button>
+        <button
+          className="api-config-btn"
+          disabled={apiConfigLoading || apiConfigSaving}
+          onClick={openApiConfigDialog}
+        >
+          更换 API
+        </button>
+        <button
+          className="runtime-restart-btn"
+          disabled={runtimeRestarting}
+          onClick={handleRestartRuntime}
+        >
+          {runtimeRestarting ? "重启中" : "重启后端"}
+        </button>
+        <button
+          className="tts-toggle-btn"
+          disabled={ttsConfigLoading || ttsConfigSaving}
+          onClick={handleToggleTTSConfig}
+        >
+          {ttsConfigSaving || ttsConfigLoading
+            ? "语气: 切换中"
+            : ttsConfigStatus
+              ? `语气: ${ttsModeLabel(ttsConfigStatus.mode)}`
+              : "切换语气"}
+        </button>
       </div>
+      {apiDialogOpen && (
+        <div
+          className="api-config-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeApiConfigDialog();
+          }}
+        >
+          <div
+            aria-labelledby="api-config-title"
+            aria-modal="true"
+            className="api-config-dialog"
+            role="dialog"
+          >
+            <h2 id="api-config-title">更换 SiliconFlow API</h2>
+            <form className="api-config-form" onSubmit={handleApiConfigSubmit}>
+              <label htmlFor="api-key-input">API Key</label>
+              <input
+                autoComplete="off"
+                disabled={apiConfigSaving}
+                id="api-key-input"
+                onChange={(event) => setApiKeyInput(event.target.value)}
+                placeholder="输入新的 API Key"
+                type="password"
+                value={apiKeyInput}
+              />
+              <label htmlFor="api-base-url-input">Base URL</label>
+              <input
+                autoComplete="off"
+                disabled={apiConfigSaving}
+                id="api-base-url-input"
+                onChange={(event) => setApiBaseUrlInput(event.target.value)}
+                type="text"
+                value={apiBaseUrlInput}
+              />
+              <div className="api-config-status" role="status">
+                {apiConfigLoading
+                  ? "读取中…"
+                  : apiConfigStatus?.api_key_configured
+                    ? "当前已配置"
+                    : "当前未配置"}
+              </div>
+              {apiConfigError && (
+                <div className="api-config-error" role="alert">
+                  {apiConfigError}
+                </div>
+              )}
+              <div className="api-config-actions">
+                <button
+                  className="api-config-cancel"
+                  disabled={apiConfigSaving}
+                  onClick={closeApiConfigDialog}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="api-config-save"
+                  disabled={apiConfigLoading || apiConfigSaving}
+                  type="submit"
+                >
+                  {apiConfigSaving ? "保存中…" : "保存"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

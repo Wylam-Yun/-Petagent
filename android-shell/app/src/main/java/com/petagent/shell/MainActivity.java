@@ -4,12 +4,16 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AppOpsManager;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -36,21 +40,37 @@ import java.net.URL;
 public class MainActivity extends Activity {
     private static final String DEFAULT_APP_URL = "http://127.0.0.1:8000/";
     private static final String DEFAULT_HEALTH_URL = "http://127.0.0.1:8000/api/health";
+    private static final String TERMUX_PACKAGE = "com.termux";
+    private static final String TERMUX_ACTIVITY = "com.termux.app.TermuxActivity";
     private static final String DEBUG_HEALTH_URL_EXTRA = "petagent_debug_health_url";
+    private static final String INTERNAL_RETURN_EXTRA = "petagent_internal_return";
     private static final int REQUEST_RECORD_AUDIO = 1001;
+    private static final long RECOVERY_POLL_INTERVAL_MS = 2000L;
+    private static final int RECOVERY_MAX_POLL_ATTEMPTS = 30;
+    private static final long RETURN_AFTER_TERMUX_LAUNCH_MS = 5000L;
 
     private FrameLayout root;
     private WebView webView;
     private View loadingView;
     private View unavailableView;
+    private TextView unavailableBodyView;
     private String appUrl = DEFAULT_APP_URL;
     private String healthUrl = DEFAULT_HEALTH_URL;
+    private boolean debugHealthOverrideActive;
+    private Handler mainHandler;
+    private Runnable recoveryPollRunnable;
+    private Runnable returnToShellRunnable;
+    private int healthCheckGeneration;
+    private int recoveryPollAttempts;
+    private boolean termuxAutoLaunchAttempted;
+    private boolean destroyed;
     private PermissionRequest pendingAudioPermissionRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        mainHandler = new Handler(Looper.getMainLooper());
         root = new FrameLayout(this);
         setContentView(root);
         configureDebugOverrides();
@@ -63,13 +83,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (webView != null && webView.getVisibility() == View.GONE) {
+        if (webView != null
+                && webView.getVisibility() == View.GONE
+                && unavailableView != null
+                && unavailableView.getVisibility() != View.VISIBLE) {
+            checkHealthAndLoad();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        configureDebugOverrides();
+        if (intent.getBooleanExtra(INTERNAL_RETURN_EXTRA, false)) {
+            startHealthCheck(false);
+        } else {
             checkHealthAndLoad();
         }
     }
 
     @Override
     protected void onDestroy() {
+        destroyed = true;
+        cancelRecoveryCallbacks();
         if (webView != null) {
             webView.destroy();
         }
@@ -77,12 +114,15 @@ public class MainActivity extends Activity {
     }
 
     private void configureDebugOverrides() {
+        healthUrl = DEFAULT_HEALTH_URL;
+        debugHealthOverrideActive = false;
         if (!isDebuggable()) {
             return;
         }
         String debugHealthUrl = getIntent().getStringExtra(DEBUG_HEALTH_URL_EXTRA);
         if (isAllowedLoopbackHttpUrl(debugHealthUrl)) {
             healthUrl = debugHealthUrl;
+            debugHealthOverrideActive = true;
         }
     }
 
@@ -142,7 +182,15 @@ public class MainActivity extends Activity {
     private void createUnavailableView() {
         LinearLayout layout = centeredColumn();
         TextView title = textView(getString(R.string.backend_unavailable_title), 20, Color.rgb(31, 41, 55));
-        TextView body = textView(getString(R.string.backend_unavailable_body), 15, Color.rgb(100, 116, 139));
+        unavailableBodyView = textView(getString(R.string.backend_unavailable_body), 15, Color.rgb(100, 116, 139));
+        Button openTermux = new Button(this);
+        openTermux.setText(getString(R.string.open_termux));
+        openTermux.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openTermuxAndPoll();
+            }
+        });
         Button retry = new Button(this);
         retry.setText(getString(R.string.retry));
         retry.setOnClickListener(new View.OnClickListener() {
@@ -152,7 +200,8 @@ public class MainActivity extends Activity {
             }
         });
         layout.addView(title);
-        layout.addView(body);
+        layout.addView(unavailableBodyView);
+        layout.addView(openTermux);
         layout.addView(retry);
         unavailableView = layout;
         unavailableView.setVisibility(View.GONE);
@@ -183,7 +232,18 @@ public class MainActivity extends Activity {
     }
 
     private void checkHealthAndLoad() {
-        showLoading();
+        startHealthCheck(true);
+    }
+
+    private void startHealthCheck(final boolean resetRecovery) {
+        if (resetRecovery) {
+            cancelRecoveryPoll();
+            recoveryPollAttempts = 0;
+            termuxAutoLaunchAttempted = false;
+            showLoading();
+        }
+        final int generation = ++healthCheckGeneration;
+        final boolean shouldAutoRecover = !debugHealthOverrideActive;
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -191,16 +251,155 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        if (destroyed || generation != healthCheckGeneration) {
+                            return;
+                        }
                         if (healthy) {
                             showWeb();
                             webView.loadUrl(appUrl);
                         } else {
-                            showUnavailable();
+                            handleUnhealthyBackend(shouldAutoRecover);
                         }
                     }
                 });
             }
         }).start();
+    }
+
+    private void handleUnhealthyBackend(boolean shouldAutoRecover) {
+        showUnavailable();
+        if (!shouldAutoRecover) {
+            setUnavailableBody(R.string.backend_recovery_manual_hint);
+            return;
+        }
+        if (!termuxAutoLaunchAttempted) {
+            termuxAutoLaunchAttempted = true;
+            if (launchTermux()) {
+                setUnavailableBody(R.string.backend_recovery_opened_termux);
+                scheduleReturnToShell();
+            } else {
+                setUnavailableBody(R.string.termux_missing);
+            }
+        } else if (recoveryPollAttempts == 0) {
+            setUnavailableBody(R.string.backend_recovery_waiting);
+        }
+        scheduleRecoveryPoll();
+    }
+
+    private void openTermuxAndPoll() {
+        cancelRecoveryPoll();
+        recoveryPollAttempts = 0;
+        termuxAutoLaunchAttempted = true;
+        showUnavailable();
+        if (launchTermux()) {
+            setUnavailableBody(R.string.backend_recovery_opened_termux);
+            scheduleReturnToShell();
+            scheduleRecoveryPoll();
+        } else {
+            setUnavailableBody(R.string.termux_missing);
+        }
+    }
+
+    private boolean launchTermux() {
+        Intent explicitTermuxIntent = new Intent(Intent.ACTION_MAIN);
+        explicitTermuxIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        explicitTermuxIntent.setComponent(new ComponentName(TERMUX_PACKAGE, TERMUX_ACTIVITY));
+        explicitTermuxIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (startTermuxIntent(explicitTermuxIntent)) {
+            return true;
+        }
+
+        Intent termuxIntent = getPackageManager().getLaunchIntentForPackage(TERMUX_PACKAGE);
+        if (termuxIntent == null || !isTermuxIntent(termuxIntent)) {
+            Toast.makeText(this, R.string.termux_missing, Toast.LENGTH_LONG).show();
+            return false;
+        }
+        termuxIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (startTermuxIntent(termuxIntent)) {
+            return true;
+        }
+        Toast.makeText(this, R.string.termux_missing, Toast.LENGTH_LONG).show();
+        return false;
+    }
+
+    private boolean isTermuxIntent(Intent intent) {
+        ComponentName componentName = intent.getComponent();
+        return componentName != null && TERMUX_PACKAGE.equals(componentName.getPackageName());
+    }
+
+    private boolean startTermuxIntent(Intent intent) {
+        try {
+            startActivity(intent);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private void scheduleReturnToShell() {
+        if (returnToShellRunnable != null) {
+            mainHandler.removeCallbacks(returnToShellRunnable);
+        }
+        returnToShellRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (destroyed) {
+                    return;
+                }
+                Intent shellIntent = new Intent(MainActivity.this, MainActivity.class);
+                shellIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                shellIntent.putExtra(INTERNAL_RETURN_EXTRA, true);
+                if (debugHealthOverrideActive) {
+                    shellIntent.putExtra(DEBUG_HEALTH_URL_EXTRA, healthUrl);
+                }
+                startActivity(shellIntent);
+            }
+        };
+        mainHandler.postDelayed(returnToShellRunnable, RETURN_AFTER_TERMUX_LAUNCH_MS);
+    }
+
+    private void scheduleRecoveryPoll() {
+        cancelRecoveryPoll();
+        if (recoveryPollAttempts >= RECOVERY_MAX_POLL_ATTEMPTS) {
+            setUnavailableBody(R.string.backend_recovery_timeout);
+            return;
+        }
+        recoveryPollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (destroyed) {
+                    return;
+                }
+                recoveryPollAttempts += 1;
+                startHealthCheck(false);
+            }
+        };
+        mainHandler.postDelayed(recoveryPollRunnable, RECOVERY_POLL_INTERVAL_MS);
+    }
+
+    private void cancelRecoveryPoll() {
+        if (mainHandler != null && recoveryPollRunnable != null) {
+            mainHandler.removeCallbacks(recoveryPollRunnable);
+        }
+        recoveryPollRunnable = null;
+    }
+
+    private void cancelRecoveryCallbacks() {
+        cancelRecoveryPoll();
+        if (mainHandler != null && returnToShellRunnable != null) {
+            mainHandler.removeCallbacks(returnToShellRunnable);
+        }
+        returnToShellRunnable = null;
+    }
+
+    private void setUnavailableBody(int resId) {
+        if (unavailableBodyView != null) {
+            unavailableBodyView.setText(resId);
+        }
+    }
+
+    private void recoverFromWebError() {
+        checkHealthAndLoad();
     }
 
     private boolean isBackendHealthy() {
@@ -235,6 +434,7 @@ public class MainActivity extends Activity {
     }
 
     private void showWeb() {
+        cancelRecoveryPoll();
         loadingView.setVisibility(View.GONE);
         unavailableView.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
@@ -298,14 +498,14 @@ public class MainActivity extends Activity {
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (android.os.Build.VERSION.SDK_INT >= 23 && request.isForMainFrame()) {
-                showUnavailable();
+                recoverFromWebError();
             }
             super.onReceivedError(view, request, error);
         }
 
         @Override
         public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-            showUnavailable();
+            recoverFromWebError();
             super.onReceivedError(view, errorCode, description, failingUrl);
         }
 

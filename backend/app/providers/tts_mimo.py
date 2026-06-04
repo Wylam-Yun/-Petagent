@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json as _json
+import threading
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -21,6 +22,8 @@ from app.providers.errors import (
     wrap_provider_error,
 )
 from app.providers.retry import retry_provider_call
+
+DIRECT_REQUEST_PROXIES = {"http": None, "https": None, "all": None}
 
 
 def _timeout_tuple(scalar: int, connect: int = 5) -> tuple:
@@ -100,6 +103,14 @@ class MockTTSProvider:
         path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt " + text.encode("utf-8")[:32])
         return "/static/audio/" + filename
 
+    def status(self) -> Dict[str, Any]:
+        return {
+            "configured": True,
+            "model": "mock",
+            "voice": "mock",
+            "format": "wav",
+        }
+
 
 class FallbackTTSProvider:
     def __init__(self, primary, fallback, circuit=None) -> None:
@@ -134,10 +145,141 @@ class FallbackTTSProvider:
         return self.fallback.synthesize(text, voice_style)
 
 
+class SelectableTTSProvider:
+    """Runtime-switchable TTS provider with automatic secondary fallback."""
+
+    VALID_MODES = ("siliconflow", "mimo", "weilin")
+    MODE_LABELS = {
+        "siliconflow": "硅基 Claire",
+        "mimo": "小米冰糖",
+        "weilin": "Weilin",
+    }
+
+    def __init__(self, providers: Dict[str, Any], mode: str = "siliconflow") -> None:
+        self.providers = {
+            key: value
+            for key, value in providers.items()
+            if key in self.VALID_MODES and value is not None
+        }
+        self.name = "selectable_tts"
+        self.last_primary_error: Optional[ProviderError] = None
+        self._lock = threading.RLock()
+        self._mode = self._normalize_mode(mode)
+
+    @property
+    def mode(self) -> str:
+        with self._lock:
+            return self._mode
+
+    def set_mode(self, mode: str) -> str:
+        next_mode = self._normalize_mode(mode)
+        with self._lock:
+            if next_mode not in self.providers:
+                raise ValueError("TTS mode is not configured: %s" % next_mode)
+            self._mode = next_mode
+            return self._mode
+
+    def available_modes(self) -> list[str]:
+        return [mode for mode in self.VALID_MODES if mode in self.providers]
+
+    def active_provider_name(self) -> str:
+        provider = self.providers.get(self.mode)
+        return str(getattr(provider, "name", self.mode))
+
+    def status(self) -> Dict[str, Any]:
+        mode = self.mode
+        active = self.providers.get(mode)
+        options = []
+        for candidate_mode in self.VALID_MODES:
+            provider = self.providers.get(candidate_mode)
+            if provider is None:
+                continue
+            provider_status = (
+                provider.status() if hasattr(provider, "status") else {"configured": True}
+            )
+            options.append(
+                {
+                    "mode": candidate_mode,
+                    "label": self.MODE_LABELS.get(candidate_mode, candidate_mode),
+                    "configured": bool(provider_status.get("configured", True)),
+                    "model": provider_status.get("model", ""),
+                    "voice": provider_status.get("voice", ""),
+                    "format": provider_status.get("format", ""),
+                }
+            )
+        return {
+            "ok": True,
+            "mode": mode,
+            "active_provider": self.active_provider_name(),
+            "options": options,
+            "last_primary_error": (
+                self.last_primary_error.error_class
+                if self.last_primary_error is not None
+                else None
+            ),
+            "configured": bool(active is not None),
+        }
+
+    def synthesize(self, text: str, voice_style: str = "soft") -> Optional[str]:
+        with self._lock:
+            mode = self._mode
+            providers = dict(self.providers)
+        order = [mode] + [candidate for candidate in self.VALID_MODES if candidate != mode]
+        last_error: Optional[ProviderError] = None
+        for candidate_mode in order:
+            provider = providers.get(candidate_mode)
+            if provider is None:
+                continue
+            try:
+                voice_url = provider.synthesize(text, voice_style)
+                if voice_url:
+                    if candidate_mode == mode:
+                        self.last_primary_error = None
+                    return voice_url
+            except ProviderError as exc:
+                last_error = exc
+                if candidate_mode == mode:
+                    self.last_primary_error = exc
+            except Exception as exc:
+                last_error = wrap_provider_error(
+                    exc, provider=getattr(provider, "name", candidate_mode),
+                )
+                if candidate_mode == mode:
+                    self.last_primary_error = last_error
+        if last_error is not None:
+            raise last_error
+        return None
+
+    def _normalize_mode(self, mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in self.VALID_MODES:
+            normalized = "siliconflow"
+        if normalized in self.providers:
+            return normalized
+        if self.providers:
+            return next(iter(self.providers))
+        raise ValueError("No TTS providers configured")
+
+
 class MiMoTTSProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.name = "mimo_tts"
+        self.name = settings.tts.name or "mimo_tts"
+
+    def status(self) -> Dict[str, Any]:
+        voice = self.settings.tts.voice or ""
+        voice_is_file = bool(self.settings.tts.extra.get("voice_is_file"))
+        sample_path = self._voice_sample_path() if voice_is_file else None
+        return {
+            "configured": bool(
+                (self.settings.tts.api_key or self.settings.api_key)
+                and self.settings.tts.base_url
+                and (not voice_is_file or (sample_path is not None and sample_path.exists()))
+            ),
+            "model": self.settings.tts.model,
+            "voice": sample_path.name if sample_path is not None else voice,
+            "format": self.settings.tts.audio_format or "",
+        }
 
     def synthesize(self, text: str, voice_style: str = "soft") -> Optional[str]:
         api_key = self.settings.tts.api_key or self.settings.api_key
@@ -153,7 +295,7 @@ class MiMoTTSProvider:
             voice_prompt=build_voice_prompt(self.settings.tts.style or {}, voice_style),
             spoken_text=text,
             model=self.settings.tts.model,
-            voice=self.settings.tts.voice or "冰糖",
+            voice=self._voice_value(),
             audio_format=self.settings.tts.audio_format or "wav",
         )
         def operation() -> bytes:
@@ -161,7 +303,7 @@ class MiMoTTSProvider:
                 self.settings.tts.base_url.rstrip("/") + "/chat/completions",
                 headers=self._headers(api_key),
                 json=payload,
-                proxies=self._proxies(),
+                proxies=DIRECT_REQUEST_PROXIES,
                 timeout=_timeout_tuple(self.settings.tts.timeout_seconds),
             )
             response.raise_for_status()
@@ -226,7 +368,7 @@ class MiMoTTSProvider:
                 self.settings.tts.base_url.rstrip("/") + "/" + endpoint.lstrip("/"),
                 headers=self._headers(api_key),
                 json=payload,
-                proxies=self._proxies(),
+                proxies=DIRECT_REQUEST_PROXIES,
                 timeout=_timeout_tuple(self.settings.tts.timeout_seconds),
             )
             response.raise_for_status()
@@ -256,6 +398,43 @@ class MiMoTTSProvider:
         prompt = build_voice_prompt(self.settings.tts.style or {}, voice_style)
         return "%s<|endofprompt|>%s" % (prompt, text)
 
+    def _voice_sample_path(self) -> Optional[Path]:
+        raw = str(self.settings.tts.voice or "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        if path.is_absolute():
+            return path
+        root = getattr(self.settings, "project_root", None)
+        if root is not None:
+            return Path(root) / path
+        return path
+
+    def _voice_value(self) -> str:
+        if not bool(self.settings.tts.extra.get("voice_is_file")):
+            return self.settings.tts.voice or "冰糖"
+
+        path = self._voice_sample_path()
+        if path is None or not path.exists():
+            raise ProviderAuthError(
+                provider=self.name,
+                message="TTS voice clone sample is not configured",
+            )
+        suffix = path.suffix.lower()
+        if suffix == ".mp3":
+            mime = "audio/mp3"
+        elif suffix == ".wav":
+            mime = "audio/wav"
+        else:
+            raise ProviderBadResponseError(
+                provider=self.name,
+                message="TTS voice clone sample must be mp3 or wav",
+            )
+        return "%s;base64,%s" % (
+            "data:%s" % mime,
+            base64.b64encode(path.read_bytes()).decode("ascii"),
+        )
+
     def _headers(self, api_key: str) -> Dict[str, str]:
         headers = {"content-type": "application/json"}
         scheme = str(self.settings.tts.extra.get("auth_scheme") or "api-key").lower()
@@ -270,12 +449,6 @@ class MiMoTTSProvider:
         header = str(self.settings.tts.extra.get("api_key_header") or "api-key")
         headers[header] = api_key
         return headers
-
-    def _proxies(self) -> Dict[str, str]:
-        proxy_url = str(self.settings.tts.extra.get("proxy_url") or "").strip()
-        if not proxy_url:
-            return {}
-        return {"http": proxy_url, "https": proxy_url}
 
     def _write_audio(self, audio_bytes: bytes) -> Optional[str]:
         if not audio_bytes:

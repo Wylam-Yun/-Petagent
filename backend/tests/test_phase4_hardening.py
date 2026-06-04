@@ -327,14 +327,10 @@ def test_rejected_internal_auth_records_sanitized_incident():
     assert secret not in str(payload)
 
 
-def test_termux_manager_supervises_proxy_with_backoff():
+def test_termux_manager_does_not_supervise_api_proxy():
     script = Path(__file__).resolve().parents[2] / "scripts" / "termux_service_manager.sh"
     text = script.read_text()
-    assert "PROXY_BACKOFF_SECONDS" in text
-    assert "proxy_fail_count=0" in text
-    assert "ensure_proxy() {" in text
-    assert "check_port_listen 7897" in text
-    assert "Proxy port 7897 is down; attempting restart" in text
-    assert "Proxy restarted successfully" in text
-    assert "proxy_fail_count=$((proxy_fail_count + 1))" in text
-    assert 'CRITICAL: proxy failed $MAX_FAILS times; backing off ${PROXY_BACKOFF_SECONDS}s' in text
+    assert "PROXY_BACKOFF_SECONDS" not in text
+    assert "proxy_fail_count" not in text
+    assert "ensure_proxy() {" not in text
+    assert "Proxy port 7897 is down; attempting restart" not in text

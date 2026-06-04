@@ -72,10 +72,9 @@ def test_voice_chat_rejects_audio_larger_than_limit():
     assert "Audio file is too large" in response.json()["detail"]
 
 
-def test_voice_chat_returns_structured_failure_when_asr_and_audio_provider_fail():
+def test_voice_chat_returns_structured_failure_when_asr_fails():
     app = create_app(testing=True)
     app.state.asr_provider.text = ""
-    app.state.audio_provider.fail = True
     client = TestClient(app)
 
     response = client.post(

@@ -9,10 +9,6 @@ providers:
     max_tokens: 1200
     chat_template_kwargs:
       enable_thinking: false
-    proxy_url_env:
-      - SILICONFLOW_PROXY_URL
-      - PETAGENT_PROXY_URL
-      - PETAGENT_ASR_PROXY_URL
   llm_fast:
     name: siliconflow_fast
     model: Qwen/Qwen3-30B-A3B-Instruct-2507
@@ -23,16 +19,6 @@ providers:
     max_tokens: 900
     chat_template_kwargs:
       enable_thinking: false
-    proxy_url_env:
-      - SILICONFLOW_PROXY_URL
-      - PETAGENT_PROXY_URL
-      - PETAGENT_ASR_PROXY_URL
-  audio_understanding:
-    name: mimo
-    model: mimo-v2-omni
-    base_url_env: MIMO_BASE_URL
-    api_key_env: MIMO_API_KEY
-    timeout_seconds: 60
   asr:
     name: configurable_http_asr
     model: TeleAI/TeleSpeechASR
@@ -55,11 +41,6 @@ providers:
     language_field: language
     language_code: zh-CN
     auth_scheme: bearer
-    proxy_url_env:
-      - SILICONFLOW_PROXY_URL
-      - PETAGENT_PROXY_URL
-      - ASR_PROXY_URL
-      - PETAGENT_ASR_PROXY_URL
     transcript_paths:
       - text
       - transcript
@@ -77,6 +58,18 @@ providers:
       - results[].channels[].alternatives[].confidence
     transient_retries: 2
     retry_backoff_seconds: 0.2
+  asr_fallback:
+    name: mimo_asr
+    model: mimo-v2.5-asr
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 30
+    protocol: mimo_chat
+    endpoint: /chat/completions
+    auth_scheme: api-key
+    language: auto
+    transient_retries: 1
+    retry_backoff_seconds: 0.2
   tts:
     name: siliconflow_tts
     model: FunAudioLLM/CosyVoice2-0.5B
@@ -90,10 +83,6 @@ providers:
     auth_scheme: bearer
     speed: 1.0
     include_voice_prompt: false
-    proxy_url_env:
-      - SILICONFLOW_PROXY_URL
-      - PETAGENT_PROXY_URL
-      - PETAGENT_ASR_PROXY_URL
     style:
       name: cute_soft
       speed: slightly_fast
@@ -124,13 +113,32 @@ providers:
     max_tokens: 600
   tts_fallback:
     name: mimo
-    model: mimo-v2.5-tts
-    voice: 冰糖
-    format: wav
+    model_env: MIMO_TTS_MODEL
+    default_model: mimo-v2.5-tts
+    voice_env: MIMO_TTS_VOICE
+    default_voice: 冰糖
+    format_env: MIMO_TTS_FORMAT
+    default_format: wav
     base_url_env: MIMO_BASE_URL
     api_key_env: MIMO_API_KEY
     timeout_seconds: 120
     style:
       name: cute_soft
       speed: slightly_fast
+      emotion: warm
+  tts_voiceclone:
+    name: weilin
+    model_env: WEILIN_TTS_MODEL
+    default_model: mimo-v2.5-tts-voiceclone
+    voice_env: WEILIN_TTS_SAMPLE
+    default_voice: backend/secrets/voice_clone/weilin.wav
+    format_env: WEILIN_TTS_FORMAT
+    default_format: wav
+    base_url_env: MIMO_BASE_URL
+    api_key_env: MIMO_API_KEY
+    timeout_seconds: 120
+    voice_is_file: true
+    style:
+      name: natural_close
+      speed: normal
       emotion: warm

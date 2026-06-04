@@ -1,40 +1,40 @@
 import type { ExpressionKey, Mood } from "./types";
 
 export const faceMap: Record<Mood, string[]> = {
-  idle: ["(・ω・)", "(｡•̀ᴗ-)✧", "(๑•̀ㅂ•́)و✧"],
-  happy: ["(^▽^)", "(≧▽≦)", "٩(ˊᗜˋ*)و"],
-  sad: ["(´･_･`)", "(｡•́︿•̀｡)", "(╥﹏╥)"],
-  sleepy: ["(-_-) zzz", "(￣o￣) . z Z", "(－_－) zzZ"],
-  tired: ["(-_-)", "(￣o￣)", "(－_－)"],
-  angry: ["(｀へ´)", "(╬ Ò﹏Ó)", "(ノಠ益ಠ)ノ"],
-  shy: ["(//▽//)", "(*ﾉωﾉ)", "(⁄ ⁄•⁄ω⁄•⁄ ⁄)"],
-  thinking: ["(・・?)", "(。ヘ°)", "(｡•̀ᴗ-)✧"],
-  concerned: ["(´･_･`)", "(´・ω・`)", "(｡•́︿•̀｡)"],
-  excited: ["٩(ˊᗜˋ*)و", "(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧", "ヽ(>∀<☆)ノ"],
-  lonely: ["(._.)", "(｡•́︿•̀｡)", "(´；ω；`)"]
+  idle: ["(o.o)", "(^_-)", "(^-^)"],
+  happy: ["(^_^)", "(^o^)", "(^-^)v"],
+  sad: ["(T_T)", "(;_;)", "(u_u)"],
+  sleepy: ["(-_-) zzz", "(-.-) zzz", "(-_-)"],
+  tired: ["(-_-)", "(u_u)", "(-.-)"],
+  angry: ["(>_<)", "(-_-#)", "(>_>)"],
+  shy: ["(//_//)", "(._.)", "(^.^)"],
+  thinking: ["(?.?)", "(o_o?)", "(._.?)"],
+  concerned: ["(._.)", "(o_o)", "(._.?)"],
+  excited: ["(^o^)/", "(^o^)", "(^-^)v"],
+  lonely: ["(._.)", "(u_u)", "(;_;)"]
 };
 
 export const expressionMap: Record<ExpressionKey, string> = {
-  idle_soft: "(・ω・)",
-  idle_wink: "(｡•̀ᴗ-)✧",
-  happy: "(^▽^)",
-  happy_big: "(≧▽≦)",
-  excited: "٩(ˊᗜˋ*)و",
-  shy: "(//▽//)",
-  clingy: "(*ﾉωﾉ)",
-  thinking: "(・・?)",
-  confused: "(。ヘ°)",
-  concerned: "(´・ω・)",
-  sad: "(｡•́︿•̀｡)",
-  crying: "(╥﹏╥)",
+  idle_soft: "(o.o)",
+  idle_wink: "(^_-)",
+  happy: "(^_^)",
+  happy_big: "(^o^)",
+  excited: "(^o^)/",
+  shy: "(//_//)",
+  clingy: "(^.^)",
+  thinking: "(?.?)",
+  confused: "(._.?)",
+  concerned: "(._.)",
+  sad: "(T_T)",
+  crying: "(;_;)",
   sleepy: "(-_-) zzz",
-  tired: "(￣o￣)",
-  annoyed: "(｀へ´)",
-  wronged: "(｡•́︿•̀｡)",
-  proud: "(๑•̀ㅂ•́)و✧",
-  playful: "(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
+  tired: "(-_-)",
+  annoyed: "(>_<)",
+  wronged: "(u_u)",
+  proud: "(^-^)v",
+  playful: "(^_~)",
   lonely: "(._.)",
-  calm: "( ˘ω˘ )"
+  calm: "(-.-)"
 };
 
 const moodExpressionFallback: Record<string, ExpressionKey> = {

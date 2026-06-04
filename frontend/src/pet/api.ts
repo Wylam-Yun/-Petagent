@@ -11,6 +11,11 @@ import type {
   PetEventType,
   PetResponse,
   PetState,
+  RuntimeRestartResponse,
+  SiliconFlowConfigStatus,
+  SiliconFlowConfigUpdateResponse,
+  TTSConfigStatus,
+  TTSMode,
   TextChatResponse,
   VoiceChatResponse
 } from "./types";
@@ -148,6 +153,43 @@ export function getPetState(): Promise<PetState> {
 
 export function getClientConfig(): Promise<ClientConfigResponse> {
   return requestJson<ClientConfigResponse>("/api/runtime/client-config");
+}
+
+export function getSiliconFlowConfig(): Promise<SiliconFlowConfigStatus> {
+  return requestJson<SiliconFlowConfigStatus>("/api/runtime/provider-config/siliconflow");
+}
+
+export function updateSiliconFlowConfig(payload: {
+  api_key: string;
+  base_url: string;
+}): Promise<SiliconFlowConfigUpdateResponse> {
+  return requestJson<SiliconFlowConfigUpdateResponse>("/api/runtime/provider-config/siliconflow", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getTTSConfig(): Promise<TTSConfigStatus> {
+  return requestJson<TTSConfigStatus>("/api/runtime/tts-config");
+}
+
+export function updateTTSConfig(payload: {
+  mode: TTSMode;
+}): Promise<TTSConfigStatus> {
+  return requestJson<TTSConfigStatus>("/api/runtime/tts-config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function restartRuntime(): Promise<RuntimeRestartResponse> {
+  return requestJson<RuntimeRestartResponse>("/api/runtime/restart", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "重启后端" })
+  });
 }
 
 export function getAudioJob(jobId: string): Promise<AudioJob> {

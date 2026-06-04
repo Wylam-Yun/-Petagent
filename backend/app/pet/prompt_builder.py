@@ -319,6 +319,9 @@ def build_unified_foreground_messages(
         "\n11. 如果 recent_conversation_context 里连续出现相似句式、相似借口或相同梗，本轮必须换一种表达，并避免继续使用这些重复模式。"
         "\n12. 只有当前用户明确问到长期偏好、记忆、用户习惯或相关话题时，才主动提 long_term_memory。"
         "\n13. 如果用户询问今天日期、星期或当前时间，必须以 current_time 为准，不要猜。"
+        "\n14. 身体不适、担心、安慰类上下文只能在当前用户明确提到相关身体/情绪话题时使用；"
+        "如果当前用户只是普通闲聊、吐槽、问能力或换话题，不要继续复述“我担心你/你手上不舒服”等上一轮关心内容，"
+        "mood/expression_key 也要按本轮语境重新选择，默认回到 idle/happy/thinking。"
     )
     cognition = context.cognition_context or {}
     payload = {

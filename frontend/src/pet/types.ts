@@ -113,6 +113,41 @@ export type ClientConfigResponse = {
   pet_name?: string;
 };
 
+export type SiliconFlowConfigStatus = {
+  ok: boolean;
+  provider: "siliconflow";
+  api_key_configured: boolean;
+  base_url: string;
+};
+
+export type SiliconFlowConfigUpdateResponse = SiliconFlowConfigStatus;
+
+export type TTSMode = "siliconflow" | "mimo" | "weilin";
+
+export type TTSConfigOption = {
+  mode: TTSMode;
+  label: string;
+  configured: boolean;
+  model: string;
+  voice: string;
+  format: string;
+};
+
+export type TTSConfigStatus = {
+  ok: boolean;
+  mode: TTSMode;
+  active_provider: string;
+  options: TTSConfigOption[];
+  configured: boolean;
+  last_primary_error?: string | null;
+};
+
+export type RuntimeRestartResponse = {
+  ok: boolean;
+  accepted: boolean;
+  message: string;
+};
+
 export type BehaviorStep = {
   action: string;
   slot?: string;
@@ -258,7 +293,6 @@ export type VoiceRouteInfo = {
   emotion_source?: string;
   wake_source?: string;
   asr_failed_hint?: string;
-  provider_failure?: Record<string, unknown> | null;
   timings_ms: Record<string, number>;
 };
 

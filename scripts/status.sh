@@ -121,7 +121,15 @@ wake_lock_status() {
     return 0
   fi
 
-  summary="$(dumpsys power 2>/dev/null | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
+  raw="$(dumpsys power 2>&1 || true)"
+  case "$raw" in
+    *"Permission Denial"*|*"permission denied"*)
+      echo "unavailable_permission_denied"
+      return 0
+      ;;
+  esac
+
+  summary="$(printf '%s\n' "$raw" | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
   if [ -z "$summary" ]; then
     echo "unknown"
     return 0
@@ -169,7 +177,15 @@ termux_stopped_state() {
     return 0
   fi
 
-  line="$(dumpsys package com.termux 2>/dev/null | grep 'User 0:' | head -n 1 || true)"
+  raw="$(dumpsys package com.termux 2>&1 || true)"
+  case "$raw" in
+    *"Permission Denial"*|*"permission denied"*)
+      echo "unavailable_permission_denied"
+      return 0
+      ;;
+  esac
+
+  line="$(printf '%s\n' "$raw" | grep 'User 0:' | head -n 1 || true)"
   case "$line" in
     *"stopped=true"*)
       echo "true"
@@ -189,13 +205,13 @@ apk_record_audio_permission_status() {
     return 0
   fi
 
-  package_dump="$(dumpsys package "$APK_PACKAGE" 2>/dev/null || true)"
+  package_dump="$(dumpsys package "$APK_PACKAGE" 2>&1 || true)"
   if [ -z "$package_dump" ]; then
     echo "unknown"
     return 0
   fi
   if printf '%s\n' "$package_dump" | grep -qi 'Permission Denial'; then
-    echo "unknown"
+    echo "unavailable_permission_denied"
     return 0
   fi
   if ! printf '%s\n' "$package_dump" | grep -q "Package \\[$APK_PACKAGE\\]"; then
@@ -228,7 +244,10 @@ apk_record_audio_appops_status() {
   fi
 
   case "$appops_output" in
-    *"NullPointerException"*|*"Permission Denial"*)
+    *"SecurityException"*|*"Permission Denial"*)
+      echo "unavailable_permission_denied"
+      ;;
+    *"NullPointerException"*)
       echo "unknown"
       ;;
     *"Unknown package"*|*"not found"*|*"No such package"*)
@@ -287,7 +306,19 @@ fi
 
 echo "wake_lock: $(wake_lock_status)"
 echo "termux_boot: $(termux_boot_status)"
-echo "termux_package: stopped=$(termux_stopped_state)"
+TERMUX_STOPPED="$(termux_stopped_state)"
+echo "termux_package: stopped=$TERMUX_STOPPED"
+case "$TERMUX_STOPPED" in
+  true)
+    echo "termux_vendor_force_stop_risk: elevated_stopped_true_not_backend_health"
+    ;;
+  false)
+    echo "termux_vendor_force_stop_risk: normal"
+    ;;
+  *)
+    echo "termux_vendor_force_stop_risk: unknown"
+    ;;
+esac
 echo "apk_record_audio_permission: $(apk_record_audio_permission_status)"
 echo "apk_record_audio_appops: $(apk_record_audio_appops_status)"
 

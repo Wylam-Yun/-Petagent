@@ -4,6 +4,7 @@ import requests
 
 from app.config import ProviderConfig
 from app.providers.asr_http import HttpASRProvider, parse_transcript_json
+from app.providers.asr_mimo import FallbackASRProvider, MiMoASRProvider, parse_mimo_asr_response
 
 
 def provider_config() -> ProviderConfig:
@@ -18,7 +19,6 @@ def provider_config() -> ProviderConfig:
             "endpoint": "/v1/audio/transcriptions",
             "language_code": "zh-CN",
             "auth_scheme": "bearer",
-            "proxy_url": "http://127.0.0.1:7897",
         },
     )
 
@@ -51,7 +51,7 @@ def test_parse_transcript_json_uses_configured_paths_for_nested_provider():
     ) == ("豆豆我回来啦", 0.64)
 
 
-def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypatch):
+def test_http_asr_posts_multipart_audio_and_disables_proxy(tmp_path: Path, monkeypatch):
     audio = tmp_path / "voice.wav"
     audio.write_bytes(b"RIFF fake wav")
     captured = {}
@@ -78,10 +78,7 @@ def test_http_asr_posts_multipart_audio_and_uses_proxy(tmp_path: Path, monkeypat
     assert captured["headers"]["Authorization"] == "Bearer test-key"
     assert captured["data"]["language"] == "zh-CN"
     assert captured["data"]["model"] == "parakeet-ctc-0.6b-zh-cn"
-    assert captured["proxies"] == {
-        "http": "http://127.0.0.1:7897",
-        "https": "http://127.0.0.1:7897",
-    }
+    assert captured["proxies"] == {"http": None, "https": None, "all": None}
     assert transcript.text == "你好豆豆"
     assert transcript.confidence == 0.81
     assert transcript.provider == "nvidia_http_asr"
@@ -439,3 +436,163 @@ def test_configured_timeout_tuple_can_separate_connect_and_read(tmp_path: Path, 
     HttpASRProvider(config).transcribe(audio, "audio/wav")
 
     assert captured["timeout"] == (4, 12)
+
+
+def test_mimo_asr_posts_chat_completions_input_audio(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+    config = ProviderConfig(
+        name="mimo_asr",
+        model="mimo-v2.5-asr",
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key_env="MIMO_API_KEY",
+        timeout_seconds=30,
+        api_key="mimo-key",
+        extra={
+            "endpoint": "/chat/completions",
+            "auth_scheme": "api-key",
+            "language": "auto",
+            "transient_retries": 0,
+        },
+    )
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "你好豆豆"}}]}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("app.providers.asr_mimo.requests.post", fake_post)
+
+    transcript = MiMoASRProvider(config).transcribe(audio, "audio/wav")
+
+    assert captured["url"] == "https://api.xiaomimimo.com/v1/chat/completions"
+    assert captured["headers"]["api-key"] == "mimo-key"
+    assert captured["proxies"] == {"http": None, "https": None, "all": None}
+    assert captured["json"]["model"] == "mimo-v2.5-asr"
+    content = captured["json"]["messages"][0]["content"][0]
+    assert content["type"] == "input_audio"
+    assert content["input_audio"]["data"].startswith("data:audio/wav;base64,")
+    assert captured["json"]["asr_options"] == {"language": "auto"}
+    assert transcript.text == "你好豆豆"
+    assert transcript.error_code == ""
+
+
+def test_mimo_asr_rejects_unsupported_audio_without_calling_provider(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "voice.webm"
+    audio.write_bytes(b"webm")
+    config = ProviderConfig(
+        name="mimo_asr",
+        model="mimo-v2.5-asr",
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key_env="MIMO_API_KEY",
+        timeout_seconds=30,
+        api_key="mimo-key",
+    )
+    post = monkeypatch.setattr(
+        "app.providers.asr_mimo.requests.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not call provider")),
+    )
+
+    transcript = MiMoASRProvider(config).transcribe(audio, "audio/webm")
+
+    assert post is None
+    assert transcript.text == ""
+    assert transcript.error_code == "asr_unsupported_audio"
+
+
+def test_parse_mimo_asr_response_accepts_text_parts():
+    body = {
+        "choices": [
+            {
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "你好"},
+                        {"type": "text", "text": "豆豆"},
+                    ]
+                }
+            }
+        ]
+    }
+
+    assert parse_mimo_asr_response(body) == "你好豆豆"
+
+
+def test_fallback_asr_uses_mimo_after_primary_empty(tmp_path: Path):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+
+    class Primary:
+        name = "primary"
+
+        def transcribe(self, audio_path, content_type):
+            from app.runtime.voice_types import ASRTranscript
+
+            return ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider="primary",
+                error_code="asr_empty",
+                error_message="empty",
+            )
+
+    class Fallback:
+        name = "mimo"
+
+        def transcribe(self, audio_path, content_type):
+            from app.runtime.voice_types import ASRTranscript
+
+            return ASRTranscript(text="听清了", confidence=1.0, provider="mimo")
+
+    transcript = FallbackASRProvider(Primary(), Fallback()).transcribe(audio, "audio/wav")
+
+    assert transcript.text == "听清了"
+    assert transcript.provider == "mimo"
+
+
+def test_fallback_asr_returns_primary_failure_when_fallback_fails(tmp_path: Path):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF fake wav")
+
+    class Primary:
+        name = "primary"
+
+        def transcribe(self, audio_path, content_type):
+            from app.runtime.voice_types import ASRTranscript
+
+            return ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider="primary",
+                error_code="asr_timeout",
+                error_message="primary timeout",
+            )
+
+    class Fallback:
+        name = "mimo"
+
+        def transcribe(self, audio_path, content_type):
+            from app.runtime.voice_types import ASRTranscript
+
+            return ASRTranscript(
+                text="",
+                confidence=0.0,
+                provider="mimo",
+                error_code="asr_request_error",
+                error_message="fallback down",
+            )
+
+    transcript = FallbackASRProvider(Primary(), Fallback()).transcribe(audio, "audio/wav")
+
+    assert transcript.text == ""
+    assert transcript.provider == "primary"
+    assert transcript.error_code == "asr_timeout"

@@ -5,6 +5,33 @@ from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
+class AudioUnderstanding:
+    user_text: str
+    detected_emotion: str
+    tone_notes: str
+    non_verbal: str
+    confidence: float
+
+    def dict(self) -> Dict[str, Any]:
+        return {
+            "user_text": self.user_text,
+            "detected_emotion": self.detected_emotion,
+            "tone_notes": self.tone_notes,
+            "non_verbal": self.non_verbal,
+            "confidence": self.confidence,
+        }
+
+
+FALLBACK_AUDIO_UNDERSTANDING = AudioUnderstanding(
+    user_text="",
+    detected_emotion="uncertain",
+    tone_notes="没有稳定识别到语音",
+    non_verbal="",
+    confidence=0.0,
+)
+
+
+@dataclass(frozen=True)
 class ASRTranscript:
     text: str
     confidence: float = 0.0
@@ -37,7 +64,6 @@ class VoiceRouteInfo:
     fallback_reason: str = ""
     emotion_source: str = ""
     wake_source: str = ""
-    provider_failure: Optional[Dict[str, Any]] = None
     asr_failed_hint: Optional[str] = None
     timings_ms: Dict[str, int] = field(default_factory=dict)
 
@@ -55,8 +81,6 @@ class VoiceRouteInfo:
             "wake_source": self.wake_source,
             "timings_ms": dict(self.timings_ms),
         }
-        if self.provider_failure:
-            body["provider_failure"] = self.provider_failure
         if self.asr_failed_hint:
             body["asr_failed_hint"] = self.asr_failed_hint
         return body

@@ -45,10 +45,12 @@ class Settings:
     llm_fallback: Optional[ProviderConfig]
     llm_fast_fallback: Optional[ProviderConfig]
     memory_summarizer: Optional[ProviderConfig]
-    audio_understanding: ProviderConfig
     asr: Optional[ProviderConfig]
+    asr_fallback: Optional[ProviderConfig]
     tts: ProviderConfig
     tts_fallback: Optional[ProviderConfig]
+    tts_voiceclone: Optional[ProviderConfig]
+    tts_mode: str
     voice_routing: Dict[str, Any]
     api_key: Optional[str] = field(default=None, repr=False)
 
@@ -127,18 +129,32 @@ def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> Prov
             "model",
             "model_env",
             "default_model",
+            "voice_env",
+            "default_voice",
+            "format_env",
+            "default_format",
             "base_url_env",
             "api_key_env",
             "timeout_seconds",
             "voice",
             "format",
             "style",
+            "proxy_url",
+            "proxy_url_env",
         }:
             continue
         if key.endswith("_env"):
             extra[key[:-4]] = _env_value(env_values, value)
         else:
             extra[key] = value
+    voice = raw.get("voice")
+    voice_env = raw.get("voice_env")
+    if voice_env:
+        voice = _env_value(env_values, voice_env) or raw.get("default_voice") or voice
+    audio_format = raw.get("format")
+    format_env = raw.get("format_env")
+    if format_env:
+        audio_format = _env_value(env_values, format_env) or raw.get("default_format") or audio_format
     return ProviderConfig(
         name=raw.get("name", "mimo"),
         model=model,
@@ -146,11 +162,18 @@ def _provider_config(raw: Dict[str, Any], env_values: Mapping[str, str]) -> Prov
         api_key_env=_env_name(api_key_env),
         timeout_seconds=int(raw.get("timeout_seconds", 60)),
         api_key=_env_value(env_values, api_key_env),
-        voice=raw.get("voice"),
-        audio_format=raw.get("format"),
+        voice=voice,
+        audio_format=audio_format,
         style=raw.get("style") or {},
         extra=extra,
     )
+
+
+def _tts_mode(value: str) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in {"siliconflow", "mimo", "weilin"}:
+        return mode
+    return "siliconflow"
 
 
 def load_settings(
@@ -200,16 +223,22 @@ def load_settings(
         if memory_summarizer_raw
         else None
     )
-    audio_understanding = _provider_config(
-        providers.get("audio_understanding", providers.get("llm", {})), env_values
-    )
     asr_raw = providers.get("asr")
     asr = _provider_config(asr_raw, env_values) if asr_raw else None
+    asr_fallback_raw = providers.get("asr_fallback")
+    asr_fallback = (
+        _provider_config(asr_fallback_raw, env_values) if asr_fallback_raw else None
+    )
     tts = _provider_config(providers.get("tts", {}), env_values)
     tts_fallback_raw = providers.get("tts_fallback")
     tts_fallback = (
         _provider_config(tts_fallback_raw, env_values) if tts_fallback_raw else None
     )
+    tts_voiceclone_raw = providers.get("tts_voiceclone")
+    tts_voiceclone = (
+        _provider_config(tts_voiceclone_raw, env_values) if tts_voiceclone_raw else None
+    )
+    tts_mode = _tts_mode(env_values.get("PETAGENT_TTS_MODE", "siliconflow"))
     api_key = env_values.get(tts.api_key_env) or env_values.get(llm.api_key_env)
     voice_routing = app_config.get("voice", {})
 
@@ -231,10 +260,12 @@ def load_settings(
         ui_theme=ui_theme,
         llm=llm,
         llm_fast=llm_fast,
-        audio_understanding=audio_understanding,
         asr=asr,
+        asr_fallback=asr_fallback,
         tts=tts,
         tts_fallback=tts_fallback,
+        tts_voiceclone=tts_voiceclone,
+        tts_mode=tts_mode,
         llm_fallback=llm_fallback,
         llm_fast_fallback=llm_fast_fallback,
         memory_summarizer=memory_summarizer,

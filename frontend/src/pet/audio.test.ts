@@ -135,7 +135,7 @@ describe("audio recording helpers", () => {
       }
     } as unknown as AudioProcessingEvent);
 
-    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    now.mockReturnValue(1000);
     const blob = await session.stop();
     const bytes = await readBlob(blob);
     const header =
@@ -324,11 +324,115 @@ describe("audio recording helpers", () => {
       }
     } as unknown as AudioProcessingEvent);
 
-    now.mockReturnValue(MIN_RECORDING_MS + 1);
+    now.mockReturnValue(1000);
     const view = new DataView(await readBlob(await session.stop()));
 
     expect(view.getUint32(24, true)).toBe(16000);
     expect(view.getUint32(40, true)).toBe(16000 * 2);
+    now.mockRestore();
+  });
+
+  test("uses elapsed time when legacy WebView reports a low wav sample rate", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeLowRateAudioContext {
+      sampleRate = 16_000;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      audioContextCtor: FakeLowRateAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: undefined
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array(48_000).fill(0.2),
+        sampleRate: 16_000
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(1000);
+    const view = new DataView(await readBlob(await session.stop()));
+
+    expect(view.getUint32(24, true)).toBe(16000);
+    expect(view.getUint32(40, true)).toBe(16000 * 2);
+    now.mockRestore();
+  });
+
+  test("caps wav output to max recording duration when legacy WebView keeps producing samples", async () => {
+    vi.useRealTimers();
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const stream = {
+      getTracks: () => [{ stop: vi.fn() }]
+    } as unknown as MediaStream;
+    const mediaDevices = {
+      getUserMedia: vi.fn().mockResolvedValue(stream)
+    };
+
+    let processor: {
+      onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      connect: () => void;
+      disconnect: () => void;
+    };
+    class FakeLowRateAudioContext {
+      sampleRate = 16_000;
+      destination = {};
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createScriptProcessor() {
+        processor = {
+          onaudioprocess: null,
+          connect: vi.fn(),
+          disconnect: vi.fn()
+        };
+        return processor;
+      }
+      close = vi.fn();
+    }
+
+    const session = await createVoiceRecordingSession({
+      mediaDevices,
+      audioContextCtor: FakeLowRateAudioContext as unknown as typeof AudioContext,
+      mediaRecorderCtor: undefined
+    });
+    processor!.onaudioprocess?.({
+      inputBuffer: {
+        getChannelData: () => new Float32Array(48_000 * 20).fill(0.2),
+        sampleRate: 16_000
+      }
+    } as unknown as AudioProcessingEvent);
+
+    now.mockReturnValue(20_000);
+    const view = new DataView(await readBlob(await session.stop()));
+
+    expect(view.getUint32(24, true)).toBe(16000);
+    expect(view.getUint32(40, true)).toBeLessThanOrEqual(16000 * 15 * 2);
     now.mockRestore();
   });
 

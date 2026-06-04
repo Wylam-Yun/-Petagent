@@ -14,7 +14,7 @@ class InteractionDef:
     description: str
     aliases: Tuple[str, ...] = ()
     state_semantics: Dict[str, str] = field(default_factory=dict)
-    requires_model: bool = False
+    requires_model: bool = True
 
 
 INTERACTION_CATALOG: Dict[str, InteractionDef] = {
@@ -162,6 +162,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         default_mood="happy",
         default_animation="bounce",
         description="调试：开心",
+        requires_model=False,
     ),
     "debug_sleepy": InteractionDef(
         event_id="debug_sleepy",
@@ -170,6 +171,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         default_mood="sleepy",
         default_animation="slowBlink",
         description="调试：困了",
+        requires_model=False,
     ),
     "debug_angry": InteractionDef(
         event_id="debug_angry",
@@ -178,6 +180,7 @@ INTERACTION_CATALOG: Dict[str, InteractionDef] = {
         default_mood="angry",
         default_animation="shake",
         description="调试：小生气",
+        requires_model=False,
     ),
 }
 

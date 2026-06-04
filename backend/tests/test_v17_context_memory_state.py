@@ -68,6 +68,8 @@ def test_unified_prompt_uses_v17_payload_sections():
     assert "不能把 recent_conversation_context" in system
     assert "相似句式" in system
     assert "才主动提 long_term_memory" in system
+    assert "身体不适、担心、安慰类上下文" in system
+    assert "普通闲聊、吐槽、问能力或换话题" in system
 
 
 def test_unified_pet_state_has_levels_and_no_sleepiness():

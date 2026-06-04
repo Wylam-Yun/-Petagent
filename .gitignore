@@ -12,3 +12,4 @@ backend/data/
 backend/secrets/
 backend/static/audio/
 backend/app/static/audio/
+plan/V2.0/runtime-monitor/

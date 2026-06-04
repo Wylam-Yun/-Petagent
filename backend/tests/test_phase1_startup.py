@@ -130,7 +130,7 @@ def test_termux_scripts_refuse_adb_su_network_context():
         assert "tr '\\011' ' '" in text
         assert "adb/su u0_a137 lacks Android inet group 3003" in text
 
-    assert "android-context-health-guard-20260530" in manager_text
+    assert "android-context-health-guard-20260604" in manager_text
     assert "without Android inet group 3003" in manager_text
     assert "without valid Termux network context" in start_services_text
     assert "process_state()" in manager_text
@@ -180,7 +180,9 @@ def test_v18_status_script_exposes_supervisor_state():
         "sshd: not listening",
         "wake_lock: $(wake_lock_status)",
         "termux_boot: $(termux_boot_status)",
-        "termux_package: stopped=$(termux_stopped_state)",
+        "TERMUX_STOPPED=\"$(termux_stopped_state)\"",
+        "termux_package: stopped=$TERMUX_STOPPED",
+        "termux_vendor_force_stop_risk: elevated_stopped_true_not_backend_health",
         "apk_record_audio_permission: $(apk_record_audio_permission_status)",
         "apk_record_audio_appops: $(apk_record_audio_appops_status)",
         "frontend_heartbeat_age_s:",
@@ -201,6 +203,7 @@ def test_v18_status_script_exposes_supervisor_state():
     assert 'appops get "$APK_PACKAGE" RECORD_AUDIO' in text
     assert 'cmd appops get "$APK_PACKAGE" RECORD_AUDIO' in text
     assert "Permission Denial" in text
+    assert "unavailable_permission_denied" in text
     assert "NullPointerException" in text
     assert "RECORD_AUDIO: ignore" in text
 
@@ -278,6 +281,9 @@ def test_v18_start_services_has_safe_status_only_and_explicit_ensure_modes():
     assert "start_services: command mode=$MODE" in text
     assert "start_services: current identity:" in text
     assert "manager candidate pid=$pid" in text
+    assert "manager candidate pid=$pid state=not_running" in text
+    assert "stale manager lock pid=$pid is not running" in text
+    assert "unavailable_permission_denied" in text
     assert "missing Android inet group 3003" in text
 
     status_branch = text.index('if [ "$MODE" = "status-only" ]; then')
@@ -293,8 +299,11 @@ def test_v18_manager_logs_wake_lock_and_browser_relaunch_results():
 
     for expected in [
         'FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"',
+        'WAKE_LOCK_REFRESH_INTERVAL="${WAKE_LOCK_REFRESH_INTERVAL:-300}"',
         "termux-wake-lock command found",
         "termux-wake-lock returned success",
+        "termux-wake-lock refresh returned success",
+        "wake_lock status=$wake_state; refreshing Termux wake lock",
         "dumpsys not available; wake lock visibility cannot be verified",
         "wake lock post-check:",
         "termux-wake-lock succeeded but dumpsys did not show a Termux wake lock",

@@ -70,7 +70,6 @@ class ProviderGate:
     - llm_slow: 1
     - asr: 1
     - tts: 2
-    - audio_understanding: 1
     """
 
     DEFAULT_LIMITS = {
@@ -78,7 +77,6 @@ class ProviderGate:
         "llm_slow": 1,
         "asr": 1,
         "tts": 2,
-        "audio_understanding": 1,
     }
 
     def __init__(self, limits: Optional[dict] = None) -> None:

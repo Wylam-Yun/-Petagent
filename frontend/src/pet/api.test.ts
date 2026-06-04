@@ -7,11 +7,16 @@ import {
   getAudioJob,
   getAmbientCheck,
   getClientConfig,
+  getSiliconFlowConfig,
+  getTTSConfig,
   postAudioRetry,
   reportDeviceState,
+  restartRuntime,
   sendHeartbeat,
   sendTextChat,
   triggerAmbientBubble,
+  updateSiliconFlowConfig,
+  updateTTSConfig,
   uploadVoice
 } from "./api";
 import { getErrorBubble } from "./errorMessages";
@@ -174,6 +179,116 @@ describe("stage 3 API helpers", () => {
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ "content-type": "application/json" });
     expect(JSON.parse(init.body as string)).toHaveProperty("user_agent");
+  });
+
+  test("fetches SiliconFlow provider config without exposing a key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        provider: "siliconflow",
+        api_key_configured: true,
+        base_url: "https://api.siliconflow.cn/v1"
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getSiliconFlowConfig();
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/runtime/provider-config/siliconflow");
+    expect(JSON.stringify(result)).not.toContain("sk-test");
+    expect(result.api_key_configured).toBe(true);
+  });
+
+  test("updates SiliconFlow provider config as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        provider: "siliconflow",
+        api_key_configured: true,
+        base_url: "https://api.siliconflow.cn/v1"
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateSiliconFlowConfig({
+      api_key: "sk-new-siliconflow-key",
+      base_url: "https://api.siliconflow.cn/v1"
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/runtime/provider-config/siliconflow");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(JSON.parse(init.body as string)).toEqual({
+      api_key: "sk-new-siliconflow-key",
+      base_url: "https://api.siliconflow.cn/v1"
+    });
+  });
+
+  test("fetches TTS config without provider secrets", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        mode: "siliconflow",
+        active_provider: "siliconflow_tts",
+        options: [],
+        configured: true,
+        last_primary_error: null
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getTTSConfig();
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/runtime/tts-config");
+    expect(JSON.stringify(result)).not.toContain("sk-test");
+    expect(result.mode).toBe("siliconflow");
+  });
+
+  test("updates TTS mode as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        mode: "weilin",
+        active_provider: "weilin",
+        options: [],
+        configured: true,
+        last_primary_error: null
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateTTSConfig({ mode: "weilin" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/runtime/tts-config");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(JSON.parse(init.body as string)).toEqual({ mode: "weilin" });
+  });
+
+  test("posts runtime restart confirmation as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        accepted: true,
+        message: "PetAgent runtime restart scheduled"
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await restartRuntime();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/runtime/restart");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    expect(JSON.parse(init.body as string)).toEqual({ confirm: "重启后端" });
   });
 });
 

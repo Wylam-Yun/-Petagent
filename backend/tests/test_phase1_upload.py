@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import struct
-import tempfile
 import wave
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -59,63 +57,3 @@ def test_upload_rejects_unsupported_type():
         files={"file": ("voice.xyz", b"fake audio", "audio/xyz")},
     )
     assert resp.status_code == 400
-
-
-def test_empty_audio_detection():
-    """Silent WAV should be detected as empty."""
-    from app.providers.audio_omni import is_probably_empty_audio
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(_make_wav_bytes(duration_s=1.0, silent=True))
-        f.flush()
-        path = Path(f.name)
-
-    assert is_probably_empty_audio(path, "audio/wav") is True
-    path.unlink()
-
-
-def test_speech_audio_detection():
-    """WAV with audio content should not be detected as empty."""
-    from app.providers.audio_omni import is_probably_empty_audio
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(_make_wav_bytes(duration_s=1.0, silent=False))
-        f.flush()
-        path = Path(f.name)
-
-    assert is_probably_empty_audio(path, "audio/wav") is False
-    path.unlink()
-
-
-def test_short_audio_detected_as_empty():
-    """Very short WAV (< 0.25s) should be detected as empty."""
-    from app.providers.audio_omni import is_probably_empty_audio
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(_make_wav_bytes(duration_s=0.1))
-        f.flush()
-        path = Path(f.name)
-
-    assert is_probably_empty_audio(path, "audio/wav") is True
-    path.unlink()
-
-
-def test_empty_audio_detection_fast():
-    """Empty audio detection should complete in < 50ms for 8MB WAV."""
-    import time
-    from app.providers.audio_omni import is_probably_empty_audio
-
-    # Create a large silent WAV (simulate 8MB)
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        # 8MB / 2 bytes per sample / 16000 samples per sec = 250 seconds
-        f.write(_make_wav_bytes(duration_s=250.0, silent=True))
-        f.flush()
-        path = Path(f.name)
-
-    start = time.monotonic()
-    result = is_probably_empty_audio(path, "audio/wav")
-    elapsed_ms = (time.monotonic() - start) * 1000
-
-    assert result is True
-    assert elapsed_ms < 100  # Should be well under 100ms with sampling
-    path.unlink()

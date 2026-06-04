@@ -44,7 +44,6 @@ activation:
   min_wake_confidence: 0.75
 voice:
   default_route: fast
-  slow_fallback_enabled: true
   allowed_audio_types:
     - audio/webm
     - audio/wav

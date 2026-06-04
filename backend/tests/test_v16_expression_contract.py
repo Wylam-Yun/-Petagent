@@ -15,7 +15,9 @@ def test_expression_catalog_contains_v16_keys():
     assert "idle_soft" in EXPRESSION_KEYS
     assert "playful" in EXPRESSION_KEYS
     assert "wronged" in EXPRESSION_KEYS
-    assert EXPRESSION_MAP["idle_soft"] == "(・ω・)"
+    assert EXPRESSION_MAP["idle_soft"] == "(o.o)"
+    assert EXPRESSION_MAP["annoyed"] == "(>_<)"
+    assert EXPRESSION_MAP["playful"] == "(^_~)"
 
 
 def test_expression_for_mood_fallbacks():

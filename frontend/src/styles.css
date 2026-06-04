@@ -157,7 +157,7 @@ input:focus {
   width: 100%;
   max-width: 920px;
   margin: 0 auto 8px;
-  padding: 12px 10px 10px;
+  padding: 8px 10px 10px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -204,35 +204,13 @@ input:focus {
   background: rgba(217, 132, 116, 0.18);
 }
 
-.pet-title-row {
-  position: relative;
-  z-index: 1;
-  text-align: center;
-}
-
-.pet-kicker {
-  margin: 0 0 2px;
-  color: var(--soft-muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.pet-stage h1 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 1.62rem;
-  font-weight: 820;
-  letter-spacing: 0;
-}
-
 .pet-face {
   position: relative;
   z-index: 1;
   width: 100%;
   max-width: 620px;
-  min-height: 178px;
-  margin: 6px auto;
+  min-height: 168px;
+  margin: 0 auto 6px;
   display: -webkit-box;
   display: -ms-flexbox;
   display: flex;
@@ -591,13 +569,23 @@ input:focus {
   max-width: 760px;
   margin: 0 auto;
   padding-bottom: 4px;
-  text-align: center;
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  justify-content: center;
+  -ms-flex-wrap: wrap;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .retry-audio-btn,
-.reset-btn {
+.reset-btn,
+.api-config-btn,
+.runtime-restart-btn,
+.tts-toggle-btn {
   min-height: 34px;
-  margin: 0 4px;
   padding: 6px 14px;
   border-radius: 999px;
   background: transparent;
@@ -626,9 +614,159 @@ input:focus {
   color: var(--danger);
 }
 
+.api-config-btn {
+  border: 1px solid rgba(47, 117, 111, 0.22);
+  color: var(--teal-dark);
+}
+
+.api-config-btn:hover:not(:disabled),
+.runtime-restart-btn:hover:not(:disabled),
+.tts-toggle-btn:hover:not(:disabled) {
+  border-color: rgba(47, 117, 111, 0.42);
+  color: #285f5a;
+}
+
+.tts-toggle-btn {
+  border: 1px solid rgba(47, 117, 111, 0.22);
+  color: var(--teal-dark);
+}
+
+.runtime-restart-btn {
+  border: 1px solid rgba(47, 117, 111, 0.22);
+  color: var(--teal-dark);
+}
+
 .retry-audio-btn:disabled,
-.reset-btn:disabled {
+.reset-btn:disabled,
+.api-config-btn:disabled,
+.runtime-restart-btn:disabled,
+.tts-toggle-btn:disabled {
   opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.api-config-backdrop {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-align: center;
+  -ms-flex-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(38, 49, 61, 0.22);
+}
+
+.api-config-dialog {
+  width: 100%;
+  max-width: 430px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-soft);
+}
+
+.api-config-dialog h2 {
+  margin: 0 0 14px;
+  font-size: 1.06rem;
+  line-height: 1.25;
+}
+
+.api-config-form {
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-box-direction: normal;
+  -ms-flex-direction: column;
+  flex-direction: column;
+}
+
+.api-config-form label {
+  margin: 10px 0 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 720;
+}
+
+.api-config-form label:first-child {
+  margin-top: 0;
+}
+
+.api-config-form input {
+  min-width: 0;
+  min-height: 42px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.api-config-status,
+.api-config-error {
+  min-height: 20px;
+  margin-top: 9px;
+  font-size: 0.82rem;
+}
+
+.api-config-status {
+  color: var(--muted);
+}
+
+.api-config-error {
+  color: var(--danger);
+}
+
+.api-config-actions {
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: end;
+  -ms-flex-pack: end;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.api-config-cancel,
+.api-config-save {
+  min-height: 38px;
+  min-width: 74px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.api-config-cancel {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.api-config-save {
+  border: 1px solid rgba(47, 117, 111, 0.42);
+  background: #f2fbf8;
+  color: var(--teal-dark);
+  font-weight: 720;
+}
+
+.api-config-cancel:disabled,
+.api-config-save:disabled {
+  opacity: 0.48;
   cursor: not-allowed;
 }
 
@@ -644,15 +782,11 @@ input:focus {
   }
 
   .pet-stage {
-    padding: 18px 14px 16px;
-  }
-
-  .pet-stage h1 {
-    font-size: 1.85rem;
+    padding: 12px 14px 16px;
   }
 
   .pet-face {
-    min-height: 300px;
+    min-height: 284px;
     font-size: 5.8rem;
   }
 
@@ -708,7 +842,7 @@ input:focus {
   }
 }
 
-@media (orientation: landscape) and (max-height: 520px) {
+@media (orientation: landscape) and (max-height: 520px) and (min-width: 900px) {
   .app-shell {
     padding: 10px;
   }
@@ -738,14 +872,6 @@ input:focus {
   .pet-stage {
     min-height: 0;
     padding: 10px;
-  }
-
-  .pet-stage h1 {
-    font-size: 1.35rem;
-  }
-
-  .pet-kicker {
-    font-size: 0.68rem;
   }
 
   .pet-face {

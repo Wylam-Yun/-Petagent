@@ -1,6 +1,8 @@
 export const MIN_RECORDING_MS = 300;
 export const MAX_RECORDING_MS = 15_000;
 const ASR_WAV_SAMPLE_RATE = 16_000;
+const LOW_WEBVIEW_SAMPLE_RATE_THRESHOLD = 24_000;
+const SAMPLE_RATE_DRIFT_TOLERANCE = 1.1;
 
 export class RecordingTooShortError extends Error {
   constructor() {
@@ -139,6 +141,7 @@ async function createWavRecordingSession(
   const source = audioContext.createMediaStreamSource(stream);
   const processor = audioContext.createScriptProcessor(4096, 1, 1);
   const startedAt = Date.now();
+  let observedInputSampleRate = 0;
   let stopped = false;
   let resolveFinished: (blob: Blob) => void = () => undefined;
   let rejectFinished: (error: Error) => void = () => undefined;
@@ -150,6 +153,10 @@ async function createWavRecordingSession(
 
   processor.onaudioprocess = (event) => {
     const input = event.inputBuffer.getChannelData(0);
+    observedInputSampleRate = maxValidSampleRate(
+      observedInputSampleRate,
+      event.inputBuffer.sampleRate
+    );
     chunks.push(new Float32Array(input));
   };
   source.connect(processor);
@@ -162,8 +169,21 @@ async function createWavRecordingSession(
     stopStream(stream);
     void audioContext.close?.();
     try {
-      assertRecordingDuration(Date.now() - startedAt);
-      resolveFinished(encodeWavBlob(chunks, normalizedSampleRate(audioContext.sampleRate)));
+      const durationMs = Date.now() - startedAt;
+      assertRecordingDuration(durationMs);
+      const cappedDurationMs = Math.min(durationMs, MAX_RECORDING_MS);
+      const sourceSampleRate = wavSourceSampleRate(
+        chunks,
+        audioContext.sampleRate,
+        observedInputSampleRate,
+        cappedDurationMs
+      );
+      resolveFinished(
+        encodeWavBlob(
+          capChunksByDuration(chunks, sourceSampleRate, cappedDurationMs),
+          sourceSampleRate
+        )
+      );
     } catch (error) {
       rejectFinished(error as Error);
     }
@@ -385,6 +405,36 @@ function normalizedSampleRate(sampleRate: number): number {
   return Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : ASR_WAV_SAMPLE_RATE;
 }
 
+function maxValidSampleRate(current: number, next: number): number {
+  if (!Number.isFinite(next) || next <= 0) return current;
+  return Math.max(current, next);
+}
+
+function wavSourceSampleRate(
+  chunks: Float32Array[],
+  contextSampleRate: number,
+  inputSampleRate: number,
+  durationMs: number
+): number {
+  const reportedSampleRate = Math.max(
+    normalizedSampleRate(contextSampleRate),
+    normalizedSampleRate(inputSampleRate)
+  );
+  const durationSeconds = durationMs / 1000;
+  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  if (
+    reportedSampleRate < LOW_WEBVIEW_SAMPLE_RATE_THRESHOLD &&
+    sampleCount > 0 &&
+    durationSeconds > 0
+  ) {
+    const elapsedSampleRate = sampleCount / durationSeconds;
+    if (elapsedSampleRate > reportedSampleRate * SAMPLE_RATE_DRIFT_TOLERANCE) {
+      return elapsedSampleRate;
+    }
+  }
+  return reportedSampleRate;
+}
+
 function flattenChunks(chunks: Float32Array[]): Float32Array {
   const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
   const samples = new Float32Array(sampleCount);
@@ -394,6 +444,27 @@ function flattenChunks(chunks: Float32Array[]): Float32Array {
     offset += chunk.length;
   });
   return samples;
+}
+
+function capChunksByDuration(
+  chunks: Float32Array[],
+  sampleRate: number,
+  durationMs: number
+): Float32Array[] {
+  const maxSamples = Math.max(1, Math.ceil((sampleRate * durationMs) / 1000));
+  let remaining = maxSamples;
+  const capped: Float32Array[] = [];
+  for (const chunk of chunks) {
+    if (remaining <= 0) break;
+    if (chunk.length <= remaining) {
+      capped.push(chunk);
+      remaining -= chunk.length;
+      continue;
+    }
+    capped.push(chunk.slice(0, remaining));
+    remaining = 0;
+  }
+  return capped;
 }
 
 function resamplePcm(

@@ -118,7 +118,7 @@ ssh nubia-adb 'ps -A -o pid,ppid,stat,args | grep -E "[t]ermux_service_manager|[
 - backend runtime: `~/Petagent/backend/data/logs/runtime.log`
 - backend runtime old rotation: `~/Petagent/backend/data/logs/runtime.log.old`
 
-Termux manager 会检查 proxy 端口 `127.0.0.1:7897`，端口掉线时会尝试执行
-`/data/local/tmp/start-proxy.sh`，连续失败会按 `PROXY_BACKOFF_SECONDS` 退避。
+Termux manager 只负责 Termux 上下文、sshd、wake lock 和 PetAgent runtime
+保活。外部 LLM/ASR/TTS API 默认直连，不再依赖本地代理。
 
 更多维护命令见 `docs/operations.md`。

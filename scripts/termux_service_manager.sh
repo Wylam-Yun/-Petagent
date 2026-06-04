@@ -11,14 +11,11 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
 SU_CHECK_INTERVAL="${SU_CHECK_INTERVAL:-600}"
 MAX_FAILS="${MAX_FAILS:-5}"
 BACKOFF_SECONDS="${BACKOFF_SECONDS:-120}"
-PROXY_BACKOFF_SECONDS="${PROXY_BACKOFF_SECONDS:-120}"
 SSHD_PORT="${SSHD_PORT:-8022}"
 PETAGENT_DIR="${PETAGENT_DIR:-$HOME_DIR/Petagent}"
 PETAGENT_PORT="${PETAGENT_PORT:-8000}"
 PETAGENT_START_GRACE_SECONDS="${PETAGENT_START_GRACE_SECONDS:-45}"
 NETWORK_WAIT_SECONDS="${NETWORK_WAIT_SECONDS:-180}"
-PROXY_START_SCRIPT="${PROXY_START_SCRIPT:-/data/local/tmp/start-proxy.sh}"
-PROXY_DISABLE_FILE="${PROXY_DISABLE_FILE:-/data/local/tmp/.petagent_no_proxy_autostart}"
 FRONTEND_STARTUP_SECONDS="${FRONTEND_STARTUP_SECONDS:-120}"
 STUCK_MAX="${STUCK_MAX:-3}"
 HTTP_FAIL_MAX="${HTTP_FAIL_MAX:-5}"
@@ -27,7 +24,10 @@ HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-8}"
 HEALTH_CONFIRM_MAX_TIME="${HEALTH_CONFIRM_MAX_TIME:-15}"
 WATCHDOG_CONNECT_TIMEOUT="${WATCHDOG_CONNECT_TIMEOUT:-2}"
 WATCHDOG_MAX_TIME="${WATCHDOG_MAX_TIME:-8}"
-MANAGER_VERSION="android-context-health-guard-20260530"
+HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-300}"
+WAKE_LOCK_REFRESH_INTERVAL="${WAKE_LOCK_REFRESH_INTERVAL:-300}"
+RUNTIME_TAIL_LINES="${RUNTIME_TAIL_LINES:-12}"
+MANAGER_VERSION="android-context-health-guard-20260604"
 
 export HOME="$HOME_DIR"
 export PREFIX="$PREFIX_DIR"
@@ -311,37 +311,9 @@ check_su() {
     return 1
 }
 
-start_proxy_once() {
-    [ -f "$PROXY_DISABLE_FILE" ] && return 0
-    [ -x "$PROXY_START_SCRIPT" ] || return 0
-    check_port_listen 7897 && return 0
-
-    if timeout 30 su -c "$PROXY_START_SCRIPT" >> "$LOG_FILE" 2>&1; then
-        log "Proxy start script executed"
-    else
-        log "WARNING: proxy start script failed"
-    fi
-}
-
-ensure_proxy() {
-    [ -f "$PROXY_DISABLE_FILE" ] && return 0
-    [ -x "$PROXY_START_SCRIPT" ] || return 0
-    check_port_listen 7897 && return 0
-
-    log "Proxy port 7897 is down; attempting restart"
-    if timeout 30 su -c "$PROXY_START_SCRIPT" >> "$LOG_FILE" 2>&1; then
-        sleep 2
-        if check_port_listen 7897; then
-            log "Proxy restarted successfully"
-            return 0
-        else
-            log "WARNING: proxy restart did not bring up port 7897"
-            return 1
-        fi
-    else
-        log "WARNING: proxy restart script failed"
-        return 1
-    fi
+process_rss_kb() {
+    pid="$1"
+    awk '/^VmRSS:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || true
 }
 
 petagent_pid() {
@@ -386,6 +358,11 @@ petagent_health() {
     curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null | grep -q '"ok":true'
 }
 
+petagent_health_json() {
+    command -v curl >/dev/null 2>&1 || return 1
+    curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>/dev/null
+}
+
 petagent_health_confirm() {
     command -v curl >/dev/null 2>&1 || return 1
     resp="$(curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_CONFIRM_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health" 2>&1)" || {
@@ -401,6 +378,95 @@ petagent_watchdog() {
     resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null)" || return 2
     printf '%s' "$resp" | grep -q '"stuck":true' && return 1
     return 0
+}
+
+watchdog_summary() {
+    command -v curl >/dev/null 2>&1 || {
+        echo "watchdog=unknown"
+        return 0
+    }
+    resp="$(curl -fsS --connect-timeout "$WATCHDOG_CONNECT_TIMEOUT" --max-time "$WATCHDOG_MAX_TIME" "http://127.0.0.1:$PETAGENT_PORT/api/health/watchdog" 2>/dev/null || true)"
+    if [ -z "$resp" ]; then
+        echo "watchdog=unreachable"
+        return 0
+    fi
+    heartbeat_age="$(printf '%s' "$resp" | sed -n 's/.*"frontend_heartbeat_age_s":\([^,}]*\).*/\1/p' | head -n 1 | tr -d '" ')"
+    stuck="$(printf '%s' "$resp" | sed -n 's/.*"stuck":\([^,}]*\).*/\1/p' | head -n 1 | tr -d '" ')"
+    echo "watchdog=ok frontend_heartbeat_age_s=${heartbeat_age:-unknown} stuck=${stuck:-unknown}"
+}
+
+wake_lock_status() {
+    if ! command -v dumpsys >/dev/null 2>&1; then
+        echo "unknown"
+        return 0
+    fi
+    raw="$(dumpsys power 2>&1 || true)"
+    case "$raw" in
+        *"Permission Denial"*|*"permission denied"*)
+            echo "unavailable_permission_denied"
+            return 0
+            ;;
+    esac
+    summary="$(printf '%s\n' "$raw" | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
+    if [ -z "$summary" ]; then
+        echo "unknown"
+    elif printf '%s\n' "$summary" | grep -qi -E 'termux|wake-lock'; then
+        echo "held"
+    elif printf '%s\n' "$summary" | grep -qi -E 'Wake Locks: size=0|mWakeLockSummary=0x0'; then
+        echo "not_held"
+    else
+        echo "unknown"
+    fi
+}
+
+refresh_wake_lock() {
+    if ! command -v termux-wake-lock >/dev/null 2>&1; then
+        log "WARNING: termux-wake-lock not found during refresh"
+        return 0
+    fi
+    if termux-wake-lock >/dev/null 2>&1; then
+        log "termux-wake-lock refresh returned success"
+    else
+        log "WARNING: termux-wake-lock refresh returned non-zero"
+    fi
+}
+
+compact_runtime_tail() {
+    [ -f "$PETAGENT_DIR/backend/data/logs/runtime.log" ] || return 0
+    tail -n "$RUNTIME_TAIL_LINES" "$PETAGENT_DIR/backend/data/logs/runtime.log" 2>/dev/null \
+        | tr '\n' ';' \
+        | sed 's/[[:space:]][[:space:]]*/ /g'
+}
+
+runtime_snapshot() {
+    label="$1"
+    pid="$(petagent_pid)"
+    pid_state="missing"
+    pid_rss="unknown"
+    pid_age="$(petagent_pid_age)"
+    if process_exists "$pid"; then
+        pid_state="$(process_state "$pid")"
+        pid_rss="$(process_rss_kb "$pid")"
+    fi
+    if petagent_port_listening; then
+        port_state="listening"
+    else
+        port_state="down"
+    fi
+    if check_sshd_listen; then
+        sshd_state="listening"
+    else
+        sshd_state="down"
+    fi
+    health_summary="$(petagent_health_json 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g' || true)"
+    [ -n "$health_summary" ] || health_summary="unreachable"
+    log "runtime_snapshot label=$label pid=${pid:-none} pid_state=$pid_state pid_age_s=$pid_age pid_rss_kb=${pid_rss:-unknown} port=$port_state sshd=$sshd_state wake_lock=$(wake_lock_status) $(watchdog_summary) health=$health_summary"
+    tail_summary="$(compact_runtime_tail)"
+    [ -n "$tail_summary" ] && log "runtime_tail label=$label tail=$tail_summary"
+}
+
+manager_heartbeat() {
+    runtime_snapshot "heartbeat"
 }
 
 run_browser_relaunch_command() {
@@ -536,29 +602,19 @@ main() {
     mkdir -p "$PETAGENT_DIR/logs" 2>/dev/null || true
     log "Service manager started with PID $$ ($MANAGER_VERSION)"
     acquire_wake_lock
-    start_proxy_once
+    runtime_snapshot "manager_started"
 
     ssh_fail_count=0
     petagent_fail_count=0
-    proxy_fail_count=0
     stuck_count=0
     su_fail_count=0
     http_fail_count=0
     last_su_check="$(date +%s 2>/dev/null || echo 0)"
+    last_heartbeat="$last_su_check"
+    last_wake_lock_check="$last_su_check"
 
     while true; do
         rotate_log
-        if ensure_proxy; then
-            proxy_fail_count=0
-        else
-            proxy_fail_count=$((proxy_fail_count + 1))
-            if [ "$proxy_fail_count" -ge "$MAX_FAILS" ]; then
-                log "CRITICAL: proxy failed $MAX_FAILS times; backing off ${PROXY_BACKOFF_SECONDS}s"
-                proxy_fail_count=0
-                sleep "$PROXY_BACKOFF_SECONDS"
-            fi
-        fi
-
         if check_sshd_listen; then
             ssh_fail_count=0
         else
@@ -584,6 +640,7 @@ main() {
                 log "PetAgent watchdog reports stuck ($stuck_count/$STUCK_MAX)"
                 if [ "$stuck_count" -ge "$STUCK_MAX" ]; then
                     log "CRITICAL: PetAgent stuck for $STUCK_MAX cycles; restarting"
+                    runtime_snapshot "watchdog_stuck_restart"
                     stuck_count=0
                     pid="$(petagent_pid)"
                     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
@@ -623,6 +680,7 @@ main() {
                                 log "PetAgent orphan HTTP health recovered during confirm; not restarting"
                             else
                                 log "CRITICAL: PetAgent orphan HTTP half-alive state persisted after confirm; attempting runtime restart"
+                                runtime_snapshot "orphan_http_restart"
                                 cleanup_duplicate_runtimes ""
                                 start_petagent || log "CRITICAL: PetAgent restart failed while orphan HTTP was half-alive"
                             fi
@@ -631,6 +689,7 @@ main() {
                     fi
                 else
                     log "PetAgent process not running; starting runtime"
+                    runtime_snapshot "process_missing_start"
                     http_fail_count=0
                     if start_petagent; then
                         petagent_fail_count=0
@@ -648,6 +707,7 @@ main() {
                 elif petagent_process_alive; then
                     pid="$(petagent_pid)"
                     log "PetAgent process $pid is alive but port $PETAGENT_PORT is not listening after grace; restarting"
+                    runtime_snapshot "port_down_restart"
                     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
                     sleep 2
                     [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
@@ -668,6 +728,7 @@ main() {
                         log "PetAgent HTTP health recovered during confirm; not restarting pid ${pid:-unknown}"
                     else
                         log "CRITICAL: PetAgent HTTP half-alive state persisted after confirm; restarting pid ${pid:-unknown}"
+                        runtime_snapshot "http_half_alive_restart"
                         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
                         sleep 2
                         [ -n "$pid" ] && process_exists "$pid" && kill -9 "$pid" 2>/dev/null || true
@@ -698,6 +759,20 @@ main() {
                     su_fail_count=0
                 fi
             fi
+        fi
+
+        if [ $((now - last_wake_lock_check)) -ge "$WAKE_LOCK_REFRESH_INTERVAL" ]; then
+            last_wake_lock_check="$now"
+            wake_state="$(wake_lock_status)"
+            if [ "$wake_state" != "held" ]; then
+                log "wake_lock status=$wake_state; refreshing Termux wake lock"
+                refresh_wake_lock
+            fi
+        fi
+
+        if [ $((now - last_heartbeat)) -ge "$HEARTBEAT_INTERVAL" ]; then
+            last_heartbeat="$now"
+            manager_heartbeat
         fi
 
         sleep "$CHECK_INTERVAL"

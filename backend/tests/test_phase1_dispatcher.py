@@ -135,7 +135,6 @@ def test_provider_gate_default_limits():
     assert "llm_slow" in usage
     assert "asr" in usage
     assert "tts" in usage
-    assert "audio_understanding" in usage
 
 
 def test_provider_gate_unknown_type():

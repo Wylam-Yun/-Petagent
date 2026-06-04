@@ -1,7 +1,6 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.providers.errors import ProviderTimeoutError
 from app.runtime.voice_types import ASRTranscript
 
 
@@ -42,7 +41,6 @@ def test_voice_chat_ignores_thinking_mode():
 
 def test_thinking_mode_still_uses_asr_route():
     app = create_app(testing=True)
-    app.state.audio_provider.fail = True
     client = TestClient(app)
 
     response = post_voice(client, data={"thinking_mode": "true"})
@@ -55,13 +53,8 @@ def test_thinking_mode_still_uses_asr_route():
     assert body["user_text"] == "我回来啦"
 
 
-def test_thinking_mode_does_not_call_audio_understanding_provider():
-    class FailingAudioUnderstanding:
-        def understand(self, audio_path, content_type):
-            raise ProviderTimeoutError(provider="mimo_audio")
-
+def test_thinking_mode_stays_on_unified_asr_chain():
     app = create_app(testing=True)
-    app.state.voice_pipeline.audio_provider = FailingAudioUnderstanding()
     client = TestClient(app)
 
     response = post_voice(client, data={"thinking_mode": "true"})
@@ -69,7 +62,8 @@ def test_thinking_mode_does_not_call_audio_understanding_provider():
     assert response.status_code == 200
     body = response.json()
     assert body["voice_route"]["selected"] == "unified"
-    assert "provider_failure" not in body["voice_route"]
+    assert not hasattr(app.state.voice_pipeline, "audio_provider")
+    assert body["voice_route"]["asr_provider"] == "mock_asr"
     assert body["reply"]
 
 

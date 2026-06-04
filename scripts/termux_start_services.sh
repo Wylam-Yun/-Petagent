@@ -157,6 +157,10 @@ log_manager_candidate() {
         log "start_services: manager candidate pid=none"
         return 0
     fi
+    if ! process_exists "$pid"; then
+        log "start_services: manager candidate pid=$pid state=not_running"
+        return 0
+    fi
 
     pid_uid="$(process_uid "$pid")"
     if process_has_android_inet_group "$pid"; then
@@ -294,7 +298,15 @@ wake_lock_status() {
         return 0
     fi
 
-    summary="$(dumpsys power 2>/dev/null | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
+    raw="$(dumpsys power 2>&1 || true)"
+    case "$raw" in
+        *"Permission Denial"*|*"permission denied"*)
+            echo "unavailable_permission_denied"
+            return 0
+            ;;
+    esac
+
+    summary="$(printf '%s\n' "$raw" | grep -i -E 'Wake Locks|termux|wake-lock|mWakeLockSummary' | head -n 80 || true)"
     if [ -z "$summary" ]; then
         echo "unknown"
         return 0
@@ -397,11 +409,14 @@ start_sshd_if_needed() {
 manager_is_running() {
     pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
     log_manager_candidate "$pid"
-    process_exists "$pid" || return 1
+    if [ -z "$pid" ] || ! process_exists "$pid"; then
+        [ -n "$pid" ] && log "start_services: stale manager lock pid=$pid is not running"
+        return 1
+    fi
 
     current_uid="$(id -u 2>/dev/null || echo "")"
     pid_uid="$(process_uid "$pid")"
-    if [ -n "$current_uid" ] && [ "$pid_uid" = "$current_uid" ] && process_has_android_inet_group "$pid"; then
+    if [ -n "$current_uid" ] && [ "$pid_uid" = "$current_uid" ] && is_manager_process "$pid" && process_has_android_inet_group "$pid"; then
         return 0
     fi
 

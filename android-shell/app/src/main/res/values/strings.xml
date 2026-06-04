@@ -1,7 +1,13 @@
 <resources>
     <string name="app_name">豆豆桌宠</string>
     <string name="backend_unavailable_title">本地后端没有连上</string>
-    <string name="backend_unavailable_body">请先打开 Termux 并启动 PetAgent 服务，然后点重试。</string>
+    <string name="backend_unavailable_body">正在等待本地服务恢复。豆豆会自动打开 Termux 启动服务，恢复后会自动回来。</string>
+    <string name="backend_recovery_waiting">正在等待本地服务恢复...</string>
+    <string name="backend_recovery_opened_termux">已打开 Termux 启动服务，正在等待恢复...</string>
+    <string name="backend_recovery_manual_hint">如果没有自动恢复，请点下面的按钮打开 Termux。</string>
+    <string name="backend_recovery_timeout">暂时还没有恢复。请点“打开 Termux 启动服务”，等待几秒后再点重试。</string>
+    <string name="termux_missing">没有找到 Termux，请先安装 Termux 和 Termux:Boot。</string>
+    <string name="open_termux">打开 Termux 启动服务</string>
     <string name="audio_permission_blocked">录音权限被系统权限管理拦截，请在应用权限里允许豆豆桌宠录音。</string>
     <string name="retry">重试</string>
 </resources>
